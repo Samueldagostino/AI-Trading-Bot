@@ -47,6 +47,7 @@ class HTFBiasEngine:
     """
 
     WINDOW = 20  # bars per timeframe to retain
+    STRENGTH_GATE = 0.3  # Config D validated threshold — do NOT change without backtest
 
     def __init__(self, config=None, timeframes: List[str] = None):
         self.config = config
@@ -92,8 +93,8 @@ class HTFBiasEngine:
         result = HTFBiasResult(
             consensus_direction=direction,
             consensus_strength=round(strength, 3),
-            htf_allows_long=(direction != "bearish" or strength < 0.3),
-            htf_allows_short=(direction != "bullish" or strength < 0.3),
+            htf_allows_long=(direction != "bearish" or strength < self.STRENGTH_GATE),
+            htf_allows_short=(direction != "bullish" or strength < self.STRENGTH_GATE),
             timestamp=timestamp,
             tf_biases=dict(self._biases),
         )
