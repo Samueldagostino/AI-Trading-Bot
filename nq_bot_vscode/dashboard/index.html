@@ -39,46 +39,102 @@ const T = {
   maintenanceShade: "#f59e0b08", maintenanceBorder: "#f59e0b15",
   crosshair: "#3b82f650",
   selection: "#3b82f620",
+  vwap: "#e68a00", vwapDim: "#e68a0040",
+  sma20: "#22d3ee", sma50: "#f472b6", sma200: "#fbbf24",
+  atrBand: "#3b82f610",
+  volProfile: "#3b82f618",
+  regimeUp: "#00c087", regimeDown: "#e5334b", regimeRange: "#f59e0b", regimeUnk: "#556178",
+  htfBull: "#00c087", htfBear: "#e5334b", htfNeutral: "#556178",
+  gold: "#fbbf24",
 };
 // ── DATA LOADING ──────────────────────────────────────────────
-// Loads viz_data.json produced by dashboard/data_adapter.py
-// Expected format: { candles: [{time,open,high,low,close,volume},...], trades: [{id,entryTime,...},...] }
-function loadVizData(jsonData) {
-  const candles = (jsonData.candles || []).map(c => ({
-    time: c.time,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-    volume: c.volume || 0,
-  }));
-  const trades = (jsonData.trades || []).map((t, i) => ({
+// Handles both viz_data.json (data_adapter output) and raw backtest_viz_data.json
+function toEpoch(t) { return typeof t === "string" ? new Date(t).getTime() : t; }
+function mapExitType(e) {
+  const r1 = (e.c1_exit_reason || "").toLowerCase();
+  const r2 = (e.c2_exit_reason || "").toLowerCase();
+  if (r2 === "trailing") return "trailing_stop";
+  if (r1 === "target" && r2 === "trailing") return "trailing_stop";
+  if (r1 === "target" && r2 === "target") return "pt2_target";
+  if (r1 === "target") return "pt1_partial";
+  if (r1 === "stop" || r2 === "stop") return "stop_loss";
+  if (r2 === "breakeven" || r2 === "be_plus") return "be_plus";
+  return "stop_loss";
+}
+function pairTradeEvents(events) {
+  const trades = []; let entry = null;
+  events.forEach(e => {
+    if (e.action === "entry") { entry = e; }
+    else if (e.action === "trade_closed" && entry) {
+      const sd = Math.abs(entry.entry_price - entry.stop);
+      const tp1 = entry.c1_target || entry.entry_price + sd * 1.5 * (entry.direction === "long" ? 1 : -1);
+      const tp2 = entry.entry_price + sd * 3 * (entry.direction === "long" ? 1 : -1);
+      const pnl = e.total_pnl || 0;
+      const avgExit = e.c2_exit_price || e.c1_exit_price || entry.entry_price;
+      trades.push({
+        id: trades.length + 1,
+        entryTime: toEpoch(entry.timestamp), exitTime: toEpoch(e.close_timestamp),
+        side: entry.direction || "long", qty: entry.contracts || 2,
+        entryPrice: entry.entry_price, exitPrice: avgExit,
+        stopPrice: entry.stop, tp1Price: tp1, tp2Price: tp2, stopDist: sd,
+        signalScore: entry.signal_score || 0,
+        regime: entry.regime || e.regime || "unknown",
+        htfBias: entry.htf_bias || "neutral",
+        htfStrength: entry.htf_strength || 0,
+        exitType: mapExitType(e), pnl: pnl,
+        c1Pnl: e.c1_pnl || 0, c2Pnl: e.c2_pnl || 0,
+        slippage: 0,
+        rMultiple: sd > 0 ? parseFloat((pnl / (sd * 2 * 2)).toFixed(2)) : 0,
+        mfe: 0, mae: 0, holdBars: 0, isCompliant: true,
+      });
+      entry = null;
+    }
+  });
+  return trades;
+}
+function normalizeTrade(t, i) {
+  return {
     id: t.id || i + 1,
-    entryTime: t.entryTime,
-    exitTime: t.exitTime,
-    side: t.side || "long",
-    qty: t.qty || 2,
-    entryPrice: t.entryPrice || 0,
-    exitPrice: t.exitPrice || 0,
-    stopPrice: t.stopPrice || 0,
-    tp1Price: t.tp1Price || 0,
-    tp2Price: t.tp2Price || 0,
-    stopDist: t.stopDist || 0,
-    signalScore: t.signalScore || 0,
-    regime: t.regime || "unknown",
-    htfBias: t.htfBias || "neutral",
-    exitType: t.exitType || "stop_loss",
-    pnl: t.pnl || 0,
-    c1Pnl: t.c1Pnl || 0,
-    c2Pnl: t.c2Pnl || 0,
-    slippage: t.slippage || 0,
-    rMultiple: t.rMultiple || 0,
-    mfe: t.mfe || 0,
-    mae: t.mae || 0,
-    holdBars: t.holdBars || 0,
+    entryTime: toEpoch(t.entryTime), exitTime: toEpoch(t.exitTime),
+    side: t.side || "long", qty: t.qty || 2,
+    entryPrice: t.entryPrice || 0, exitPrice: t.exitPrice || 0,
+    stopPrice: t.stopPrice || 0, tp1Price: t.tp1Price || 0, tp2Price: t.tp2Price || 0,
+    stopDist: t.stopDist || 0, signalScore: t.signalScore || 0,
+    regime: t.regime || "unknown", htfBias: t.htfBias || "neutral",
+    htfStrength: t.htfStrength || 0,
+    exitType: t.exitType || "stop_loss", pnl: t.pnl || 0,
+    c1Pnl: t.c1Pnl || 0, c2Pnl: t.c2Pnl || 0,
+    slippage: t.slippage || 0, rMultiple: t.rMultiple || 0,
+    mfe: t.mfe || 0, mae: t.mae || 0, holdBars: t.holdBars || 0,
     isCompliant: t.isCompliant !== undefined ? t.isCompliant : true,
+  };
+}
+function loadVizData(jsonData) {
+  // Candles: support both formats
+  const raw = jsonData.candles || jsonData.bars || [];
+  const candles = raw.map(c => ({
+    time: toEpoch(c.time), open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0,
+  })).sort((a, b) => a.time - b.time);
+  // Trades: detect format
+  const rawT = jsonData.trades || [];
+  let trades;
+  if (rawT.length > 0 && rawT[0].action) {
+    trades = pairTradeEvents(rawT);
+  } else {
+    trades = rawT.map((t, i) => normalizeTrade(t, i));
+  }
+  // HTF bias snapshots
+  const htfBias = (jsonData.htf_bias || jsonData.htfBias || []).map(h => ({
+    time: toEpoch(h.time), direction: h.direction, strength: h.strength,
+    allowsLong: h.allows_long ?? h.allowsLong ?? true,
+    allowsShort: h.allows_short ?? h.allowsShort ?? true,
+  })).sort((a, b) => a.time - b.time);
+  // Equity curve
+  const equityCurve = (jsonData.equity_curve || jsonData.equityCurve || []).map(e => ({
+    equity: e.equity, time: e.time === "start" ? null : toEpoch(e.time),
   }));
-  return { candles, trades };
+  const summary = jsonData.summary || jsonData.meta || {};
+  return { candles, trades, htfBias, equityCurve, summary };
 }
 // ── UTILITIES ─────────────────────────────────────────────────
 function formatPrice(p) { return p.toFixed(2); }
@@ -104,8 +160,11 @@ function NQForensicVisualizer() {
   // Data
   const [candles, setCandles] = useState([]);
   const [trades, setTrades] = useState([]);
+  const [htfBiasData, setHtfBiasData] = useState([]);
+  const [equityCurve, setEquityCurve] = useState([]);
+  const [dataSummary, setDataSummary] = useState({});
   const [loading, setLoading] = useState(true);
-  const [dataSource, setDataSource] = useState(""); // "file:xyz" or "fetch" or "drop"
+  const [dataSource, setDataSource] = useState("");
   const [loadError, setLoadError] = useState(null);
   const fileInputRef = useRef(null);
   // View state
@@ -115,6 +174,11 @@ function NQForensicVisualizer() {
   const [crosshairPos, setCrosshairPos] = useState(null);
   const [hoveredCandle, setHoveredCandle] = useState(null);
   const [timeframe, setTimeframe] = useState("5m");
+  // Overlay toggles
+  const [showVWAP, setShowVWAP] = useState(true);
+  const [showSMA, setShowSMA] = useState(true);
+  const [showATR, setShowATR] = useState(false);
+  const [showVolProfile, setShowVolProfile] = useState(true);
   // Filters
   const [filterRegime, setFilterRegime] = useState("all");
   const [filterSide, setFilterSide] = useState("all");
@@ -123,26 +187,35 @@ function NQForensicVisualizer() {
   // Refs
   const chartRef = useRef(null);
   const volRef = useRef(null);
+  const regimeRef = useRef(null);
+  const htfRef = useRef(null);
+  const signalRef = useRef(null);
   const containerRef = useRef(null);
   const isDragging = useRef(false);
   const dragStart = useRef(0);
   const dragViewStart = useRef(0);
   // Chart dimensions
-  const CHART_H = 480;
-  const VOL_H = 80;
+  const CHART_H = 380;
+  const VOL_H = 60;
+  const REGIME_H = 28;
+  const HTF_H = 48;
+  const SIGNAL_H = 38;
   const PRICE_AXIS_W = 85;
   const TIME_AXIS_H = 28;
   const MIN_CANDLE_W = 3;
   const MAX_CANDLE_W = 24;
   // Load data from viz_data.json or accept file upload
   const applyData = useCallback((jsonData, source) => {
-    const { candles: c, trades: t } = loadVizData(jsonData);
+    const { candles: c, trades: t, htfBias: hb, equityCurve: ec, summary: sm } = loadVizData(jsonData);
     if (c.length === 0) {
       setLoadError("No candle data found in file");
       return;
     }
     setCandles(c);
     setTrades(t);
+    setHtfBiasData(hb);
+    setEquityCurve(ec);
+    setDataSummary(sm);
     setViewStart(Math.max(0, c.length - 250));
     setViewEnd(c.length);
     setDataSource(source);
@@ -228,6 +301,80 @@ function NQForensicVisualizer() {
     if (visibleCandles.length === 0) return { max: 1 };
     return { max: Math.max(...visibleCandles.map(c => c.volume)) };
   }, [visibleCandles]);
+  // ── COMPUTED INDICATORS ────────────────────────────────────
+  const indicators = useMemo(() => {
+    if (candles.length === 0) return { vwap: [], sma20: [], sma50: [], sma200: [], atr: [] };
+    // SMA helper
+    const sma = (data, period) => {
+      const out = new Array(data.length).fill(null);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        sum += data[i].close;
+        if (i >= period) sum -= data[i - period].close;
+        if (i >= period - 1) out[i] = sum / period;
+      }
+      return out;
+    };
+    // VWAP — resets each day (by UTC date)
+    const vwap = new Array(candles.length).fill(null);
+    let cumTPV = 0, cumVol = 0, lastDay = -1;
+    for (let i = 0; i < candles.length; i++) {
+      const c = candles[i];
+      const day = new Date(c.time).getUTCDate();
+      if (day !== lastDay) { cumTPV = 0; cumVol = 0; lastDay = day; }
+      const tp = (c.high + c.low + c.close) / 3;
+      cumTPV += tp * c.volume;
+      cumVol += c.volume;
+      vwap[i] = cumVol > 0 ? cumTPV / cumVol : null;
+    }
+    // ATR (14-period)
+    const atrPeriod = 14;
+    const atr = new Array(candles.length).fill(null);
+    let atrSum = 0;
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i], p = candles[i - 1];
+      const tr = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+      if (i <= atrPeriod) { atrSum += tr; if (i === atrPeriod) atr[i] = atrSum / atrPeriod; }
+      else { atr[i] = (atr[i - 1] * (atrPeriod - 1) + tr) / atrPeriod; }
+    }
+    return { vwap, sma20: sma(candles, 20), sma50: sma(candles, 50), sma200: sma(candles, 200), atr };
+  }, [candles]);
+  // Volume profile for visible range
+  const volumeProfile = useMemo(() => {
+    if (visibleCandles.length === 0) return [];
+    const { min, max } = priceRange;
+    const buckets = 40;
+    const step = (max - min) / buckets;
+    if (step <= 0) return [];
+    const profile = new Array(buckets).fill(0);
+    visibleCandles.forEach(c => {
+      const idx = Math.min(buckets - 1, Math.max(0, Math.floor((c.close - min) / step)));
+      profile[idx] += c.volume;
+    });
+    const maxVol = Math.max(...profile);
+    return profile.map((v, i) => ({ price: min + (i + 0.5) * step, volume: v, pct: maxVol > 0 ? v / maxVol : 0 }));
+  }, [visibleCandles, priceRange]);
+  // Regime per candle (derived from SMA crossovers)
+  const regimePerCandle = useMemo(() => {
+    const { sma20, sma50 } = indicators;
+    return candles.map((c, i) => {
+      if (!sma20[i] || !sma50[i]) return "unknown";
+      if (c.close > sma20[i] && sma20[i] > sma50[i]) return "trending_up";
+      if (c.close < sma20[i] && sma20[i] < sma50[i]) return "trending_down";
+      return "ranging";
+    });
+  }, [candles, indicators]);
+  // HTF bias interpolated per candle
+  const htfPerCandle = useMemo(() => {
+    if (htfBiasData.length === 0 || candles.length === 0) return [];
+    const out = new Array(candles.length).fill(null);
+    let hIdx = 0;
+    for (let i = 0; i < candles.length; i++) {
+      while (hIdx < htfBiasData.length - 1 && htfBiasData[hIdx + 1].time <= candles[i].time) hIdx++;
+      if (htfBiasData[hIdx].time <= candles[i].time) out[i] = htfBiasData[hIdx];
+    }
+    return out;
+  }, [candles, htfBiasData]);
   // Get chart width
   const getChartWidth = useCallback(() => {
     if (!containerRef.current) return 800;
@@ -485,6 +632,71 @@ function NQForensicVisualizer() {
       vctx.fillStyle = isGreen ? T.greenDim : T.redDim;
       vctx.fillRect(x, VOL_H - vH, bodyW, vH);
     });
+    // ── VOLUME PROFILE (left side histogram)
+    if (showVolProfile && volumeProfile.length > 0) {
+      const vpMaxW = chartW * 0.12;
+      volumeProfile.forEach(vp => {
+        const y = priceToY(vp.price);
+        const bH = Math.max(1, (priceRange.max - priceRange.min) / 40 / (priceRange.max - priceRange.min) * CHART_H);
+        const bW = vp.pct * vpMaxW;
+        ctx.fillStyle = T.volProfile;
+        ctx.fillRect(0, y - bH / 2, bW, bH);
+      });
+    }
+    // ── VWAP LINE
+    if (showVWAP) {
+      ctx.strokeStyle = T.vwap;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      let started = false;
+      visibleCandles.forEach((c, i) => {
+        const gi = viewStart + i;
+        const v = indicators.vwap[gi];
+        if (v === null) { started = false; return; }
+        const x = (i / count) * chartW + (chartW / count) / 2;
+        const y = priceToY(v);
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+    // ── SMA LINES (20=cyan, 50=pink, 200=gold)
+    if (showSMA) {
+      const smaConfigs = [
+        { data: indicators.sma20, color: T.sma20, width: 1 },
+        { data: indicators.sma50, color: T.sma50, width: 1 },
+        { data: indicators.sma200, color: T.sma200, width: 1.2 },
+      ];
+      smaConfigs.forEach(({ data, color, width }) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        let started = false;
+        visibleCandles.forEach((c, i) => {
+          const v = data[viewStart + i];
+          if (v === null) { started = false; return; }
+          const x = (i / count) * chartW + (chartW / count) / 2;
+          const y = priceToY(v);
+          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      });
+    }
+    // ── ATR BANDS
+    if (showATR) {
+      ctx.fillStyle = T.atrBand;
+      visibleCandles.forEach((c, i) => {
+        const a = indicators.atr[viewStart + i];
+        if (a === null) return;
+        const x = (i / count) * chartW;
+        const w2 = chartW / count;
+        const yTop = priceToY(c.close + a);
+        const yBot = priceToY(c.close - a);
+        ctx.fillRect(x, yTop, w2, yBot - yTop);
+      });
+    }
     // ── Non-selected trade markers (small)
     filteredTrades.forEach(t => {
       if (selectedTrade && t.id === selectedTrade.id) return;
@@ -546,7 +758,110 @@ function NQForensicVisualizer() {
     vctx.moveTo(chartW, 0);
     vctx.lineTo(chartW, VOL_H);
     vctx.stroke();
-  }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, indexToX, getChartWidth]);
+  }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, indexToX, getChartWidth, indicators, volumeProfile, showVWAP, showSMA, showATR, showVolProfile]);
+  // ── RENDER SUBPANES ──────────────────────────────────────
+  useEffect(() => {
+    if (visibleCandles.length === 0) return;
+    const w = getChartWidth() + PRICE_AXIS_W;
+    const chartW = w - PRICE_AXIS_W;
+    const count = visibleCandles.length;
+    const dpr = window.devicePixelRatio || 1;
+    // Helper to set up a canvas
+    const setupCanvas = (ref, h) => {
+      const canvas = ref.current;
+      if (!canvas) return null;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = w + "px"; canvas.style.height = h + "px";
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = T.bg; ctx.fillRect(0, 0, w, h);
+      // Right border
+      ctx.strokeStyle = T.border; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(chartW, 0); ctx.lineTo(chartW, h); ctx.stroke();
+      return ctx;
+    };
+    // ── REGIME SUBPANE
+    const rctx = setupCanvas(regimeRef, REGIME_H);
+    if (rctx) {
+      const regimeColors = { trending_up: T.regimeUp, trending_down: T.regimeDown, ranging: T.regimeRange, unknown: T.regimeUnk };
+      visibleCandles.forEach((c, i) => {
+        const gi = viewStart + i;
+        const regime = regimePerCandle[gi] || "unknown";
+        const x = (i / count) * chartW;
+        const bw = chartW / count;
+        rctx.fillStyle = regimeColors[regime] || T.regimeUnk;
+        rctx.globalAlpha = 0.6;
+        rctx.fillRect(x, 2, bw, REGIME_H - 4);
+        rctx.globalAlpha = 1;
+      });
+      rctx.fillStyle = T.textMuted; rctx.font = "bold 8px monospace"; rctx.textAlign = "right";
+      rctx.fillText("REGIME", w - 8, REGIME_H / 2 + 3);
+    }
+    // ── HTF BIAS SUBPANE
+    const hctx = setupCanvas(htfRef, HTF_H);
+    if (hctx && htfPerCandle.length > 0) {
+      // Gate threshold lines
+      [0.3, 0.7].forEach(gate => {
+        const y = HTF_H - gate * (HTF_H - 8) - 4;
+        hctx.strokeStyle = T.textMuted; hctx.lineWidth = 0.5; hctx.setLineDash([2, 3]);
+        hctx.beginPath(); hctx.moveTo(0, y); hctx.lineTo(chartW, y); hctx.stroke();
+        hctx.setLineDash([]);
+        hctx.fillStyle = T.textMuted; hctx.font = "7px monospace"; hctx.textAlign = "left";
+        hctx.fillText(gate.toFixed(1), 4, y - 2);
+      });
+      // Strength line
+      hctx.beginPath();
+      let started = false;
+      visibleCandles.forEach((c, i) => {
+        const gi = viewStart + i;
+        const hb = htfPerCandle[gi];
+        if (!hb) { started = false; return; }
+        const x = (i / count) * chartW + (chartW / count) / 2;
+        const y = HTF_H - hb.strength * (HTF_H - 8) - 4;
+        if (!started) { hctx.moveTo(x, y); started = true; } else hctx.lineTo(x, y);
+      });
+      hctx.strokeStyle = T.cyan; hctx.lineWidth = 1.5; hctx.stroke();
+      // Direction shading
+      visibleCandles.forEach((c, i) => {
+        const gi = viewStart + i;
+        const hb = htfPerCandle[gi];
+        if (!hb) return;
+        const x = (i / count) * chartW; const bw = chartW / count;
+        const dirColor = hb.direction === "bullish" ? T.htfBull : hb.direction === "bearish" ? T.htfBear : T.htfNeutral;
+        hctx.fillStyle = dirColor; hctx.globalAlpha = 0.08;
+        hctx.fillRect(x, 0, bw, HTF_H); hctx.globalAlpha = 1;
+      });
+      hctx.fillStyle = T.textMuted; hctx.font = "bold 8px monospace"; hctx.textAlign = "right";
+      hctx.fillText("HTF BIAS", w - 8, HTF_H / 2 + 3);
+    } else if (hctx) {
+      hctx.fillStyle = T.textMuted; hctx.font = "9px monospace"; hctx.textAlign = "center";
+      hctx.fillText("No HTF data — load backtest_viz_data.json", chartW / 2, HTF_H / 2 + 3);
+    }
+    // ── SIGNAL SCORE SUBPANE
+    const sctx = setupCanvas(signalRef, SIGNAL_H);
+    if (sctx) {
+      // 0.75 threshold line
+      const threshY = SIGNAL_H - 0.75 * (SIGNAL_H - 6) - 3;
+      sctx.strokeStyle = T.amber; sctx.lineWidth = 0.5; sctx.setLineDash([3, 3]);
+      sctx.beginPath(); sctx.moveTo(0, threshY); sctx.lineTo(chartW, threshY); sctx.stroke();
+      sctx.setLineDash([]); sctx.fillStyle = T.amber; sctx.font = "7px monospace"; sctx.textAlign = "left";
+      sctx.fillText("0.75", 4, threshY - 2);
+      // Plot signal scores at trade entry times
+      filteredTrades.forEach(t => {
+        const idx = candles.findIndex(c => c.time >= t.entryTime);
+        if (idx < viewStart || idx >= viewEnd) return;
+        const x = ((idx - viewStart) / count) * chartW + (chartW / count) / 2;
+        const barH = t.signalScore * (SIGNAL_H - 6);
+        const y = SIGNAL_H - barH - 3;
+        sctx.fillStyle = t.signalScore >= 0.75 ? T.blue : T.textMuted;
+        sctx.globalAlpha = 0.8;
+        sctx.fillRect(x - 2, y, 4, barH);
+        sctx.globalAlpha = 1;
+      });
+      sctx.fillStyle = T.textMuted; sctx.font = "bold 8px monospace"; sctx.textAlign = "right";
+      sctx.fillText("SIGNAL", w - 8, SIGNAL_H / 2 + 3);
+    }
+  }, [visibleCandles, candles, viewStart, viewEnd, getChartWidth, regimePerCandle, htfPerCandle, filteredTrades]);
   // ── MOUSE HANDLERS ──────────────────────────────────────────
   const handleMouseMove = useCallback((e) => {
     const rect = chartRef.current?.getBoundingClientRect();
@@ -680,6 +995,21 @@ function NQForensicVisualizer() {
               }}>{tf}</button>
             ))}
           </div>
+          <div style={{ display: "flex", gap: 2, marginLeft: 8 }}>
+            {[
+              { label: "VWAP", active: showVWAP, toggle: () => setShowVWAP(v => !v), color: T.vwap },
+              { label: "SMA", active: showSMA, toggle: () => setShowSMA(v => !v), color: T.sma20 },
+              { label: "ATR", active: showATR, toggle: () => setShowATR(v => !v), color: T.blue },
+              { label: "VP", active: showVolProfile, toggle: () => setShowVolProfile(v => !v), color: T.blue },
+            ].map(b => (
+              <button key={b.label} onClick={b.toggle} style={{
+                background: b.active ? T.bgActive : "transparent",
+                color: b.active ? b.color : T.textMuted,
+                border: `1px solid ${b.active ? b.color + "40" : "transparent"}`,
+                padding: "2px 6px", borderRadius: 3, cursor: "pointer", fontSize: 9, fontWeight: 600,
+              }}>{b.label}</button>
+            ))}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }}
               onChange={e => { handleFileUpload(e.target.files[0]); e.target.value = ""; }} />
@@ -715,6 +1045,18 @@ function NQForensicVisualizer() {
           {/* Volume canvas */}
           <div style={{ borderTop: `1px solid ${T.border}` }}>
             <canvas ref={volRef} style={{ display: "block" }} />
+          </div>
+          {/* Regime subpane */}
+          <div style={{ borderTop: `1px solid ${T.border}` }}>
+            <canvas ref={regimeRef} style={{ display: "block" }} />
+          </div>
+          {/* HTF Bias subpane */}
+          <div style={{ borderTop: `1px solid ${T.border}` }}>
+            <canvas ref={htfRef} style={{ display: "block" }} />
+          </div>
+          {/* Signal score subpane */}
+          <div style={{ borderTop: `1px solid ${T.border}` }}>
+            <canvas ref={signalRef} style={{ display: "block" }} />
           </div>
           {/* ── STATS BAR */}
           {stats && (
