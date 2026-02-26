@@ -48,6 +48,10 @@ backtest_viz_data.json
 backtest_results_*.json
 equity_curve_*.json
 
+# ── Dashboard Generated Data ────────────────────────────────
+dashboard/viz_data.json
+dashboard/data_anomalies.json
+
 # ── Database ─────────────────────────────────────────────────
 *.db
 *.sqlite
