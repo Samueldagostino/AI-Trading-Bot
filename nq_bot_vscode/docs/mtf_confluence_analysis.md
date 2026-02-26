@@ -1,28 +1,33 @@
 # MTF Confluence Analysis Report
-**Generated**: 2026-02-26 17:55 UTC
+**Generated**: 2026-02-26 18:27 UTC (corrected — isolated subprocess runs)
 **Data window**: Feb 1-26, 2026 (2m execution, all TF HTF data)
 **HC filter**: ON (score >= 0.75, stop <= 30pts, TP1 = 1.5x stop)
 
 ---
 ## Phase 1: HTF Confluence Value Test
 
+Results from isolated subprocess runs (one config per process, zero state leakage):
+
 | Metric | Config A (No HTF) | Config B (gate=0.7) | Config C (gate=0.5) | Config D (gate=0.3) |
 |---|---|---|---|---|
-| **Total Trades** | 88 | 110 | 90 | 84 |
-| **HTF Blocked** | 0 | 386 | 1682 | 1838 |
+| **Total Trades** | 83 | 110 | 90 | 84 |
+| **HTF Blocked** | 0 | 386 | 1,682 | 1,838 |
 | **Win Rate** | 38.6% | 38.2% | 46.7% | 50.0% |
-| **Profit Factor** | 0.75 | 0.79 | 1.13 | 1.29 |
-| **Total PnL** | $-1,527.68 | $-1,512.08 | $685.98 | $1,302.36 |
-| **Avg Winner** | $134.93 | $136.27 | $138.95 | $138.40 |
-| **Avg Loser** | $-113.25 | $-106.40 | $-107.29 | $-107.39 |
-| **Largest Win** | $363.08 | $363.08 | $364.08 | $364.08 |
-| **Largest Loss** | $-330.58 | $-283.58 | $-283.58 | $-284.58 |
-| **Max DD** | 4.1% | 4.8% | 3.1% | 2.8% |
-| **C1 PnL** | $-985.42 | $-1,049.22 | $28.62 | $329.90 |
-| **C2 PnL** | $-542.26 | $-462.86 | $657.36 | $972.46 |
-| **Expectancy/trade** | $-17.36 | $-13.75 | $7.62 | $15.50 |
+| **Profit Factor** | 0.74 | 0.78 | 1.13 | 1.29 |
+| **Total PnL** | $-1,530.64 | $-1,556.80 | $649.98 | $1,304.36 |
+| **Max DD** | 4.0% | 4.8% | 3.1% | 2.8% |
+| **Expectancy/trade** | $-18.44 | $-14.15 | $7.22 | $15.53 |
 
 **Best performing config**: D (PF 1.29)
+
+### Trade Count Note
+
+Config B (gate=0.7) produces 110 trades vs 83 baseline. This is the **trade sequence
+effect**: the bot holds one position at a time. When the HTF gate blocks a trade, the bot
+stays flat → evaluates subsequent signals → takes a different trade with different duration →
+cascading changes to the trade sequence. At gate=0.7 (permissive), few blocks create large
+cascades. At gate=0.3 (aggressive), the effect is negligible (84 ≈ 83). Verified by running a
+fully-permissive HTF gate in isolation: 83 trades, matching the no-HTF baseline exactly.
 
 ---
 ## Phase 2: Kill/Save Matrix
@@ -167,18 +172,19 @@ All filter combinations sorted by expectancy. **Positive expectancy** combos are
 
 | Config | Trades | PF | PnL | Max DD | Expectancy |
 |---|---|---|---|---|---|
-| A (no HTF) | 88 | 0.75 | -$1,528 | 4.1% | -$17.36 |
-| B (gate=0.7) | 110 | 0.79 | -$1,512 | 4.8% | -$13.75 |
-| **C (gate=0.5)** | **90** | **1.13** | **+$686** | **3.1%** | **+$7.62** |
-| **D (gate=0.3)** | **84** | **1.29** | **+$1,302** | **2.8%** | **+$15.50** |
+| A (no HTF) | 83 | 0.74 | -$1,531 | 4.0% | -$18.44 |
+| B (gate=0.7) | 110 | 0.78 | -$1,557 | 4.8% | -$14.15 |
+| **C (gate=0.5)** | **90** | **1.13** | **+$650** | **3.1%** | **+$7.22** |
+| **D (gate=0.3)** | **84** | **1.29** | **+$1,304** | **2.8%** | **+$15.53** |
 
 **Adopt Config D (gate=0.3)** as the production HTF configuration.
 
 Config D delivers:
-- $2,830 PnL improvement over the no-HTF baseline (-$1,528 → +$1,302)
-- Kill/save matrix: saves $4,136 in blocked losers, sacrifices $2,634 in blocked winners = +$1,502 net filter value
-- Max DD drops from 4.1% to 2.8%
+- $2,835 PnL improvement over the no-HTF baseline (-$1,531 → +$1,304)
+- Trade count: 84 (essentially equal to 83-trade baseline — sequence effect is negligible at this gate)
+- Max DD drops from 4.0% to 2.8%
 - Win rate climbs from 38.6% to 50.0%
+- C2 runner generates 75% of total PnL ($973 of $1,304)
 
 ### Additional filters to consider
 
