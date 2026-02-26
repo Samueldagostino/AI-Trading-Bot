@@ -24,12 +24,109 @@ How to export from TradingView:
 import csv
 import logging
 import os
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Iterator, Tuple
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+# Map CSV filename minute-intervals to standard timeframe labels
+MINUTES_TO_LABEL: Dict[int, str] = {
+    1: "1m", 2: "2m", 3: "3m", 5: "5m", 15: "15m",
+    30: "30m", 60: "1H", 240: "4H", 1440: "1D",
+}
+
+
+def _parse_tf_from_filename(filename: str) -> Optional[str]:
+    """Parse timeframe label from TradingView CSV filename.
+
+    Handles patterns like:
+        CME_MINI_MNQ1!, 2m.csv      -> "2m"
+        CME_MINI_MNQ1!, 60 1hr.csv  -> "1H"
+        CME_MINI_MNQ1!, 240 4hr.csv -> "4H"
+        CME_MINI_MNQ1!, 1D.csv      -> "1D"
+    """
+    stem = Path(filename).stem
+    parts = stem.rsplit(", ", 1)
+    if len(parts) < 2:
+        parts = stem.rsplit(",", 1)
+    if len(parts) < 2:
+        return None
+    tf_part = parts[1].strip()
+
+    # "1D" daily
+    if tf_part.upper() == "1D":
+        return "1D"
+
+    # "2m", "5m", "15m", "30m" etc
+    m = re.match(r'^(\d+)m$', tf_part, re.IGNORECASE)
+    if m:
+        minutes = int(m.group(1))
+        return MINUTES_TO_LABEL.get(minutes)
+
+    # "60 1hr", "240 4hr" — leading number is the minute interval
+    m = re.match(r'^(\d+)\s', tf_part)
+    if m:
+        minutes = int(m.group(1))
+        return MINUTES_TO_LABEL.get(minutes)
+
+    return None
+
+
+def bardata_to_bar(bar_data: 'BarData') -> 'Bar':
+    """Convert BarData (pipeline format) to Bar (feature engine format)."""
+    from features.engine import Bar
+    return Bar(
+        timestamp=bar_data.timestamp,
+        open=bar_data.open,
+        high=bar_data.high,
+        low=bar_data.low,
+        close=bar_data.close,
+        volume=bar_data.volume,
+        bid_volume=bar_data.bid_volume,
+        ask_volume=bar_data.ask_volume,
+        delta=bar_data.delta,
+        tick_count=bar_data.tick_count,
+        vwap=bar_data.vwap,
+    )
+
+
+def bardata_to_htfbar(bar_data: 'BarData') -> 'HTFBar':
+    """Convert BarData (pipeline format) to HTFBar (HTF bias engine format)."""
+    from features.htf_engine import HTFBar
+    return HTFBar(
+        timestamp=bar_data.timestamp,
+        open=bar_data.open,
+        high=bar_data.high,
+        low=bar_data.low,
+        close=bar_data.close,
+        volume=bar_data.volume,
+    )
+
+
+class MultiTimeframeIterator:
+    """Iterates over bars from multiple timeframes in chronological order.
+
+    Yields (timeframe_label, BarData) tuples sorted by timestamp.
+    When timestamps tie, higher timeframes come first so HTF bias
+    is updated before execution-TF bars are processed.
+    """
+
+    _TF_PRIORITY = {
+        "1D": 0, "4H": 1, "1H": 2, "30m": 3,
+        "15m": 4, "5m": 5, "3m": 6, "2m": 7, "1m": 8,
+    }
+
+    def __init__(self, merged: List[Tuple[str, 'BarData']]):
+        self._items = merged
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __iter__(self) -> Iterator[Tuple[str, 'BarData']]:
+        return iter(self._items)
 
 
 @dataclass
@@ -378,3 +475,52 @@ class DataPipeline:
             "source": bars[0].source,
             "has_delta": any(b.delta != 0 for b in bars),
         }
+
+    # ================================================================
+    # MULTI-TIMEFRAME METHODS
+    # ================================================================
+    def load_mtf_data(self, directory: str = None) -> Dict[str, List[BarData]]:
+        """Load all TradingView CSVs, detect timeframe from filename, group by TF."""
+        dir_path = Path(directory or self.tv_importer._import_dir)
+        if not dir_path.exists():
+            logger.warning(f"MTF data directory not found: {dir_path}")
+            return {}
+
+        tf_bars: Dict[str, List[BarData]] = {}
+
+        for csv_file in sorted(dir_path.glob("*.csv")):
+            tf_label = _parse_tf_from_filename(str(csv_file))
+            if not tf_label:
+                logger.warning(f"Could not determine timeframe for: {csv_file.name}")
+                continue
+
+            bars = self.tv_importer.import_file(str(csv_file))
+            if bars:
+                tf_bars[tf_label] = bars
+                logger.info(f"  {tf_label}: {len(bars)} bars from {csv_file.name}")
+
+        return tf_bars
+
+    def get_mtf_summary(self, tf_bars: Dict[str, List[BarData]]) -> dict:
+        """Summarize multi-timeframe data for display."""
+        summary = {}
+        for tf, bars in sorted(tf_bars.items()):
+            if bars:
+                summary[tf] = {
+                    "bars": len(bars),
+                    "price_range": f"{min(b.low for b in bars):.2f} - {max(b.high for b in bars):.2f}",
+                    "date_range": f"{bars[0].timestamp.date()} to {bars[-1].timestamp.date()}",
+                }
+        return summary
+
+    def create_mtf_iterator(self, tf_bars: Dict[str, List[BarData]]) -> MultiTimeframeIterator:
+        """Create a chronologically sorted iterator across all timeframes."""
+        merged: List[Tuple[str, BarData]] = []
+        for tf, bars in tf_bars.items():
+            for bar in bars:
+                merged.append((tf, bar))
+
+        tf_priority = MultiTimeframeIterator._TF_PRIORITY
+        merged.sort(key=lambda x: (x[1].timestamp, tf_priority.get(x[0], 99)))
+
+        return MultiTimeframeIterator(merged)

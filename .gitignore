@@ -28,3 +28,6 @@ build/
 *.db
 *.sqlite3
 *.log
+
+# Generated backtest outputs
+backtest_viz_data.json

@@ -72,12 +72,14 @@ class SignalAggregator:
         self.config = config.signals
         self._last_signal_time: Optional[datetime] = None
         self._signal_history: List[AggregatedSignal] = []
+        self._htf_blocked_count: int = 0
 
     def aggregate(
         self,
         discord_signal: Optional[object] = None,
         feature_snapshot: Optional[object] = None,
         ml_prediction: Optional[dict] = None,
+        htf_bias: Optional[object] = None,
         current_time: Optional[datetime] = None,
     ) -> Optional[AggregatedSignal]:
         """
@@ -203,6 +205,23 @@ class SignalAggregator:
         if should_trade and len(tech_scores) == 0 and len(ml_scores) == 0:
             should_trade = False
             rejection_reason = "Discord signal alone — requires technical or ML confluence"
+
+        # === HTF BIAS GATE ===
+        if should_trade and htf_bias is not None:
+            if direction == SignalDirection.LONG and not htf_bias.htf_allows_long:
+                should_trade = False
+                rejection_reason = (
+                    f"HTF bias blocks long: {htf_bias.consensus_direction} "
+                    f"({htf_bias.consensus_strength:.2f})"
+                )
+                self._htf_blocked_count += 1
+            elif direction == SignalDirection.SHORT and not htf_bias.htf_allows_short:
+                should_trade = False
+                rejection_reason = (
+                    f"HTF bias blocks short: {htf_bias.consensus_direction} "
+                    f"({htf_bias.consensus_strength:.2f})"
+                )
+                self._htf_blocked_count += 1
 
         signal = AggregatedSignal(
             timestamp=current_time,
@@ -382,5 +401,9 @@ class SignalAggregator:
             "avg_confluence_score": (
                 round(sum(s.combined_score for s in trade_signals) / len(trade_signals), 3)
                 if trade_signals else 0
+            ),
+            "htf_blocked_signals": self._htf_blocked_count,
+            "htf_block_rate": (
+                round(self._htf_blocked_count / total * 100, 1) if total > 0 else 0
             ),
         }

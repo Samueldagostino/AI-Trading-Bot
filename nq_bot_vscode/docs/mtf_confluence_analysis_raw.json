@@ -1,0 +1,352 @@
+{
+  "phase1": {
+    "A": {
+      "total_trades": 88,
+      "total_pnl": -1527.68,
+      "win_rate": 38.6,
+      "profit_factor": 0.75,
+      "avg_winner": 134.93,
+      "avg_loser": -113.25,
+      "largest_win": 363.08,
+      "largest_loss": -330.58,
+      "max_drawdown_pct": 4.07,
+      "htf_blocked": 0,
+      "c1_pnl": -985.42,
+      "c2_pnl": -542.26
+    },
+    "B": {
+      "total_trades": 110,
+      "total_pnl": -1512.08,
+      "win_rate": 38.2,
+      "profit_factor": 0.79,
+      "avg_winner": 136.27,
+      "avg_loser": -106.4,
+      "largest_win": 363.08,
+      "largest_loss": -283.58,
+      "max_drawdown_pct": 4.76,
+      "htf_blocked": 386,
+      "c1_pnl": -1049.22,
+      "c2_pnl": -462.86
+    },
+    "C": {
+      "total_trades": 90,
+      "total_pnl": 685.98,
+      "win_rate": 46.7,
+      "profit_factor": 1.13,
+      "avg_winner": 138.95,
+      "avg_loser": -107.29,
+      "largest_win": 364.08,
+      "largest_loss": -283.58,
+      "max_drawdown_pct": 3.1,
+      "htf_blocked": 1682,
+      "c1_pnl": 28.62,
+      "c2_pnl": 657.36
+    },
+    "D": {
+      "total_trades": 84,
+      "total_pnl": 1302.36,
+      "win_rate": 50.0,
+      "profit_factor": 1.29,
+      "avg_winner": 138.4,
+      "avg_loser": -107.39,
+      "largest_win": 364.08,
+      "largest_loss": -284.58,
+      "max_drawdown_pct": 2.83,
+      "htf_blocked": 1838,
+      "c1_pnl": 329.9,
+      "c2_pnl": 972.46
+    }
+  },
+  "phase2": {
+    "0.7": {
+      "tp": 27,
+      "tn": 10,
+      "fp": 44,
+      "fn": 7,
+      "tp_pnl": 3807.48,
+      "tn_pnl": -1342.8,
+      "fp_pnl": -4772.52,
+      "fn_pnl": 780.16,
+      "precision": 0.3803,
+      "recall": 0.7941,
+      "f1": 0.5143,
+      "total": 88,
+      "pnl_saved": 1342.8,
+      "pnl_sacrificed": 780.16,
+      "net_filter_value": 562.64
+    },
+    "0.5": {
+      "tp": 14,
+      "tn": 35,
+      "fp": 19,
+      "fn": 20,
+      "tp_pnl": 2026.02,
+      "tn_pnl": -4029.3,
+      "fp_pnl": -2086.02,
+      "fn_pnl": 2561.62,
+      "precision": 0.4242,
+      "recall": 0.4118,
+      "f1": 0.4179,
+      "total": 88,
+      "pnl_saved": 4029.3,
+      "pnl_sacrificed": 2561.62,
+      "net_filter_value": 1467.68
+    },
+    "0.3": {
+      "tp": 13,
+      "tn": 36,
+      "fp": 18,
+      "fn": 21,
+      "tp_pnl": 1953.32,
+      "tn_pnl": -4135.88,
+      "fp_pnl": -1979.44,
+      "fn_pnl": 2634.32,
+      "precision": 0.4194,
+      "recall": 0.3824,
+      "f1": 0.4,
+      "total": 88,
+      "pnl_saved": 4135.88,
+      "pnl_sacrificed": 2634.32,
+      "net_filter_value": 1501.56
+    }
+  },
+  "phase3_regime": {
+    "trending_up": {
+      "trades": 31,
+      "wins": 16,
+      "pnl": 204.25999999999982,
+      "winners_pnl": 1984.9600000000003,
+      "losers_pnl": -1780.6999999999996
+    },
+    "trending_down": {
+      "trades": 23,
+      "wins": 11,
+      "pnl": 685.9599999999998,
+      "winners_pnl": 1920.9199999999998,
+      "losers_pnl": -1234.96
+    },
+    "ranging": {
+      "trades": 11,
+      "wins": 7,
+      "pnl": 527.6400000000001,
+      "winners_pnl": 869.96,
+      "losers_pnl": -342.32
+    },
+    "unknown": {
+      "trades": 18,
+      "wins": 8,
+      "pnl": -49.92000000000006,
+      "winners_pnl": 1036.88,
+      "losers_pnl": -1086.8000000000002
+    },
+    "low_liquidity": {
+      "trades": 1,
+      "wins": 0,
+      "pnl": -65.58,
+      "winners_pnl": 0.0,
+      "losers_pnl": -65.58
+    }
+  },
+  "phase3_session": {
+    "pre-market (6-9:30)": {
+      "trades": 18,
+      "wins": 9,
+      "pnl": 109.88000000000002,
+      "winners_pnl": 1129.1,
+      "losers_pnl": -1019.2200000000001
+    },
+    "morning (9:30-11:30)": {
+      "trades": 3,
+      "wins": 2,
+      "pnl": 254.51999999999998,
+      "winners_pnl": 539.0999999999999,
+      "losers_pnl": -284.58
+    },
+    "overnight/extended": {
+      "trades": 55,
+      "wins": 28,
+      "pnl": 1018.6999999999999,
+      "winners_pnl": 3659.36,
+      "losers_pnl": -2640.659999999999
+    },
+    "midday (11:30-14:00)": {
+      "trades": 2,
+      "wins": 1,
+      "pnl": -3.0800000000000267,
+      "winners_pnl": 127.49999999999999,
+      "losers_pnl": -130.58
+    },
+    "afternoon (14-16:00)": {
+      "trades": 6,
+      "wins": 2,
+      "pnl": -77.66,
+      "winners_pnl": 357.65999999999997,
+      "losers_pnl": -435.32
+    }
+  },
+  "phase3_htf": {
+    "bullish": {
+      "trades": 36,
+      "wins": 19,
+      "pnl": 1000.02,
+      "winners_pnl": 2646.88,
+      "losers_pnl": -1646.8599999999997
+    },
+    "bearish": {
+      "trades": 34,
+      "wins": 16,
+      "pnl": 291.64,
+      "winners_pnl": 2207.08,
+      "losers_pnl": -1915.4399999999998
+    },
+    "neutral": {
+      "trades": 14,
+      "wins": 7,
+      "pnl": 10.699999999999974,
+      "winners_pnl": 958.7599999999999,
+      "losers_pnl": -948.0600000000002
+    }
+  },
+  "combined_filters": [
+    {
+      "filter": "regime=trending_up + session=overnight/extended + htf=neutral",
+      "trades": 4,
+      "pnl": 352.38,
+      "wr": 75.0,
+      "expectancy": 88.1
+    },
+    {
+      "filter": "session=overnight/extended + htf=neutral",
+      "trades": 9,
+      "pnl": 774.6,
+      "wr": 77.8,
+      "expectancy": 86.07
+    },
+    {
+      "filter": "session=morning (9:30-11:30)",
+      "trades": 3,
+      "pnl": 254.52,
+      "wr": 66.7,
+      "expectancy": 84.84
+    },
+    {
+      "filter": "regime=trending_up + session=pre-market (6-9:30) + htf=bullish",
+      "trades": 4,
+      "pnl": 297.56,
+      "wr": 75.0,
+      "expectancy": 74.39
+    },
+    {
+      "filter": "regime=ranging + htf=bullish",
+      "trades": 4,
+      "pnl": 276.9,
+      "wr": 75.0,
+      "expectancy": 69.22
+    },
+    {
+      "filter": "regime=ranging + session=overnight/extended + htf=bullish",
+      "trades": 4,
+      "pnl": 276.9,
+      "wr": 75.0,
+      "expectancy": 69.22
+    },
+    {
+      "filter": "regime=trending_down + session=overnight/extended + htf=bullish",
+      "trades": 3,
+      "pnl": 200.34,
+      "wr": 33.3,
+      "expectancy": 66.78
+    },
+    {
+      "filter": "regime=trending_up + session=pre-market (6-9:30) + htf=bearish",
+      "trades": 3,
+      "pnl": 176.06,
+      "wr": 66.7,
+      "expectancy": 58.69
+    },
+    {
+      "filter": "regime=ranging + htf=bearish",
+      "trades": 6,
+      "pnl": 327.32,
+      "wr": 66.7,
+      "expectancy": 54.55
+    },
+    {
+      "filter": "regime=trending_down + session=overnight/extended",
+      "trades": 12,
+      "pnl": 591.22,
+      "wr": 58.3,
+      "expectancy": 49.27
+    },
+    {
+      "filter": "regime=ranging",
+      "trades": 11,
+      "pnl": 527.64,
+      "wr": 63.6,
+      "expectancy": 47.97
+    },
+    {
+      "filter": "regime=trending_down + htf=bearish",
+      "trades": 12,
+      "pnl": 558.78,
+      "wr": 58.3,
+      "expectancy": 46.56
+    },
+    {
+      "filter": "regime=unknown + session=overnight/extended + htf=bullish",
+      "trades": 6,
+      "pnl": 254.48,
+      "wr": 50.0,
+      "expectancy": 42.41
+    },
+    {
+      "filter": "regime=trending_up + session=pre-market (6-9:30)",
+      "trades": 8,
+      "pnl": 329.04,
+      "wr": 62.5,
+      "expectancy": 41.13
+    },
+    {
+      "filter": "session=overnight/extended + htf=bullish",
+      "trades": 25,
+      "pnl": 989.54,
+      "wr": 56.0,
+      "expectancy": 39.58
+    },
+    {
+      "filter": "regime=ranging + session=overnight/extended",
+      "trades": 10,
+      "pnl": 394.64,
+      "wr": 60.0,
+      "expectancy": 39.46
+    },
+    {
+      "filter": "regime=ranging + session=overnight/extended + htf=bearish",
+      "trades": 5,
+      "pnl": 194.32,
+      "wr": 60.0,
+      "expectancy": 38.86
+    },
+    {
+      "filter": "regime=trending_down",
+      "trades": 23,
+      "pnl": 685.96,
+      "wr": 47.8,
+      "expectancy": 29.82
+    },
+    {
+      "filter": "regime=trending_up + session=overnight/extended + htf=bullish",
+      "trades": 11,
+      "pnl": 323.4,
+      "wr": 63.6,
+      "expectancy": 29.4
+    },
+    {
+      "filter": "regime=trending_up + htf=bullish",
+      "trades": 18,
+      "pnl": 517.3,
+      "wr": 61.1,
+      "expectancy": 28.74
+    }
+  ]
+}

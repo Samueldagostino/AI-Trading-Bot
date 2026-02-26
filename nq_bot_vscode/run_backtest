@@ -195,7 +195,15 @@ def main():
     parser.add_argument("--bars", type=int, default=3000, help="Number of sample bars")
     parser.add_argument("--exec-tf", type=str, default="2m",
                        help="Execution timeframe for MTF backtest (default: 2m)")
+    parser.add_argument("--no-hc", action="store_true",
+                       help="Disable high-conviction filter (pass all signals)")
     args = parser.parse_args()
+
+    if args.no_hc:
+        import main as _m
+        _m.HIGH_CONVICTION_MIN_SCORE = 0.0
+        _m.HIGH_CONVICTION_MAX_STOP_PTS = 9999.0
+        _m.HIGH_CONVICTION_TP1_RR_RATIO = 0.0  # 0 -> executor uses config default
 
     logging.basicConfig(
         level=logging.INFO,
