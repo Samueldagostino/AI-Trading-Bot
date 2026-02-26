@@ -24,12 +24,19 @@ How to export from TradingView:
 import csv
 import logging
 import os
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Iterator, Tuple
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+# Map CSV filename minute-intervals to standard timeframe labels
+MINUTES_TO_LABEL: Dict[int, str] = {
+    1: "1m", 2: "2m", 3: "3m", 5: "5m", 15: "15m",
+    30: "30m", 60: "1H", 240: "4H", 1440: "1D",
+}
 
 
 @dataclass
