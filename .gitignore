@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# macOS specific
+.DS_Store
+
+# Virtual environments
+venv/
+.venv/
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# VSCode settings
+.vscode/
+
+# JetBrains IDEs settings
+.idea/
+
+# Other common exclusions
+*.pyd
+*.db
+*.sqlite3
+*.log
