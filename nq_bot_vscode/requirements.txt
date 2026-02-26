@@ -1,0 +1,31 @@
+# NQ Trading Bot — Dependencies
+# ================================
+
+# Core
+numpy>=1.24.0
+
+# Async
+aiohttp>=3.9.0             # Tradovate WebSocket + REST client
+
+# Database
+asyncpg>=0.28.0            # Async PostgreSQL
+psycopg2-binary>=2.9.0     # Sync PostgreSQL (for schema setup)
+
+# Discord
+discord.py>=2.3.0          # MikesTrades #alerts monitoring
+
+# Data & Analysis
+pandas>=2.0.0
+scipy>=1.11.0
+
+# Dashboard & API Server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+
+# Config
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
