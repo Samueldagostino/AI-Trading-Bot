@@ -210,8 +210,11 @@ function NQForensicVisualizer() {
   const [sortCol, setSortCol] = useState("id");
   const [sortDir, setSortDir] = useState(1);
   const [showSessions, setShowSessions] = useState(false);
+  // Phase 5: Performance panel
+  const [showPerfPanel, setShowPerfPanel] = useState(false);
   // Refs
   const chartRef = useRef(null);
+  const equityRef = useRef(null);
   const volRef = useRef(null);
   const regimeRef = useRef(null);
   const htfRef = useRef(null);
@@ -1155,6 +1158,105 @@ function NQForensicVisualizer() {
     };
     return { a: calcStats(filteredTrades.slice(0, split)), b: calcStats(filteredTrades.slice(split)), split };
   }, [abMode, abSplitIndex, filteredTrades]);
+  // Extended stats for performance panel
+  const extStats = useMemo(() => {
+    const ft = filteredTrades;
+    if (ft.length === 0) return null;
+    const pnls = ft.map(t => t.pnl);
+    const totalPnl = pnls.reduce((s, v) => s + v, 0);
+    // Max drawdown
+    let peak = 0, equity = 0, maxDD = 0;
+    const eqCurve = [0];
+    pnls.forEach(p => {
+      equity += p; eqCurve.push(equity);
+      if (equity > peak) peak = equity;
+      const dd = peak - equity;
+      if (dd > maxDD) maxDD = dd;
+    });
+    // Consecutive wins/losses
+    let maxConsecWin = 0, maxConsecLoss = 0, cw = 0, cl = 0;
+    pnls.forEach(p => {
+      if (p > 0) { cw++; cl = 0; maxConsecWin = Math.max(maxConsecWin, cw); }
+      else { cl++; cw = 0; maxConsecLoss = Math.max(maxConsecLoss, cl); }
+    });
+    // Best/worst
+    const bestTrade = ft.reduce((b, t) => t.pnl > b.pnl ? t : b, ft[0]);
+    const worstTrade = ft.reduce((w, t) => t.pnl < w.pnl ? t : w, ft[0]);
+    // Avg hold bars
+    const avgHold = ft.reduce((s, t) => s + (t.holdBars || 0), 0) / ft.length;
+    // Win/loss streaks array
+    const streaks = [];
+    let streakType = null, streakLen = 0;
+    ft.forEach((t, i) => {
+      const w = t.pnl > 0;
+      if (streakType === null || w !== streakType) {
+        if (streakType !== null) streaks.push({ win: streakType, len: streakLen });
+        streakType = w; streakLen = 1;
+      } else { streakLen++; }
+      if (i === ft.length - 1) streaks.push({ win: streakType, len: streakLen });
+    });
+    // Sharpe-like: mean(pnl) / stdev(pnl)
+    const mean = totalPnl / ft.length;
+    const variance = pnls.reduce((s, p) => s + (p - mean) ** 2, 0) / ft.length;
+    const sharpe = variance > 0 ? (mean / Math.sqrt(variance)).toFixed(2) : "N/A";
+    // Heatmap: PnL by day of week and hour
+    const heatmap = {};
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    ft.forEach(t => {
+      const d = new Date(t.entryTime);
+      const day = days[d.getDay()];
+      const hour = d.getHours();
+      const key = `${day}-${hour}`;
+      if (!heatmap[key]) heatmap[key] = { pnl: 0, count: 0 };
+      heatmap[key].pnl += t.pnl;
+      heatmap[key].count++;
+    });
+    return { eqCurve, maxDD, maxConsecWin, maxConsecLoss, bestTrade, worstTrade, avgHold, streaks, sharpe, heatmap, days };
+  }, [filteredTrades]);
+  // Render equity curve canvas
+  useEffect(() => {
+    if (!showPerfPanel || !extStats || !equityRef.current) return;
+    const canvas = equityRef.current;
+    const w = canvas.parentElement?.offsetWidth || 400;
+    const h = 120;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = T.bg; ctx.fillRect(0, 0, w, h);
+    const eq = extStats.eqCurve;
+    if (eq.length < 2) return;
+    const minE = Math.min(...eq), maxE = Math.max(...eq);
+    const range = maxE - minE || 1;
+    const pad = 6;
+    const chartW = w - pad * 2, chartH = h - pad * 2;
+    // Zero line
+    const zeroY = pad + chartH - ((0 - minE) / range) * chartH;
+    ctx.strokeStyle = T.textMuted; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(pad, zeroY); ctx.lineTo(w - pad, zeroY); ctx.stroke(); ctx.setLineDash([]);
+    // Equity line
+    ctx.beginPath();
+    eq.forEach((v, i) => {
+      const x = pad + (i / (eq.length - 1)) * chartW;
+      const y = pad + chartH - ((v - minE) / range) * chartH;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = T.green; ctx.lineWidth = 1.5; ctx.stroke();
+    // Fill under curve
+    const lastX = pad + chartW;
+    const lastY = pad + chartH - ((eq[eq.length - 1] - minE) / range) * chartH;
+    ctx.lineTo(lastX, zeroY); ctx.lineTo(pad, zeroY); ctx.closePath();
+    ctx.fillStyle = eq[eq.length - 1] >= 0 ? T.greenBg : T.redBg; ctx.fill();
+    // Labels
+    ctx.fillStyle = T.textMuted; ctx.font = "9px monospace"; ctx.textAlign = "left";
+    ctx.fillText(`$${maxE.toFixed(0)}`, pad + 2, pad + 10);
+    ctx.fillText(`$${minE.toFixed(0)}`, pad + 2, h - pad - 2);
+    ctx.textAlign = "right";
+    ctx.fillStyle = eq[eq.length - 1] >= 0 ? T.green : T.red;
+    ctx.font = "bold 10px monospace";
+    ctx.fillText(`$${eq[eq.length - 1] >= 0 ? "+" : ""}${eq[eq.length - 1].toFixed(0)}`, w - pad - 2, pad + 10);
+  }, [showPerfPanel, extStats]);
   // CSV export
   const exportCSV = useCallback(() => {
     const headers = ["ID","Side","EntryTime","ExitTime","EntryPrice","ExitPrice","StopPrice","StopDist","TP1","SignalScore","Regime","HTFBias","HTFStrength","ExitType","PnL","C1PnL","C2PnL","RMultiple","MFE","MAE","HoldBars","Compliant"];
@@ -1232,6 +1334,7 @@ function NQForensicVisualizer() {
               { label: "VP", active: showVolProfile, toggle: () => setShowVolProfile(v => !v), color: T.blue },
               { label: "SESS", active: showSessions, toggle: () => setShowSessions(v => !v), color: T.amber },
               { label: "A/B", active: abMode, toggle: () => { setAbMode(v => !v); setAbSplitIndex(Math.floor(filteredTrades.length / 2)); }, color: T.purple },
+              { label: "PERF", active: showPerfPanel, toggle: () => setShowPerfPanel(v => !v), color: T.cyan },
             ].map(b => (
               <button key={b.label} onClick={b.toggle} style={{
                 background: b.active ? T.bgActive : "transparent",
@@ -1336,6 +1439,81 @@ function NQForensicVisualizer() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: s.color }}>{s.value}</div>
                 </div>
               ))}
+              <div onClick={() => setShowPerfPanel(v => !v)} style={{ padding: "6px 10px", background: showPerfPanel ? T.bgActive : T.bgCard, textAlign: "center", cursor: "pointer", minWidth: 50 }}>
+                <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 1, marginBottom: 2 }}>PERF</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: showPerfPanel ? T.cyan : T.textMuted }}>{showPerfPanel ? "▼" : "▶"}</div>
+              </div>
+            </div>
+          )}
+          {/* ── PERFORMANCE PANEL */}
+          {showPerfPanel && extStats && (
+            <div style={{ borderTop: `1px solid ${T.border}`, background: T.bgPanel, maxHeight: 340, overflow: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                {/* Left: Equity Curve + Streaks */}
+                <div style={{ borderRight: `1px solid ${T.border}` }}>
+                  <div style={{ padding: "6px 10px 2px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>EQUITY CURVE</div>
+                  <div style={{ padding: "0 6px 6px" }}>
+                    <canvas ref={equityRef} style={{ display: "block", width: "100%", borderRadius: 4 }} />
+                  </div>
+                  {/* Streak visualization */}
+                  <div style={{ padding: "4px 10px 8px" }}>
+                    <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2, marginBottom: 4 }}>WIN/LOSS STREAKS</div>
+                    <div style={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      {extStats.streaks.map((s, i) => (
+                        <div key={i} style={{
+                          width: Math.max(4, Math.min(20, s.len * 5)),
+                          height: Math.max(6, s.len * 6),
+                          background: s.win ? T.green : T.red,
+                          borderRadius: 2, opacity: 0.7,
+                          position: "relative",
+                        }} title={`${s.win ? "Win" : "Loss"} x${s.len}`}>
+                          {s.len >= 3 && <span style={{ position: "absolute", top: -10, left: 0, fontSize: 7, color: s.win ? T.green : T.red }}>{s.len}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* Right: Extended Stats + Heatmap */}
+                <div>
+                  <div style={{ padding: "6px 10px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>EXTENDED STATS</div>
+                  <div style={{ padding: "0 10px 6px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 12px", fontSize: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max DD</span><span style={{ color: T.red, fontWeight: 600 }}>${extStats.maxDD.toFixed(0)}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Sharpe</span><span style={{ color: T.textBright, fontWeight: 600 }}>{extStats.sharpe}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max Win Run</span><span style={{ color: T.green }}>{extStats.maxConsecWin}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max Loss Run</span><span style={{ color: T.red }}>{extStats.maxConsecLoss}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Best</span><span style={{ color: T.green }}>+${extStats.bestTrade.pnl.toFixed(0)} #{extStats.bestTrade.id}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Worst</span><span style={{ color: T.red }}>${extStats.worstTrade.pnl.toFixed(0)} #{extStats.worstTrade.id}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Avg Hold</span><span style={{ color: T.textBright }}>{extStats.avgHold.toFixed(0)} bars</span></div>
+                  </div>
+                  {/* Hour/Day Heatmap */}
+                  <div style={{ padding: "4px 10px 8px" }}>
+                    <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2, marginBottom: 4 }}>PNL HEATMAP (DAY × HOUR)</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "28px repeat(11, 1fr)", gap: 1, fontSize: 7 }}>
+                      <span></span>
+                      {[8,9,10,11,12,13,14,15,16,17,18].map(h => (
+                        <span key={h} style={{ color: T.textMuted, textAlign: "center" }}>{h}</span>
+                      ))}
+                      {["Mon","Tue","Wed","Thu","Fri"].map(day => (
+                        <React.Fragment key={day}>
+                          <span style={{ color: T.textMuted, fontSize: 7 }}>{day}</span>
+                          {[8,9,10,11,12,13,14,15,16,17,18].map(hour => {
+                            const cell = extStats.heatmap[`${day}-${hour}`];
+                            if (!cell) return <span key={hour} style={{ background: T.bgCard, borderRadius: 2, height: 14 }}></span>;
+                            const intensity = Math.min(1, Math.abs(cell.pnl) / 200);
+                            const bg = cell.pnl >= 0 ? `rgba(0, 192, 135, ${0.1 + intensity * 0.5})` : `rgba(229, 51, 75, ${0.1 + intensity * 0.5})`;
+                            return (
+                              <span key={hour} style={{ background: bg, borderRadius: 2, height: 14, display: "flex", alignItems: "center", justifyContent: "center", color: T.textWhite, fontSize: 6 }}
+                                title={`${day} ${hour}:00 — ${cell.count} trades, $${cell.pnl.toFixed(0)}`}>
+                                {cell.count}
+                              </span>
+                            );
+                          })}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
