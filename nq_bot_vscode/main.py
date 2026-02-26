@@ -354,7 +354,7 @@ class TradingOrchestrator:
             if timeframe in HTF_TIMEFRAMES:
                 self.process_htf_bar(timeframe, bar_data)
                 htf_bars_count += 1
-            elif timeframe in EXECUTION_TIMEFRAMES or timeframe == execution_tf:
+            elif timeframe == execution_tf:
                 exec_bar = bardata_to_bar(bar_data)
                 result = await self.process_bar(exec_bar)
                 exec_bars_count += 1
