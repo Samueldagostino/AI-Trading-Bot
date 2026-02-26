@@ -21,147 +21,45 @@ const T = {
   crosshair: "#3b82f650",
   selection: "#3b82f620",
 };
-// ── SYNTHETIC DATA GENERATION ─────────────────────────────────
-// Matches your NQ HC filter profile: 62 trades, PF~2.35, etc.
-function generateMarketData(startDate, days, intervalMin = 5) {
-  const candles = [];
-  let price = 21500;
-  const barsPerDay = Math.floor((23 * 60) / intervalMin); // NQ trades ~23hrs
-  const d = new Date(startDate);
-  for (let day = 0; day < days; day++) {
-    const dayOfWeek = d.getDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) { d.setDate(d.getDate() + 1); continue; }
-    const dayStart = new Date(d);
-    dayStart.setHours(18, 0, 0, 0); // NQ opens 6PM ET prior day
-    const trendBias = (Math.random() - 0.48) * 0.3;
-    const volatility = 8 + Math.random() * 12;
-    for (let bar = 0; bar < barsPerDay; bar++) {
-      const ts = new Date(dayStart.getTime() + bar * intervalMin * 60000);
-      const hour = ts.getHours();
-      const min = ts.getMinutes();
-      // Skip maintenance window 4:30-6:00 PM ET
-      if ((hour === 16 && min >= 30) || hour === 17 || (hour === 18 && min === 0)) continue;
-      const sessionVol = (hour >= 9 && hour <= 11) ? 1.8 : (hour >= 14 && hour <= 16) ? 1.4 : 0.7;
-      const move = (Math.random() - 0.5 + trendBias) * volatility * sessionVol;
-      const o = price;
-      const h = o + Math.abs(move) + Math.random() * volatility * 0.5;
-      const l = o - Math.abs(move) - Math.random() * volatility * 0.5;
-      const c = o + move;
-      const v = Math.floor((500 + Math.random() * 2000) * sessionVol);
-      candles.push({
-        time: ts.getTime(),
-        open: Math.round(o * 100) / 100,
-        high: Math.round(Math.max(o, c, h) * 100) / 100,
-        low: Math.round(Math.min(o, c, l) * 100) / 100,
-        close: Math.round(c * 100) / 100,
-        volume: v,
-      });
-      price = c;
-    }
-    d.setDate(d.getDate() + 1);
-  }
-  return candles;
-}
-function generateTrades(candles, count = 62) {
-  const trades = [];
-  const regimes = ["trending_up", "trending_down", "ranging", "unknown"];
-  const regimeWeights = [0.34, 0.19, 0.16, 0.31];
-  const htfBiases = ["long", "short", "neutral"];
-  const exitTypes = ["pt1_partial", "trailing_stop", "stop_loss", "pt2_target", "be_plus"];
-  const exitWeights = [0.25, 0.30, 0.20, 0.15, 0.10];
-  const rthCandles = candles.filter(c => {
-    const h = new Date(c.time).getHours();
-    return h >= 9 && h <= 15;
-  });
-  const step = Math.floor(rthCandles.length / (count + 5));
-  for (let i = 0; i < count; i++) {
-    const idx = 20 + i * step + Math.floor(Math.random() * Math.min(step * 0.5, 10));
-    if (idx >= rthCandles.length - 30) break;
-    const entryCandle = rthCandles[idx];
-    const side = Math.random() > 0.48 ? "long" : "short";
-    const entryPrice = entryCandle.close;
-    const signalScore = 0.75 + Math.random() * 0.23;
-    const stopDist = 12 + Math.random() * 18; // 12-30pts, HC compliant
-    const tp1Dist = stopDist * 1.5;
-    const tp2Dist = stopDist * 3;
-    const stopPrice = side === "long" ? entryPrice - stopDist : entryPrice + stopDist;
-    const tp1Price = side === "long" ? entryPrice + tp1Dist : entryPrice - tp1Dist;
-    const tp2Price = side === "long" ? entryPrice + tp2Dist : entryPrice - tp2Dist;
-    // Pick regime
-    let r = Math.random(), cumW = 0, regime = regimes[3];
-    for (let ri = 0; ri < regimes.length; ri++) {
-      cumW += regimeWeights[ri]; if (r < cumW) { regime = regimes[ri]; break; }
-    }
-    // Pick exit type
-    r = Math.random(); cumW = 0; let exitType = exitTypes[0];
-    for (let ei = 0; ei < exitTypes.length; ei++) {
-      cumW += exitWeights[ei]; if (r < cumW) { exitType = exitTypes[ei]; break; }
-    }
-    const isWin = exitType !== "stop_loss";
-    const holdBars = 5 + Math.floor(Math.random() * 40);
-    const exitIdx = Math.min(idx + holdBars, rthCandles.length - 1);
-    const exitCandle = rthCandles[exitIdx];
-    let exitPrice, pnl, c1Pnl, c2Pnl;
-    const ptPerDollar = 2; // MNQ $2/point
-    if (exitType === "stop_loss") {
-      exitPrice = stopPrice + (Math.random() - 0.5) * 2;
-      pnl = side === "long" ? (exitPrice - entryPrice) * ptPerDollar * 2 : (entryPrice - exitPrice) * ptPerDollar * 2;
-      c1Pnl = pnl / 2; c2Pnl = pnl / 2;
-    } else if (exitType === "pt1_partial") {
-      const c1Exit = tp1Price + (Math.random() - 0.5) * 1;
-      const c2Exit = entryPrice + (side === "long" ? 1 : -1) * stopDist * (0.5 + Math.random() * 1.5);
-      c1Pnl = (side === "long" ? c1Exit - entryPrice : entryPrice - c1Exit) * ptPerDollar;
-      c2Pnl = (side === "long" ? c2Exit - entryPrice : entryPrice - c2Exit) * ptPerDollar;
-      exitPrice = c2Exit; pnl = c1Pnl + c2Pnl;
-    } else if (exitType === "pt2_target") {
-      const c1Exit = tp1Price;
-      c1Pnl = (side === "long" ? c1Exit - entryPrice : entryPrice - c1Exit) * ptPerDollar;
-      exitPrice = tp2Price + (Math.random() - 0.5) * 3;
-      c2Pnl = (side === "long" ? exitPrice - entryPrice : entryPrice - exitPrice) * ptPerDollar;
-      pnl = c1Pnl + c2Pnl;
-    } else if (exitType === "trailing_stop") {
-      const mfe = stopDist * (1.5 + Math.random() * 2);
-      exitPrice = side === "long" ? entryPrice + mfe * 0.6 : entryPrice - mfe * 0.6;
-      c1Pnl = tp1Dist * ptPerDollar;
-      c2Pnl = (side === "long" ? exitPrice - entryPrice : entryPrice - exitPrice) * ptPerDollar;
-      pnl = c1Pnl + c2Pnl;
-    } else {
-      exitPrice = entryPrice + (side === "long" ? 2 : -2);
-      c1Pnl = 2 * ptPerDollar; c2Pnl = 2 * ptPerDollar;
-      pnl = c1Pnl + c2Pnl;
-    }
-    const slippage = Math.round((0.25 + Math.random() * 1.5) * 100) / 100;
-    pnl = Math.round((pnl - slippage) * 100) / 100;
-    const mfe = Math.abs(stopDist * (0.5 + Math.random() * 3));
-    const mae = Math.abs(stopDist * (0.1 + Math.random() * 0.8));
-    trades.push({
-      id: i + 1,
-      entryTime: entryCandle.time,
-      exitTime: exitCandle.time,
-      side,
-      qty: 2,
-      entryPrice: Math.round(entryPrice * 100) / 100,
-      exitPrice: Math.round(exitPrice * 100) / 100,
-      stopPrice: Math.round(stopPrice * 100) / 100,
-      tp1Price: Math.round(tp1Price * 100) / 100,
-      tp2Price: Math.round(tp2Price * 100) / 100,
-      stopDist: Math.round(stopDist * 100) / 100,
-      signalScore: Math.round(signalScore * 1000) / 1000,
-      regime,
-      htfBias: htfBiases[Math.floor(Math.random() * 3)],
-      exitType,
-      pnl,
-      c1Pnl: Math.round(c1Pnl * 100) / 100,
-      c2Pnl: Math.round(c2Pnl * 100) / 100,
-      slippage,
-      rMultiple: Math.round((pnl / (stopDist * ptPerDollar * 2)) * 100) / 100,
-      mfe: Math.round(mfe * 100) / 100,
-      mae: Math.round(mae * 100) / 100,
-      holdBars,
-      isCompliant: true,
-    });
-  }
-  return trades;
+// ── DATA LOADING ──────────────────────────────────────────────
+// Loads viz_data.json produced by dashboard/data_adapter.py
+// Expected format: { candles: [{time,open,high,low,close,volume},...], trades: [{id,entryTime,...},...] }
+function loadVizData(jsonData) {
+  const candles = (jsonData.candles || []).map(c => ({
+    time: c.time,
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+    volume: c.volume || 0,
+  }));
+  const trades = (jsonData.trades || []).map((t, i) => ({
+    id: t.id || i + 1,
+    entryTime: t.entryTime,
+    exitTime: t.exitTime,
+    side: t.side || "long",
+    qty: t.qty || 2,
+    entryPrice: t.entryPrice || 0,
+    exitPrice: t.exitPrice || 0,
+    stopPrice: t.stopPrice || 0,
+    tp1Price: t.tp1Price || 0,
+    tp2Price: t.tp2Price || 0,
+    stopDist: t.stopDist || 0,
+    signalScore: t.signalScore || 0,
+    regime: t.regime || "unknown",
+    htfBias: t.htfBias || "neutral",
+    exitType: t.exitType || "stop_loss",
+    pnl: t.pnl || 0,
+    c1Pnl: t.c1Pnl || 0,
+    c2Pnl: t.c2Pnl || 0,
+    slippage: t.slippage || 0,
+    rMultiple: t.rMultiple || 0,
+    mfe: t.mfe || 0,
+    mae: t.mae || 0,
+    holdBars: t.holdBars || 0,
+    isCompliant: t.isCompliant !== undefined ? t.isCompliant : true,
+  }));
+  return { candles, trades };
 }
 // ── UTILITIES ─────────────────────────────────────────────────
 function formatPrice(p) { return p.toFixed(2); }
@@ -188,6 +86,9 @@ export default function NQForensicVisualizer() {
   const [candles, setCandles] = useState([]);
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [dataSource, setDataSource] = useState(""); // "file:xyz" or "fetch" or "drop"
+  const [loadError, setLoadError] = useState(null);
+  const fileInputRef = useRef(null);
   // View state
   const [viewStart, setViewStart] = useState(0);
   const [viewEnd, setViewEnd] = useState(200);
@@ -214,16 +115,68 @@ export default function NQForensicVisualizer() {
   const TIME_AXIS_H = 28;
   const MIN_CANDLE_W = 3;
   const MAX_CANDLE_W = 24;
-  // Init data
-  useEffect(() => {
-    const c = generateMarketData("2026-01-06", 40, 5);
-    const t = generateTrades(c, 62);
+  // Load data from viz_data.json or accept file upload
+  const applyData = useCallback((jsonData, source) => {
+    const { candles: c, trades: t } = loadVizData(jsonData);
+    if (c.length === 0) {
+      setLoadError("No candle data found in file");
+      return;
+    }
     setCandles(c);
     setTrades(t);
     setViewStart(Math.max(0, c.length - 250));
     setViewEnd(c.length);
+    setDataSource(source);
+    setLoadError(null);
     setLoading(false);
+    setSelectedTrade(null);
   }, []);
+  const handleFileUpload = useCallback((file) => {
+    if (!file) return;
+    setLoading(true);
+    setLoadError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        applyData(data, `file:${file.name}`);
+      } catch (err) {
+        setLoadError(`Failed to parse ${file.name}: ${err.message}`);
+        setLoading(false);
+      }
+    };
+    reader.onerror = () => {
+      setLoadError(`Failed to read ${file.name}`);
+      setLoading(false);
+    };
+    reader.readAsText(file);
+  }, [applyData]);
+  // Init: try to fetch viz_data.json from same directory, fall back to waiting for upload
+  useEffect(() => {
+    fetch("viz_data.json")
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(data => applyData(data, "fetch:viz_data.json"))
+      .catch(() => {
+        // No pre-built file available — wait for drag-drop
+        setLoading(false);
+        setLoadError(null);
+      });
+  }, [applyData]);
+  // Drag-drop handler for the whole page
+  useEffect(() => {
+    const onDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
+    const onDrop = (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file && file.name.endsWith(".json")) handleFileUpload(file);
+    };
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, [handleFileUpload]);
   // Filtered trades
   const filteredTrades = useMemo(() => {
     return trades.filter(t => {
@@ -659,7 +612,29 @@ export default function NQForensicVisualizer() {
   if (loading) {
     return (
       <div style={{ background: T.bg, color: T.text, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'SF Mono', monospace" }}>
-        <div>Generating NQ market data & trade overlays...</div>
+        <div>Loading viz data...</div>
+      </div>
+    );
+  }
+  // No data loaded yet — show upload prompt
+  if (candles.length === 0) {
+    return (
+      <div style={{ background: T.bg, color: T.text, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'SF Mono', monospace", flexDirection: "column", gap: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: T.textWhite, letterSpacing: 1 }}>NQ FORENSIC VISUALIZER</div>
+        <div style={{ color: T.textMuted, fontSize: 12, maxWidth: 440, textAlign: "center", lineHeight: 1.6 }}>
+          Drop a <span style={{ color: T.blue }}>viz_data.json</span> file here, or click below to select one.
+          <br/>Generate it with: <span style={{ color: T.textBright }}>python -m dashboard.data_adapter --help</span>
+        </div>
+        {loadError && <div style={{ color: T.red, fontSize: 11 }}>{loadError}</div>}
+        <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }}
+          onChange={e => handleFileUpload(e.target.files[0])} />
+        <button onClick={() => fileInputRef.current?.click()} style={{
+          background: T.bgCard, color: T.textBright, border: `1px solid ${T.borderLight}`,
+          padding: "8px 24px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "inherit",
+        }}>Select viz_data.json</button>
+        <div style={{ color: T.textMuted, fontSize: 9, marginTop: 8 }}>
+          Or place viz_data.json alongside this page and refresh
+        </div>
       </div>
     );
   }
@@ -685,6 +660,15 @@ export default function NQForensicVisualizer() {
                 border: `1px solid ${timeframe === tf ? T.borderLight : "transparent"}`, padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 10,
               }}>{tf}</button>
             ))}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }}
+              onChange={e => { handleFileUpload(e.target.files[0]); e.target.value = ""; }} />
+            <button onClick={() => fileInputRef.current?.click()} style={{
+              background: "transparent", color: T.textMuted, border: `1px solid ${T.border}`,
+              padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+            }}>LOAD JSON</button>
+            {dataSource && <span style={{ color: T.textMuted, fontSize: 8 }}>{dataSource}</span>}
           </div>
         </div>
         {hoveredCandle && (
@@ -848,7 +832,7 @@ export default function NQForensicVisualizer() {
               <span><span style={{ color: T.red }}>●</span> Stop</span>
               <span><span style={{ color: T.amber }}>●</span> BE+</span>
             </div>
-            <div style={{ marginTop: 4, color: T.textMuted, fontSize: 8 }}>Scroll to zoom · Drag to pan · Click trade to focus</div>
+            <div style={{ marginTop: 4, color: T.textMuted, fontSize: 8 }}>Scroll to zoom · Drag to pan · Click trade to focus · Drop JSON to load</div>
           </div>
         </div>
       </div>
