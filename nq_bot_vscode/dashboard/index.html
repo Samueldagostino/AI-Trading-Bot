@@ -931,7 +931,7 @@ function NQForensicVisualizer() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const trade = findTradeAt(x, y);
-    if (trade) { focusTrade(trade); e.stopPropagation(); }
+    if (trade) { focusTrade(trade); } else { setSelectedTrade(null); }
   }, [findTradeAt, focusTrade]);
   const handleMouseDown = useCallback((e) => {
     isDragging.current = true;
@@ -972,6 +972,79 @@ function NQForensicVisualizer() {
     setViewStart(newStart);
     setViewEnd(newEnd);
   }, [candles]);
+  // Double-click to reset zoom
+  const handleDoubleClick = useCallback(() => {
+    setViewStart(Math.max(0, candles.length - 250));
+    setViewEnd(candles.length);
+    setSelectedTrade(null);
+  }, [candles]);
+  // Navigate to prev/next trade
+  const navigateTrade = useCallback((dir) => {
+    if (filteredTrades.length === 0) return;
+    if (!selectedTrade) {
+      focusTrade(filteredTrades[dir > 0 ? 0 : filteredTrades.length - 1]);
+    } else {
+      const curIdx = filteredTrades.findIndex(t => t.id === selectedTrade.id);
+      const nextIdx = curIdx + dir;
+      if (nextIdx >= 0 && nextIdx < filteredTrades.length) {
+        focusTrade(filteredTrades[nextIdx]);
+      }
+    }
+  }, [filteredTrades, selectedTrade, focusTrade]);
+  // Regime subpane click — toggle filter by regime at clicked position
+  const handleRegimeClick = useCallback((e) => {
+    const rect = regimeRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const chartW = getChartWidth();
+    const count = viewEnd - viewStart;
+    const idx = Math.floor((x / chartW) * count) + viewStart;
+    if (idx >= 0 && idx < candles.length) {
+      const regime = regimePerCandle[idx];
+      if (regime) {
+        setFilterRegime(prev => prev === regime ? "all" : regime);
+      }
+    }
+  }, [candles, viewStart, viewEnd, getChartWidth, regimePerCandle]);
+  // HTF subpane click — set strength filter threshold from Y position
+  const handleHtfClick = useCallback((e) => {
+    const rect = htfRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const y = e.clientY - rect.top;
+    const strength = Math.max(0, Math.min(1, (HTF_H - y - 4) / (HTF_H - 8)));
+    if (Math.abs(strength - filterHtfMinStrength) < 0.05) {
+      setFilterHtfMinStrength(0);
+    } else {
+      setFilterHtfMinStrength(parseFloat(strength.toFixed(2)));
+    }
+  }, [filterHtfMinStrength]);
+  // Reset all filters
+  const resetFilters = useCallback(() => {
+    setFilterRegime("all");
+    setFilterSide("all");
+    setFilterExit("all");
+    setFilterMinScore(0.75);
+    setFilterHtfMinStrength(0);
+  }, []);
+  const hasActiveFilters = filterRegime !== "all" || filterSide !== "all" || filterExit !== "all" || filterMinScore !== 0.75 || filterHtfMinStrength > 0;
+  // Keyboard navigation
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+      if (e.key === "Escape") { setSelectedTrade(null); return; }
+      if (e.key === "Home") {
+        setViewStart(Math.max(0, candles.length - 250));
+        setViewEnd(candles.length);
+        return;
+      }
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        navigateTrade(e.key === "ArrowRight" ? 1 : -1);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [candles, navigateTrade]);
   // Stats
   const stats = useMemo(() => {
     const ft = filteredTrades;
@@ -1086,20 +1159,50 @@ function NQForensicVisualizer() {
           <div style={{ position: "relative", cursor: isDragging.current ? "grabbing" : "crosshair" }}
             onMouseMove={handleMouseMove} onMouseDown={handleMouseDown}
             onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeave}
-            onWheel={handleWheel}
+            onWheel={handleWheel} onClick={handleChartClick} onDoubleClick={handleDoubleClick}
           >
             <canvas ref={chartRef} style={{ display: "block" }} />
+            {/* Hover tooltip */}
+            {hoveredTrade && !selectedTrade && (
+              <div style={{
+                position: "fixed", left: tooltipPos.x + 14, top: tooltipPos.y - 8,
+                background: T.bgCard, border: `1px solid ${T.borderLight}`,
+                borderRadius: 6, padding: "8px 10px", fontSize: 10, zIndex: 100,
+                pointerEvents: "none", minWidth: 190, boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ color: hoveredTrade.side === "long" ? T.green : T.red, fontWeight: 700 }}>
+                    {hoveredTrade.side.toUpperCase()} #{hoveredTrade.id}
+                  </span>
+                  <span style={{ color: hoveredTrade.pnl >= 0 ? T.green : T.red, fontWeight: 700 }}>
+                    ${hoveredTrade.pnl >= 0 ? "+" : ""}{hoveredTrade.pnl.toFixed(2)}
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 10px", color: T.textMuted }}>
+                  <span>Entry <span style={{ color: T.textBright }}>{formatPrice(hoveredTrade.entryPrice)}</span></span>
+                  <span>Stop <span style={{ color: T.red }}>{hoveredTrade.stopDist.toFixed(1)}pt</span></span>
+                  <span>Score <span style={{ color: T.blue }}>{hoveredTrade.signalScore.toFixed(2)}</span></span>
+                  <span>R <span style={{ color: hoveredTrade.rMultiple > 0 ? T.green : T.red }}>{hoveredTrade.rMultiple > 0 ? "+" : ""}{hoveredTrade.rMultiple}R</span></span>
+                  <span>Regime <span style={{ color: regimeColor(hoveredTrade.regime) }}>{hoveredTrade.regime}</span></span>
+                  <span>HTF <span style={{ color: T.textBright }}>{hoveredTrade.htfBias}</span></span>
+                </div>
+                <div style={{ marginTop: 4, color: exitColor(hoveredTrade.exitType), fontSize: 9, fontWeight: 600 }}>
+                  {hoveredTrade.exitType.replace(/_/g, " ").toUpperCase()}
+                </div>
+                <div style={{ marginTop: 2, fontSize: 8, color: T.textMuted }}>Click to inspect · Dbl-click reset</div>
+              </div>
+            )}
           </div>
           {/* Volume canvas */}
           <div style={{ borderTop: `1px solid ${T.border}` }}>
             <canvas ref={volRef} style={{ display: "block" }} />
           </div>
-          {/* Regime subpane */}
-          <div style={{ borderTop: `1px solid ${T.border}` }}>
+          {/* Regime subpane — click to filter */}
+          <div style={{ borderTop: `1px solid ${T.border}`, cursor: "pointer" }} onClick={handleRegimeClick} title="Click to filter by regime">
             <canvas ref={regimeRef} style={{ display: "block" }} />
           </div>
-          {/* HTF Bias subpane */}
-          <div style={{ borderTop: `1px solid ${T.border}` }}>
+          {/* HTF Bias subpane — click to set strength threshold */}
+          <div style={{ borderTop: `1px solid ${T.border}`, cursor: "pointer" }} onClick={handleHtfClick} title="Click to set HTF strength threshold">
             <canvas ref={htfRef} style={{ display: "block" }} />
           </div>
           {/* Signal score subpane */}
@@ -1163,12 +1266,34 @@ function NQForensicVisualizer() {
                 style={{ flex: 1, accentColor: T.blue }} />
               <span style={{ fontSize: 11, color: T.textBright, fontWeight: 600, minWidth: 36 }}>{filterMinScore.toFixed(2)}</span>
             </div>
+            {htfBiasData.length > 0 && (
+              <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 10, color: T.textMuted }}>HTF ≥</span>
+                <input type="range" min="0" max="0.80" step="0.05" value={filterHtfMinStrength}
+                  onChange={e => setFilterHtfMinStrength(parseFloat(e.target.value))}
+                  style={{ flex: 1, accentColor: T.cyan }} />
+                <span style={{ fontSize: 11, color: T.textBright, fontWeight: 600, minWidth: 36 }}>{filterHtfMinStrength.toFixed(2)}</span>
+              </div>
+            )}
+            {hasActiveFilters && (
+              <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 9, color: T.amber, fontWeight: 600, letterSpacing: 1 }}>FILTERED</span>
+                <button onClick={resetFilters} style={{
+                  background: "transparent", color: T.textMuted, border: `1px solid ${T.border}`,
+                  padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+                }}>RESET</button>
+              </div>
+            )}
           </div>
           {/* Selected trade detail */}
           {selectedTrade && (
             <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, background: T.bgCard }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: T.textWhite, letterSpacing: 1 }}>TRADE #{selectedTrade.id}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button onClick={() => navigateTrade(-1)} style={{ background: T.bgHover, border: `1px solid ${T.border}`, color: T.textMuted, cursor: "pointer", fontSize: 10, padding: "1px 5px", borderRadius: 3 }}>&#9664;</button>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: T.textWhite, letterSpacing: 1 }}>TRADE #{selectedTrade.id}</span>
+                  <button onClick={() => navigateTrade(1)} style={{ background: T.bgHover, border: `1px solid ${T.border}`, color: T.textMuted, cursor: "pointer", fontSize: 10, padding: "1px 5px", borderRadius: 3 }}>&#9654;</button>
+                </div>
                 <button onClick={() => setSelectedTrade(null)} style={{ background: "transparent", border: "none", color: T.textMuted, cursor: "pointer", fontSize: 12 }}>✕</button>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 10 }}>
@@ -1241,7 +1366,7 @@ function NQForensicVisualizer() {
               <span><span style={{ color: T.red }}>●</span> Stop</span>
               <span><span style={{ color: T.amber }}>●</span> BE+</span>
             </div>
-            <div style={{ marginTop: 4, color: T.textMuted, fontSize: 8 }}>Scroll to zoom · Drag to pan · Click trade to focus · Drop JSON to load</div>
+            <div style={{ marginTop: 4, color: T.textMuted, fontSize: 8 }}>Scroll zoom · Drag pan · Click trade · Dbl-click reset · ←→ nav · Esc deselect · Drop JSON</div>
           </div>
         </div>
       </div>
