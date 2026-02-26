@@ -85,12 +85,23 @@ def detect_1m_csv(directory: str) -> Optional[str]:
     return str(largest)
 
 
+def _looks_like_timestamp(value: str) -> bool:
+    """Check if a string looks like a timestamp rather than a column name."""
+    v = value.strip()
+    # Starts with a digit → likely data, not a header
+    if v and v[0].isdigit():
+        return True
+    return False
+
+
 def detect_csv_format(filepath: str) -> Dict:
     """Auto-detect CSV format: column names, delimiter, timestamp format.
 
+    Handles both files with headers and headerless files (like FirstRate).
+
     Returns dict with keys:
-      delimiter, time_col, open_col, high_col, low_col, close_col, volume_col,
-      timestamp_format ('unix', 'iso', 'us', 'standard')
+      delimiter, time (col index), open, high, low, close, volume,
+      ts_format ('unix', 'iso', 'us', 'standard'), has_header (bool)
     """
     with open(filepath, "r", encoding="utf-8-sig") as f:
         sample = f.read(4096)
@@ -101,35 +112,48 @@ def detect_csv_format(filepath: str) -> Dict:
         delimiter = "\t"
 
     lines = sample.strip().split("\n")
-    header_line = lines[0]
-    headers = [h.strip().lower() for h in header_line.split(delimiter)]
+    first_line = lines[0]
+    fields = [h.strip().lower() for h in first_line.split(delimiter)]
 
-    # Map columns
-    col_map = {}
+    # Detect whether first row is a header or data
+    # If the first field looks like a timestamp/number, there's no header
+    has_header = not _looks_like_timestamp(fields[0])
 
-    time_names = ["time", "date", "datetime", "timestamp", "date_time"]
-    open_names = ["open", "o"]
-    high_names = ["high", "h"]
-    low_names = ["low", "l"]
-    close_names = ["close", "c", "last"]
-    vol_names = ["volume", "vol", "v"]
+    col_map = {"has_header": has_header}
 
-    for std, candidates in [
-        ("time", time_names),
-        ("open", open_names),
-        ("high", high_names),
-        ("low", low_names),
-        ("close", close_names),
-        ("volume", vol_names),
-    ]:
-        for c in candidates:
-            if c in headers:
-                col_map[std] = headers.index(c)
-                break
+    if has_header:
+        time_names = ["time", "date", "datetime", "timestamp", "date_time"]
+        open_names = ["open", "o"]
+        high_names = ["high", "h"]
+        low_names = ["low", "l"]
+        close_names = ["close", "c", "last"]
+        vol_names = ["volume", "vol", "v"]
+
+        for std, candidates in [
+            ("time", time_names),
+            ("open", open_names),
+            ("high", high_names),
+            ("low", low_names),
+            ("close", close_names),
+            ("volume", vol_names),
+        ]:
+            for c in candidates:
+                if c in fields:
+                    col_map[std] = fields.index(c)
+                    break
+    else:
+        # Headerless: assume positional — datetime,open,high,low,close,volume
+        col_map["time"] = 0
+        col_map["open"] = 1
+        col_map["high"] = 2
+        col_map["low"] = 3
+        col_map["close"] = 4
+        col_map["volume"] = 5
 
     # Detect timestamp format from first data row
-    if len(lines) > 1:
-        first_row = lines[1].split(delimiter)
+    data_row_idx = 1 if has_header else 0
+    if len(lines) > data_row_idx:
+        first_row = lines[data_row_idx].split(delimiter)
         time_val = first_row[col_map.get("time", 0)].strip()
 
         # Unix timestamp (integer or float)
@@ -148,11 +172,6 @@ def detect_csv_format(filepath: str) -> Dict:
                 col_map["ts_format"] = "standard"
 
     col_map["delimiter"] = delimiter
-
-    # Get original header names for CSV reading
-    orig_headers = [h.strip() for h in header_line.split(delimiter)]
-    col_map["orig_headers"] = orig_headers
-
     return col_map
 
 
@@ -204,7 +223,8 @@ def load_1m_bars(filepath: str) -> List[Dict]:
 
     with open(filepath, "r", encoding="utf-8-sig") as f:
         reader = csv.reader(f, delimiter=fmt["delimiter"])
-        header = next(reader)  # skip header
+        if fmt.get("has_header", True):
+            next(reader)  # skip header only if present
 
         time_idx = fmt.get("time", 0)
         open_idx = fmt.get("open", 1)
