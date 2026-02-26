@@ -155,6 +155,21 @@ function isMaintenance(ts) {
   const h = d.getHours(), m = d.getMinutes();
   return (h === 16 && m >= 30) || h === 17 || (h === 18 && m === 0);
 }
+function getSession(ts) {
+  const d = new Date(ts);
+  const h = d.getHours(), m = d.getMinutes(), t = h * 60 + m;
+  if (t >= 240 && t < 570) return "premarket";
+  if (t >= 570 && t < 720) return "am_rth";
+  if (t >= 720 && t < 960) return "pm_rth";
+  if (t >= 960 || t < 240) return "off_hours";
+  return "overnight";
+}
+const SESSION_COLORS = {
+  premarket: "#06b6d406", am_rth: "#00c08706", pm_rth: "transparent", off_hours: "#f59e0b06", overnight: "#a855f704",
+};
+const SESSION_LABELS = {
+  premarket: "Pre-Mkt", am_rth: "AM RTH", pm_rth: "PM RTH", off_hours: "Off-Hrs",
+};
 // ── MAIN COMPONENT ────────────────────────────────────────────
 function NQForensicVisualizer() {
   // Data
@@ -189,8 +204,17 @@ function NQForensicVisualizer() {
   const [filterSide, setFilterSide] = useState("all");
   const [filterExit, setFilterExit] = useState("all");
   const [filterMinScore, setFilterMinScore] = useState(0.75);
+  // Phase 4: A/B mode, sort, sessions
+  const [abMode, setAbMode] = useState(false);
+  const [abSplitIndex, setAbSplitIndex] = useState(0);
+  const [sortCol, setSortCol] = useState("id");
+  const [sortDir, setSortDir] = useState(1);
+  const [showSessions, setShowSessions] = useState(false);
+  // Phase 5: Performance panel
+  const [showPerfPanel, setShowPerfPanel] = useState(false);
   // Refs
   const chartRef = useRef(null);
+  const equityRef = useRef(null);
   const volRef = useRef(null);
   const regimeRef = useRef(null);
   const htfRef = useRef(null);
@@ -452,14 +476,33 @@ function NQForensicVisualizer() {
       ctx.textAlign = "right";
       ctx.fillText(formatPrice(p), w - 8, y + 4);
     }
-    // ── Maintenance window shading
-    visibleCandles.forEach((c, i) => {
-      if (isMaintenance(c.time)) {
+    // ── Session shading (replaces simple maintenance shading when enabled)
+    if (showSessions) {
+      let lastSess = "";
+      let sessStart = 0;
+      visibleCandles.forEach((c, i) => {
+        const sess = getSession(c.time);
         const x = (i / count) * chartW;
-        ctx.fillStyle = T.maintenanceShade;
-        ctx.fillRect(x, 0, candleW + 1, CHART_H);
-      }
-    });
+        const bw = chartW / count;
+        if (SESSION_COLORS[sess] && SESSION_COLORS[sess] !== "transparent") {
+          ctx.fillStyle = SESSION_COLORS[sess];
+          ctx.fillRect(x, 0, bw + 1, CHART_H);
+        }
+        if (sess !== lastSess && lastSess !== "" && SESSION_LABELS[sess]) {
+          ctx.fillStyle = T.textMuted; ctx.font = "7px monospace"; ctx.textAlign = "left"; ctx.globalAlpha = 0.5;
+          ctx.fillText(SESSION_LABELS[sess], x + 2, 10); ctx.globalAlpha = 1;
+        }
+        lastSess = sess;
+      });
+    } else {
+      visibleCandles.forEach((c, i) => {
+        if (isMaintenance(c.time)) {
+          const x = (i / count) * chartW;
+          ctx.fillStyle = T.maintenanceShade;
+          ctx.fillRect(x, 0, candleW + 1, CHART_H);
+        }
+      });
+    }
     // ── Day separators
     let lastDay = -1;
     visibleCandles.forEach((c, i) => {
@@ -777,7 +820,7 @@ function NQForensicVisualizer() {
     vctx.moveTo(chartW, 0);
     vctx.lineTo(chartW, VOL_H);
     vctx.stroke();
-  }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, indexToX, getChartWidth, indicators, volumeProfile, showVWAP, showSMA, showATR, showVolProfile]);
+  }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, indexToX, getChartWidth, indicators, volumeProfile, showVWAP, showSMA, showATR, showVolProfile, showSessions]);
   // ── RENDER SUBPANES ──────────────────────────────────────
   useEffect(() => {
     if (visibleCandles.length === 0) return;
@@ -931,7 +974,7 @@ function NQForensicVisualizer() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const trade = findTradeAt(x, y);
-    if (trade) { focusTrade(trade); e.stopPropagation(); }
+    if (trade) { focusTrade(trade); } else { setSelectedTrade(null); }
   }, [findTradeAt, focusTrade]);
   const handleMouseDown = useCallback((e) => {
     isDragging.current = true;
@@ -972,6 +1015,79 @@ function NQForensicVisualizer() {
     setViewStart(newStart);
     setViewEnd(newEnd);
   }, [candles]);
+  // Double-click to reset zoom
+  const handleDoubleClick = useCallback(() => {
+    setViewStart(Math.max(0, candles.length - 250));
+    setViewEnd(candles.length);
+    setSelectedTrade(null);
+  }, [candles]);
+  // Navigate to prev/next trade
+  const navigateTrade = useCallback((dir) => {
+    if (filteredTrades.length === 0) return;
+    if (!selectedTrade) {
+      focusTrade(filteredTrades[dir > 0 ? 0 : filteredTrades.length - 1]);
+    } else {
+      const curIdx = filteredTrades.findIndex(t => t.id === selectedTrade.id);
+      const nextIdx = curIdx + dir;
+      if (nextIdx >= 0 && nextIdx < filteredTrades.length) {
+        focusTrade(filteredTrades[nextIdx]);
+      }
+    }
+  }, [filteredTrades, selectedTrade, focusTrade]);
+  // Regime subpane click — toggle filter by regime at clicked position
+  const handleRegimeClick = useCallback((e) => {
+    const rect = regimeRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const chartW = getChartWidth();
+    const count = viewEnd - viewStart;
+    const idx = Math.floor((x / chartW) * count) + viewStart;
+    if (idx >= 0 && idx < candles.length) {
+      const regime = regimePerCandle[idx];
+      if (regime) {
+        setFilterRegime(prev => prev === regime ? "all" : regime);
+      }
+    }
+  }, [candles, viewStart, viewEnd, getChartWidth, regimePerCandle]);
+  // HTF subpane click — set strength filter threshold from Y position
+  const handleHtfClick = useCallback((e) => {
+    const rect = htfRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const y = e.clientY - rect.top;
+    const strength = Math.max(0, Math.min(1, (HTF_H - y - 4) / (HTF_H - 8)));
+    if (Math.abs(strength - filterHtfMinStrength) < 0.05) {
+      setFilterHtfMinStrength(0);
+    } else {
+      setFilterHtfMinStrength(parseFloat(strength.toFixed(2)));
+    }
+  }, [filterHtfMinStrength]);
+  // Reset all filters
+  const resetFilters = useCallback(() => {
+    setFilterRegime("all");
+    setFilterSide("all");
+    setFilterExit("all");
+    setFilterMinScore(0.75);
+    setFilterHtfMinStrength(0);
+  }, []);
+  const hasActiveFilters = filterRegime !== "all" || filterSide !== "all" || filterExit !== "all" || filterMinScore !== 0.75 || filterHtfMinStrength > 0;
+  // Keyboard navigation
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+      if (e.key === "Escape") { setSelectedTrade(null); return; }
+      if (e.key === "Home") {
+        setViewStart(Math.max(0, candles.length - 250));
+        setViewEnd(candles.length);
+        return;
+      }
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        navigateTrade(e.key === "ArrowRight" ? 1 : -1);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [candles, navigateTrade]);
   // Stats
   const stats = useMemo(() => {
     const ft = filteredTrades;
@@ -990,6 +1106,173 @@ function NQForensicVisualizer() {
       avgWin: wins.length > 0 ? (grossWin / wins.length).toFixed(2) : "0",
       avgLoss: losses.length > 0 ? (grossLoss / losses.length).toFixed(2) : "0",
     };
+  }, [filteredTrades]);
+  // Sorted trades for table
+  const sortedTrades = useMemo(() => {
+    const sorted = [...filteredTrades];
+    const get = (t) => {
+      switch (sortCol) {
+        case "id": return t.id;
+        case "side": return t.side;
+        case "entry": return t.entryPrice;
+        case "stop": return t.stopDist;
+        case "pnl": return t.pnl;
+        case "exit": return t.exitType;
+        case "regime": return t.regime;
+        case "time": return t.entryTime;
+        case "score": return t.signalScore;
+        case "r": return t.rMultiple;
+        default: return t.id;
+      }
+    };
+    sorted.sort((a, b) => {
+      const va = get(a), vb = get(b);
+      if (typeof va === "string") return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    return sorted;
+  }, [filteredTrades, sortCol, sortDir]);
+  // Sort handler
+  const handleSort = useCallback((col) => {
+    if (sortCol === col) { setSortDir(d => -d); }
+    else { setSortCol(col); setSortDir(1); }
+  }, [sortCol]);
+  // A/B mode stats
+  const abStats = useMemo(() => {
+    if (!abMode || filteredTrades.length < 2) return null;
+    const split = Math.max(1, Math.min(filteredTrades.length - 1, abSplitIndex || Math.floor(filteredTrades.length / 2)));
+    const calcStats = (arr) => {
+      if (arr.length === 0) return null;
+      const wins = arr.filter(t => t.pnl > 0);
+      const losses = arr.filter(t => t.pnl <= 0);
+      const totalPnl = arr.reduce((s, t) => s + t.pnl, 0);
+      const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+      const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+      return {
+        count: arr.length,
+        winRate: ((wins.length / arr.length) * 100).toFixed(1),
+        pf: grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : "∞",
+        totalPnl: totalPnl.toFixed(2),
+        avgPnl: (totalPnl / arr.length).toFixed(2),
+      };
+    };
+    return { a: calcStats(filteredTrades.slice(0, split)), b: calcStats(filteredTrades.slice(split)), split };
+  }, [abMode, abSplitIndex, filteredTrades]);
+  // Extended stats for performance panel
+  const extStats = useMemo(() => {
+    const ft = filteredTrades;
+    if (ft.length === 0) return null;
+    const pnls = ft.map(t => t.pnl);
+    const totalPnl = pnls.reduce((s, v) => s + v, 0);
+    // Max drawdown
+    let peak = 0, equity = 0, maxDD = 0;
+    const eqCurve = [0];
+    pnls.forEach(p => {
+      equity += p; eqCurve.push(equity);
+      if (equity > peak) peak = equity;
+      const dd = peak - equity;
+      if (dd > maxDD) maxDD = dd;
+    });
+    // Consecutive wins/losses
+    let maxConsecWin = 0, maxConsecLoss = 0, cw = 0, cl = 0;
+    pnls.forEach(p => {
+      if (p > 0) { cw++; cl = 0; maxConsecWin = Math.max(maxConsecWin, cw); }
+      else { cl++; cw = 0; maxConsecLoss = Math.max(maxConsecLoss, cl); }
+    });
+    // Best/worst
+    const bestTrade = ft.reduce((b, t) => t.pnl > b.pnl ? t : b, ft[0]);
+    const worstTrade = ft.reduce((w, t) => t.pnl < w.pnl ? t : w, ft[0]);
+    // Avg hold bars
+    const avgHold = ft.reduce((s, t) => s + (t.holdBars || 0), 0) / ft.length;
+    // Win/loss streaks array
+    const streaks = [];
+    let streakType = null, streakLen = 0;
+    ft.forEach((t, i) => {
+      const w = t.pnl > 0;
+      if (streakType === null || w !== streakType) {
+        if (streakType !== null) streaks.push({ win: streakType, len: streakLen });
+        streakType = w; streakLen = 1;
+      } else { streakLen++; }
+      if (i === ft.length - 1) streaks.push({ win: streakType, len: streakLen });
+    });
+    // Sharpe-like: mean(pnl) / stdev(pnl)
+    const mean = totalPnl / ft.length;
+    const variance = pnls.reduce((s, p) => s + (p - mean) ** 2, 0) / ft.length;
+    const sharpe = variance > 0 ? (mean / Math.sqrt(variance)).toFixed(2) : "N/A";
+    // Heatmap: PnL by day of week and hour
+    const heatmap = {};
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    ft.forEach(t => {
+      const d = new Date(t.entryTime);
+      const day = days[d.getDay()];
+      const hour = d.getHours();
+      const key = `${day}-${hour}`;
+      if (!heatmap[key]) heatmap[key] = { pnl: 0, count: 0 };
+      heatmap[key].pnl += t.pnl;
+      heatmap[key].count++;
+    });
+    return { eqCurve, maxDD, maxConsecWin, maxConsecLoss, bestTrade, worstTrade, avgHold, streaks, sharpe, heatmap, days };
+  }, [filteredTrades]);
+  // Render equity curve canvas
+  useEffect(() => {
+    if (!showPerfPanel || !extStats || !equityRef.current) return;
+    const canvas = equityRef.current;
+    const w = canvas.parentElement?.offsetWidth || 400;
+    const h = 120;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = T.bg; ctx.fillRect(0, 0, w, h);
+    const eq = extStats.eqCurve;
+    if (eq.length < 2) return;
+    const minE = Math.min(...eq), maxE = Math.max(...eq);
+    const range = maxE - minE || 1;
+    const pad = 6;
+    const chartW = w - pad * 2, chartH = h - pad * 2;
+    // Zero line
+    const zeroY = pad + chartH - ((0 - minE) / range) * chartH;
+    ctx.strokeStyle = T.textMuted; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(pad, zeroY); ctx.lineTo(w - pad, zeroY); ctx.stroke(); ctx.setLineDash([]);
+    // Equity line
+    ctx.beginPath();
+    eq.forEach((v, i) => {
+      const x = pad + (i / (eq.length - 1)) * chartW;
+      const y = pad + chartH - ((v - minE) / range) * chartH;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = T.green; ctx.lineWidth = 1.5; ctx.stroke();
+    // Fill under curve
+    const lastX = pad + chartW;
+    const lastY = pad + chartH - ((eq[eq.length - 1] - minE) / range) * chartH;
+    ctx.lineTo(lastX, zeroY); ctx.lineTo(pad, zeroY); ctx.closePath();
+    ctx.fillStyle = eq[eq.length - 1] >= 0 ? T.greenBg : T.redBg; ctx.fill();
+    // Labels
+    ctx.fillStyle = T.textMuted; ctx.font = "9px monospace"; ctx.textAlign = "left";
+    ctx.fillText(`$${maxE.toFixed(0)}`, pad + 2, pad + 10);
+    ctx.fillText(`$${minE.toFixed(0)}`, pad + 2, h - pad - 2);
+    ctx.textAlign = "right";
+    ctx.fillStyle = eq[eq.length - 1] >= 0 ? T.green : T.red;
+    ctx.font = "bold 10px monospace";
+    ctx.fillText(`$${eq[eq.length - 1] >= 0 ? "+" : ""}${eq[eq.length - 1].toFixed(0)}`, w - pad - 2, pad + 10);
+  }, [showPerfPanel, extStats]);
+  // CSV export
+  const exportCSV = useCallback(() => {
+    const headers = ["ID","Side","EntryTime","ExitTime","EntryPrice","ExitPrice","StopPrice","StopDist","TP1","SignalScore","Regime","HTFBias","HTFStrength","ExitType","PnL","C1PnL","C2PnL","RMultiple","MFE","MAE","HoldBars","Compliant"];
+    const rows = filteredTrades.map(t => [
+      t.id, t.side, new Date(t.entryTime).toISOString(), new Date(t.exitTime).toISOString(),
+      t.entryPrice, t.exitPrice, t.stopPrice, t.stopDist.toFixed(1), t.tp1Price,
+      t.signalScore.toFixed(3), t.regime, t.htfBias, t.htfStrength,
+      t.exitType, t.pnl.toFixed(2), t.c1Pnl.toFixed(2), t.c2Pnl.toFixed(2),
+      t.rMultiple, t.mfe.toFixed(1), t.mae.toFixed(1), t.holdBars, t.isCompliant ? "Y" : "N",
+    ].join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `nq_trades_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
   }, [filteredTrades]);
   if (loading) {
     return (
@@ -1049,6 +1332,9 @@ function NQForensicVisualizer() {
               { label: "SMA", active: showSMA, toggle: () => setShowSMA(v => !v), color: T.sma20 },
               { label: "ATR", active: showATR, toggle: () => setShowATR(v => !v), color: T.blue },
               { label: "VP", active: showVolProfile, toggle: () => setShowVolProfile(v => !v), color: T.blue },
+              { label: "SESS", active: showSessions, toggle: () => setShowSessions(v => !v), color: T.amber },
+              { label: "A/B", active: abMode, toggle: () => { setAbMode(v => !v); setAbSplitIndex(Math.floor(filteredTrades.length / 2)); }, color: T.purple },
+              { label: "PERF", active: showPerfPanel, toggle: () => setShowPerfPanel(v => !v), color: T.cyan },
             ].map(b => (
               <button key={b.label} onClick={b.toggle} style={{
                 background: b.active ? T.bgActive : "transparent",
@@ -1086,20 +1372,50 @@ function NQForensicVisualizer() {
           <div style={{ position: "relative", cursor: isDragging.current ? "grabbing" : "crosshair" }}
             onMouseMove={handleMouseMove} onMouseDown={handleMouseDown}
             onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeave}
-            onWheel={handleWheel}
+            onWheel={handleWheel} onClick={handleChartClick} onDoubleClick={handleDoubleClick}
           >
             <canvas ref={chartRef} style={{ display: "block" }} />
+            {/* Hover tooltip */}
+            {hoveredTrade && !selectedTrade && (
+              <div style={{
+                position: "fixed", left: tooltipPos.x + 14, top: tooltipPos.y - 8,
+                background: T.bgCard, border: `1px solid ${T.borderLight}`,
+                borderRadius: 6, padding: "8px 10px", fontSize: 10, zIndex: 100,
+                pointerEvents: "none", minWidth: 190, boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ color: hoveredTrade.side === "long" ? T.green : T.red, fontWeight: 700 }}>
+                    {hoveredTrade.side.toUpperCase()} #{hoveredTrade.id}
+                  </span>
+                  <span style={{ color: hoveredTrade.pnl >= 0 ? T.green : T.red, fontWeight: 700 }}>
+                    ${hoveredTrade.pnl >= 0 ? "+" : ""}{hoveredTrade.pnl.toFixed(2)}
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 10px", color: T.textMuted }}>
+                  <span>Entry <span style={{ color: T.textBright }}>{formatPrice(hoveredTrade.entryPrice)}</span></span>
+                  <span>Stop <span style={{ color: T.red }}>{hoveredTrade.stopDist.toFixed(1)}pt</span></span>
+                  <span>Score <span style={{ color: T.blue }}>{hoveredTrade.signalScore.toFixed(2)}</span></span>
+                  <span>R <span style={{ color: hoveredTrade.rMultiple > 0 ? T.green : T.red }}>{hoveredTrade.rMultiple > 0 ? "+" : ""}{hoveredTrade.rMultiple}R</span></span>
+                  <span>Regime <span style={{ color: regimeColor(hoveredTrade.regime) }}>{hoveredTrade.regime}</span></span>
+                  <span>HTF <span style={{ color: T.textBright }}>{hoveredTrade.htfBias}</span></span>
+                </div>
+                <div style={{ marginTop: 4, color: exitColor(hoveredTrade.exitType), fontSize: 9, fontWeight: 600 }}>
+                  {hoveredTrade.exitType.replace(/_/g, " ").toUpperCase()}
+                </div>
+                <div style={{ marginTop: 2, fontSize: 8, color: T.textMuted }}>Click to inspect · Dbl-click reset</div>
+              </div>
+            )}
           </div>
           {/* Volume canvas */}
           <div style={{ borderTop: `1px solid ${T.border}` }}>
             <canvas ref={volRef} style={{ display: "block" }} />
           </div>
-          {/* Regime subpane */}
-          <div style={{ borderTop: `1px solid ${T.border}` }}>
+          {/* Regime subpane — click to filter */}
+          <div style={{ borderTop: `1px solid ${T.border}`, cursor: "pointer" }} onClick={handleRegimeClick} title="Click to filter by regime">
             <canvas ref={regimeRef} style={{ display: "block" }} />
           </div>
-          {/* HTF Bias subpane */}
-          <div style={{ borderTop: `1px solid ${T.border}` }}>
+          {/* HTF Bias subpane — click to set strength threshold */}
+          <div style={{ borderTop: `1px solid ${T.border}`, cursor: "pointer" }} onClick={handleHtfClick} title="Click to set HTF strength threshold">
             <canvas ref={htfRef} style={{ display: "block" }} />
           </div>
           {/* Signal score subpane */}
@@ -1123,6 +1439,81 @@ function NQForensicVisualizer() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: s.color }}>{s.value}</div>
                 </div>
               ))}
+              <div onClick={() => setShowPerfPanel(v => !v)} style={{ padding: "6px 10px", background: showPerfPanel ? T.bgActive : T.bgCard, textAlign: "center", cursor: "pointer", minWidth: 50 }}>
+                <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 1, marginBottom: 2 }}>PERF</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: showPerfPanel ? T.cyan : T.textMuted }}>{showPerfPanel ? "▼" : "▶"}</div>
+              </div>
+            </div>
+          )}
+          {/* ── PERFORMANCE PANEL */}
+          {showPerfPanel && extStats && (
+            <div style={{ borderTop: `1px solid ${T.border}`, background: T.bgPanel, maxHeight: 340, overflow: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                {/* Left: Equity Curve + Streaks */}
+                <div style={{ borderRight: `1px solid ${T.border}` }}>
+                  <div style={{ padding: "6px 10px 2px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>EQUITY CURVE</div>
+                  <div style={{ padding: "0 6px 6px" }}>
+                    <canvas ref={equityRef} style={{ display: "block", width: "100%", borderRadius: 4 }} />
+                  </div>
+                  {/* Streak visualization */}
+                  <div style={{ padding: "4px 10px 8px" }}>
+                    <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2, marginBottom: 4 }}>WIN/LOSS STREAKS</div>
+                    <div style={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      {extStats.streaks.map((s, i) => (
+                        <div key={i} style={{
+                          width: Math.max(4, Math.min(20, s.len * 5)),
+                          height: Math.max(6, s.len * 6),
+                          background: s.win ? T.green : T.red,
+                          borderRadius: 2, opacity: 0.7,
+                          position: "relative",
+                        }} title={`${s.win ? "Win" : "Loss"} x${s.len}`}>
+                          {s.len >= 3 && <span style={{ position: "absolute", top: -10, left: 0, fontSize: 7, color: s.win ? T.green : T.red }}>{s.len}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* Right: Extended Stats + Heatmap */}
+                <div>
+                  <div style={{ padding: "6px 10px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>EXTENDED STATS</div>
+                  <div style={{ padding: "0 10px 6px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 12px", fontSize: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max DD</span><span style={{ color: T.red, fontWeight: 600 }}>${extStats.maxDD.toFixed(0)}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Sharpe</span><span style={{ color: T.textBright, fontWeight: 600 }}>{extStats.sharpe}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max Win Run</span><span style={{ color: T.green }}>{extStats.maxConsecWin}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max Loss Run</span><span style={{ color: T.red }}>{extStats.maxConsecLoss}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Best</span><span style={{ color: T.green }}>+${extStats.bestTrade.pnl.toFixed(0)} #{extStats.bestTrade.id}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Worst</span><span style={{ color: T.red }}>${extStats.worstTrade.pnl.toFixed(0)} #{extStats.worstTrade.id}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Avg Hold</span><span style={{ color: T.textBright }}>{extStats.avgHold.toFixed(0)} bars</span></div>
+                  </div>
+                  {/* Hour/Day Heatmap */}
+                  <div style={{ padding: "4px 10px 8px" }}>
+                    <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2, marginBottom: 4 }}>PNL HEATMAP (DAY × HOUR)</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "28px repeat(11, 1fr)", gap: 1, fontSize: 7 }}>
+                      <span></span>
+                      {[8,9,10,11,12,13,14,15,16,17,18].map(h => (
+                        <span key={h} style={{ color: T.textMuted, textAlign: "center" }}>{h}</span>
+                      ))}
+                      {["Mon","Tue","Wed","Thu","Fri"].map(day => (
+                        <React.Fragment key={day}>
+                          <span style={{ color: T.textMuted, fontSize: 7 }}>{day}</span>
+                          {[8,9,10,11,12,13,14,15,16,17,18].map(hour => {
+                            const cell = extStats.heatmap[`${day}-${hour}`];
+                            if (!cell) return <span key={hour} style={{ background: T.bgCard, borderRadius: 2, height: 14 }}></span>;
+                            const intensity = Math.min(1, Math.abs(cell.pnl) / 200);
+                            const bg = cell.pnl >= 0 ? `rgba(0, 192, 135, ${0.1 + intensity * 0.5})` : `rgba(229, 51, 75, ${0.1 + intensity * 0.5})`;
+                            return (
+                              <span key={hour} style={{ background: bg, borderRadius: 2, height: 14, display: "flex", alignItems: "center", justifyContent: "center", color: T.textWhite, fontSize: 6 }}
+                                title={`${day} ${hour}:00 — ${cell.count} trades, $${cell.pnl.toFixed(0)}`}>
+                                {cell.count}
+                              </span>
+                            );
+                          })}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1163,12 +1554,34 @@ function NQForensicVisualizer() {
                 style={{ flex: 1, accentColor: T.blue }} />
               <span style={{ fontSize: 11, color: T.textBright, fontWeight: 600, minWidth: 36 }}>{filterMinScore.toFixed(2)}</span>
             </div>
+            {htfBiasData.length > 0 && (
+              <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 10, color: T.textMuted }}>HTF ≥</span>
+                <input type="range" min="0" max="0.80" step="0.05" value={filterHtfMinStrength}
+                  onChange={e => setFilterHtfMinStrength(parseFloat(e.target.value))}
+                  style={{ flex: 1, accentColor: T.cyan }} />
+                <span style={{ fontSize: 11, color: T.textBright, fontWeight: 600, minWidth: 36 }}>{filterHtfMinStrength.toFixed(2)}</span>
+              </div>
+            )}
+            {hasActiveFilters && (
+              <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 9, color: T.amber, fontWeight: 600, letterSpacing: 1 }}>FILTERED</span>
+                <button onClick={resetFilters} style={{
+                  background: "transparent", color: T.textMuted, border: `1px solid ${T.border}`,
+                  padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+                }}>RESET</button>
+              </div>
+            )}
           </div>
           {/* Selected trade detail */}
           {selectedTrade && (
             <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, background: T.bgCard }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: T.textWhite, letterSpacing: 1 }}>TRADE #{selectedTrade.id}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button onClick={() => navigateTrade(-1)} style={{ background: T.bgHover, border: `1px solid ${T.border}`, color: T.textMuted, cursor: "pointer", fontSize: 10, padding: "1px 5px", borderRadius: 3 }}>&#9664;</button>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: T.textWhite, letterSpacing: 1 }}>TRADE #{selectedTrade.id}</span>
+                  <button onClick={() => navigateTrade(1)} style={{ background: T.bgHover, border: `1px solid ${T.border}`, color: T.textMuted, cursor: "pointer", fontSize: 10, padding: "1px 5px", borderRadius: 3 }}>&#9654;</button>
+                </div>
                 <button onClick={() => setSelectedTrade(null)} style={{ background: "transparent", border: "none", color: T.textMuted, cursor: "pointer", fontSize: 12 }}>✕</button>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 10 }}>
@@ -1197,26 +1610,62 @@ function NQForensicVisualizer() {
               </div>
             </div>
           )}
+          {/* A/B Comparison Panel */}
+          {abMode && abStats && (
+            <div style={{ padding: "8px 12px", borderBottom: `1px solid ${T.border}`, background: T.bgCard }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>A/B SPLIT</span>
+                <span style={{ fontSize: 9, color: T.textMuted }}>Trade #{abStats.split}</span>
+              </div>
+              <input type="range" min="1" max={Math.max(2, filteredTrades.length - 1)} step="1" value={abSplitIndex || Math.floor(filteredTrades.length / 2)}
+                onChange={e => setAbSplitIndex(parseInt(e.target.value))}
+                style={{ width: "100%", accentColor: T.purple, marginBottom: 6 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {[{ label: "A", data: abStats.a, color: T.blue }, { label: "B", data: abStats.b, color: T.purple }].map(g => g.data && (
+                  <div key={g.label} style={{ background: T.bg, borderRadius: 4, padding: "6px 8px", border: `1px solid ${g.color}30` }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: g.color, marginBottom: 4 }}>GROUP {g.label} ({g.data.count})</div>
+                    <div style={{ fontSize: 9, display: "grid", gap: 2 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Win%</span><span style={{ color: parseFloat(g.data.winRate) > 55 ? T.green : T.amber }}>{g.data.winRate}%</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>PF</span><span style={{ color: parseFloat(g.data.pf) > 1.5 ? T.green : parseFloat(g.data.pf) > 1 ? T.amber : T.red }}>{g.data.pf}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Total</span><span style={{ color: parseFloat(g.data.totalPnl) >= 0 ? T.green : T.red }}>${g.data.totalPnl}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Avg</span><span style={{ color: parseFloat(g.data.avgPnl) >= 0 ? T.green : T.red }}>${g.data.avgPnl}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {/* Trade table */}
           <div style={{ flex: 1, overflow: "auto" }}>
-            <div style={{ padding: "8px 12px 4px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>
-              TRADE LOG — {filteredTrades.length} TRADES
+            <div style={{ padding: "8px 12px 4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>TRADE LOG — {filteredTrades.length} TRADES</span>
+              <button onClick={exportCSV} style={{
+                background: T.bgCard, color: T.textMuted, border: `1px solid ${T.border}`,
+                padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 8, letterSpacing: 1,
+              }}>CSV</button>
             </div>
             <div style={{ fontSize: 10 }}>
-              {/* Header */}
-              <div style={{ display: "grid", gridTemplateColumns: "28px 36px 52px 48px 48px 56px 48px", gap: 2, padding: "4px 12px", borderBottom: `1px solid ${T.border}`, color: T.textMuted, fontSize: 9, letterSpacing: 0.5, position: "sticky", top: 0, background: T.bgPanel, zIndex: 1 }}>
-                <span>#</span><span>SIDE</span><span>ENTRY</span><span>STOP</span><span>PNL</span><span>EXIT</span><span>REGIME</span>
+              {/* Sortable header */}
+              <div style={{ display: "grid", gridTemplateColumns: "26px 34px 50px 44px 48px 50px 44px", gap: 2, padding: "4px 12px", borderBottom: `1px solid ${T.border}`, color: T.textMuted, fontSize: 8, letterSpacing: 0.5, position: "sticky", top: 0, background: T.bgPanel, zIndex: 1 }}>
+                {[
+                  { col: "id", label: "#" }, { col: "side", label: "SIDE" }, { col: "entry", label: "ENTRY" },
+                  { col: "stop", label: "STOP" }, { col: "pnl", label: "PNL" }, { col: "exit", label: "EXIT" }, { col: "regime", label: "REGIME" },
+                ].map(h => (
+                  <span key={h.col} onClick={() => handleSort(h.col)} style={{ cursor: "pointer", color: sortCol === h.col ? T.textBright : T.textMuted, userSelect: "none" }}>
+                    {h.label}{sortCol === h.col ? (sortDir > 0 ? " ▲" : " ▼") : ""}
+                  </span>
+                ))}
               </div>
-              {filteredTrades.map(t => (
+              {sortedTrades.map((t, ti) => (
                 <div key={t.id} onClick={() => focusTrade(t)}
                   style={{
-                    display: "grid", gridTemplateColumns: "28px 36px 52px 48px 48px 56px 48px", gap: 2,
+                    display: "grid", gridTemplateColumns: "26px 34px 50px 44px 48px 50px 44px", gap: 2,
                     padding: "5px 12px", cursor: "pointer", borderBottom: `1px solid ${T.border}08`,
-                    background: selectedTrade?.id === t.id ? T.bgActive : "transparent",
+                    background: selectedTrade?.id === t.id ? T.bgActive : (abMode && abStats ? (ti < abStats.split ? `${T.blue}08` : `${T.purple}08`) : "transparent"),
                     transition: "background 0.15s",
                   }}
                   onMouseEnter={e => e.currentTarget.style.background = selectedTrade?.id === t.id ? T.bgActive : T.bgHover}
-                  onMouseLeave={e => e.currentTarget.style.background = selectedTrade?.id === t.id ? T.bgActive : "transparent"}
+                  onMouseLeave={e => e.currentTarget.style.background = selectedTrade?.id === t.id ? T.bgActive : (abMode && abStats ? (ti < abStats.split ? `${T.blue}08` : `${T.purple}08`) : "transparent")}
                 >
                   <span style={{ color: T.textMuted }}>{t.id}</span>
                   <span style={{ color: t.side === "long" ? T.green : T.red, fontWeight: 600 }}>{t.side === "long" ? "LNG" : "SHT"}</span>
@@ -1241,7 +1690,7 @@ function NQForensicVisualizer() {
               <span><span style={{ color: T.red }}>●</span> Stop</span>
               <span><span style={{ color: T.amber }}>●</span> BE+</span>
             </div>
-            <div style={{ marginTop: 4, color: T.textMuted, fontSize: 8 }}>Scroll to zoom · Drag to pan · Click trade to focus · Drop JSON to load</div>
+            <div style={{ marginTop: 4, color: T.textMuted, fontSize: 8 }}>Scroll zoom · Drag pan · Click trade · Dbl-click reset · ←→ nav · Esc deselect · Drop JSON</div>
           </div>
         </div>
       </div>
