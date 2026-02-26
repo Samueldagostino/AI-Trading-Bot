@@ -155,6 +155,21 @@ function isMaintenance(ts) {
   const h = d.getHours(), m = d.getMinutes();
   return (h === 16 && m >= 30) || h === 17 || (h === 18 && m === 0);
 }
+function getSession(ts) {
+  const d = new Date(ts);
+  const h = d.getHours(), m = d.getMinutes(), t = h * 60 + m;
+  if (t >= 240 && t < 570) return "premarket";
+  if (t >= 570 && t < 720) return "am_rth";
+  if (t >= 720 && t < 960) return "pm_rth";
+  if (t >= 960 || t < 240) return "off_hours";
+  return "overnight";
+}
+const SESSION_COLORS = {
+  premarket: "#06b6d406", am_rth: "#00c08706", pm_rth: "transparent", off_hours: "#f59e0b06", overnight: "#a855f704",
+};
+const SESSION_LABELS = {
+  premarket: "Pre-Mkt", am_rth: "AM RTH", pm_rth: "PM RTH", off_hours: "Off-Hrs",
+};
 // ── MAIN COMPONENT ────────────────────────────────────────────
 function NQForensicVisualizer() {
   // Data
@@ -189,6 +204,12 @@ function NQForensicVisualizer() {
   const [filterSide, setFilterSide] = useState("all");
   const [filterExit, setFilterExit] = useState("all");
   const [filterMinScore, setFilterMinScore] = useState(0.75);
+  // Phase 4: A/B mode, sort, sessions
+  const [abMode, setAbMode] = useState(false);
+  const [abSplitIndex, setAbSplitIndex] = useState(0);
+  const [sortCol, setSortCol] = useState("id");
+  const [sortDir, setSortDir] = useState(1);
+  const [showSessions, setShowSessions] = useState(false);
   // Refs
   const chartRef = useRef(null);
   const volRef = useRef(null);
@@ -452,14 +473,33 @@ function NQForensicVisualizer() {
       ctx.textAlign = "right";
       ctx.fillText(formatPrice(p), w - 8, y + 4);
     }
-    // ── Maintenance window shading
-    visibleCandles.forEach((c, i) => {
-      if (isMaintenance(c.time)) {
+    // ── Session shading (replaces simple maintenance shading when enabled)
+    if (showSessions) {
+      let lastSess = "";
+      let sessStart = 0;
+      visibleCandles.forEach((c, i) => {
+        const sess = getSession(c.time);
         const x = (i / count) * chartW;
-        ctx.fillStyle = T.maintenanceShade;
-        ctx.fillRect(x, 0, candleW + 1, CHART_H);
-      }
-    });
+        const bw = chartW / count;
+        if (SESSION_COLORS[sess] && SESSION_COLORS[sess] !== "transparent") {
+          ctx.fillStyle = SESSION_COLORS[sess];
+          ctx.fillRect(x, 0, bw + 1, CHART_H);
+        }
+        if (sess !== lastSess && lastSess !== "" && SESSION_LABELS[sess]) {
+          ctx.fillStyle = T.textMuted; ctx.font = "7px monospace"; ctx.textAlign = "left"; ctx.globalAlpha = 0.5;
+          ctx.fillText(SESSION_LABELS[sess], x + 2, 10); ctx.globalAlpha = 1;
+        }
+        lastSess = sess;
+      });
+    } else {
+      visibleCandles.forEach((c, i) => {
+        if (isMaintenance(c.time)) {
+          const x = (i / count) * chartW;
+          ctx.fillStyle = T.maintenanceShade;
+          ctx.fillRect(x, 0, candleW + 1, CHART_H);
+        }
+      });
+    }
     // ── Day separators
     let lastDay = -1;
     visibleCandles.forEach((c, i) => {
@@ -777,7 +817,7 @@ function NQForensicVisualizer() {
     vctx.moveTo(chartW, 0);
     vctx.lineTo(chartW, VOL_H);
     vctx.stroke();
-  }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, indexToX, getChartWidth, indicators, volumeProfile, showVWAP, showSMA, showATR, showVolProfile]);
+  }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, indexToX, getChartWidth, indicators, volumeProfile, showVWAP, showSMA, showATR, showVolProfile, showSessions]);
   // ── RENDER SUBPANES ──────────────────────────────────────
   useEffect(() => {
     if (visibleCandles.length === 0) return;
@@ -1064,6 +1104,74 @@ function NQForensicVisualizer() {
       avgLoss: losses.length > 0 ? (grossLoss / losses.length).toFixed(2) : "0",
     };
   }, [filteredTrades]);
+  // Sorted trades for table
+  const sortedTrades = useMemo(() => {
+    const sorted = [...filteredTrades];
+    const get = (t) => {
+      switch (sortCol) {
+        case "id": return t.id;
+        case "side": return t.side;
+        case "entry": return t.entryPrice;
+        case "stop": return t.stopDist;
+        case "pnl": return t.pnl;
+        case "exit": return t.exitType;
+        case "regime": return t.regime;
+        case "time": return t.entryTime;
+        case "score": return t.signalScore;
+        case "r": return t.rMultiple;
+        default: return t.id;
+      }
+    };
+    sorted.sort((a, b) => {
+      const va = get(a), vb = get(b);
+      if (typeof va === "string") return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    return sorted;
+  }, [filteredTrades, sortCol, sortDir]);
+  // Sort handler
+  const handleSort = useCallback((col) => {
+    if (sortCol === col) { setSortDir(d => -d); }
+    else { setSortCol(col); setSortDir(1); }
+  }, [sortCol]);
+  // A/B mode stats
+  const abStats = useMemo(() => {
+    if (!abMode || filteredTrades.length < 2) return null;
+    const split = Math.max(1, Math.min(filteredTrades.length - 1, abSplitIndex || Math.floor(filteredTrades.length / 2)));
+    const calcStats = (arr) => {
+      if (arr.length === 0) return null;
+      const wins = arr.filter(t => t.pnl > 0);
+      const losses = arr.filter(t => t.pnl <= 0);
+      const totalPnl = arr.reduce((s, t) => s + t.pnl, 0);
+      const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+      const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+      return {
+        count: arr.length,
+        winRate: ((wins.length / arr.length) * 100).toFixed(1),
+        pf: grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : "∞",
+        totalPnl: totalPnl.toFixed(2),
+        avgPnl: (totalPnl / arr.length).toFixed(2),
+      };
+    };
+    return { a: calcStats(filteredTrades.slice(0, split)), b: calcStats(filteredTrades.slice(split)), split };
+  }, [abMode, abSplitIndex, filteredTrades]);
+  // CSV export
+  const exportCSV = useCallback(() => {
+    const headers = ["ID","Side","EntryTime","ExitTime","EntryPrice","ExitPrice","StopPrice","StopDist","TP1","SignalScore","Regime","HTFBias","HTFStrength","ExitType","PnL","C1PnL","C2PnL","RMultiple","MFE","MAE","HoldBars","Compliant"];
+    const rows = filteredTrades.map(t => [
+      t.id, t.side, new Date(t.entryTime).toISOString(), new Date(t.exitTime).toISOString(),
+      t.entryPrice, t.exitPrice, t.stopPrice, t.stopDist.toFixed(1), t.tp1Price,
+      t.signalScore.toFixed(3), t.regime, t.htfBias, t.htfStrength,
+      t.exitType, t.pnl.toFixed(2), t.c1Pnl.toFixed(2), t.c2Pnl.toFixed(2),
+      t.rMultiple, t.mfe.toFixed(1), t.mae.toFixed(1), t.holdBars, t.isCompliant ? "Y" : "N",
+    ].join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `nq_trades_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }, [filteredTrades]);
   if (loading) {
     return (
       <div style={{ background: T.bg, color: T.text, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'SF Mono', monospace" }}>
@@ -1122,6 +1230,8 @@ function NQForensicVisualizer() {
               { label: "SMA", active: showSMA, toggle: () => setShowSMA(v => !v), color: T.sma20 },
               { label: "ATR", active: showATR, toggle: () => setShowATR(v => !v), color: T.blue },
               { label: "VP", active: showVolProfile, toggle: () => setShowVolProfile(v => !v), color: T.blue },
+              { label: "SESS", active: showSessions, toggle: () => setShowSessions(v => !v), color: T.amber },
+              { label: "A/B", active: abMode, toggle: () => { setAbMode(v => !v); setAbSplitIndex(Math.floor(filteredTrades.length / 2)); }, color: T.purple },
             ].map(b => (
               <button key={b.label} onClick={b.toggle} style={{
                 background: b.active ? T.bgActive : "transparent",
@@ -1322,26 +1432,62 @@ function NQForensicVisualizer() {
               </div>
             </div>
           )}
+          {/* A/B Comparison Panel */}
+          {abMode && abStats && (
+            <div style={{ padding: "8px 12px", borderBottom: `1px solid ${T.border}`, background: T.bgCard }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>A/B SPLIT</span>
+                <span style={{ fontSize: 9, color: T.textMuted }}>Trade #{abStats.split}</span>
+              </div>
+              <input type="range" min="1" max={Math.max(2, filteredTrades.length - 1)} step="1" value={abSplitIndex || Math.floor(filteredTrades.length / 2)}
+                onChange={e => setAbSplitIndex(parseInt(e.target.value))}
+                style={{ width: "100%", accentColor: T.purple, marginBottom: 6 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {[{ label: "A", data: abStats.a, color: T.blue }, { label: "B", data: abStats.b, color: T.purple }].map(g => g.data && (
+                  <div key={g.label} style={{ background: T.bg, borderRadius: 4, padding: "6px 8px", border: `1px solid ${g.color}30` }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: g.color, marginBottom: 4 }}>GROUP {g.label} ({g.data.count})</div>
+                    <div style={{ fontSize: 9, display: "grid", gap: 2 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Win%</span><span style={{ color: parseFloat(g.data.winRate) > 55 ? T.green : T.amber }}>{g.data.winRate}%</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>PF</span><span style={{ color: parseFloat(g.data.pf) > 1.5 ? T.green : parseFloat(g.data.pf) > 1 ? T.amber : T.red }}>{g.data.pf}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Total</span><span style={{ color: parseFloat(g.data.totalPnl) >= 0 ? T.green : T.red }}>${g.data.totalPnl}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Avg</span><span style={{ color: parseFloat(g.data.avgPnl) >= 0 ? T.green : T.red }}>${g.data.avgPnl}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {/* Trade table */}
           <div style={{ flex: 1, overflow: "auto" }}>
-            <div style={{ padding: "8px 12px 4px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>
-              TRADE LOG — {filteredTrades.length} TRADES
+            <div style={{ padding: "8px 12px 4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>TRADE LOG — {filteredTrades.length} TRADES</span>
+              <button onClick={exportCSV} style={{
+                background: T.bgCard, color: T.textMuted, border: `1px solid ${T.border}`,
+                padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 8, letterSpacing: 1,
+              }}>CSV</button>
             </div>
             <div style={{ fontSize: 10 }}>
-              {/* Header */}
-              <div style={{ display: "grid", gridTemplateColumns: "28px 36px 52px 48px 48px 56px 48px", gap: 2, padding: "4px 12px", borderBottom: `1px solid ${T.border}`, color: T.textMuted, fontSize: 9, letterSpacing: 0.5, position: "sticky", top: 0, background: T.bgPanel, zIndex: 1 }}>
-                <span>#</span><span>SIDE</span><span>ENTRY</span><span>STOP</span><span>PNL</span><span>EXIT</span><span>REGIME</span>
+              {/* Sortable header */}
+              <div style={{ display: "grid", gridTemplateColumns: "26px 34px 50px 44px 48px 50px 44px", gap: 2, padding: "4px 12px", borderBottom: `1px solid ${T.border}`, color: T.textMuted, fontSize: 8, letterSpacing: 0.5, position: "sticky", top: 0, background: T.bgPanel, zIndex: 1 }}>
+                {[
+                  { col: "id", label: "#" }, { col: "side", label: "SIDE" }, { col: "entry", label: "ENTRY" },
+                  { col: "stop", label: "STOP" }, { col: "pnl", label: "PNL" }, { col: "exit", label: "EXIT" }, { col: "regime", label: "REGIME" },
+                ].map(h => (
+                  <span key={h.col} onClick={() => handleSort(h.col)} style={{ cursor: "pointer", color: sortCol === h.col ? T.textBright : T.textMuted, userSelect: "none" }}>
+                    {h.label}{sortCol === h.col ? (sortDir > 0 ? " ▲" : " ▼") : ""}
+                  </span>
+                ))}
               </div>
-              {filteredTrades.map(t => (
+              {sortedTrades.map((t, ti) => (
                 <div key={t.id} onClick={() => focusTrade(t)}
                   style={{
-                    display: "grid", gridTemplateColumns: "28px 36px 52px 48px 48px 56px 48px", gap: 2,
+                    display: "grid", gridTemplateColumns: "26px 34px 50px 44px 48px 50px 44px", gap: 2,
                     padding: "5px 12px", cursor: "pointer", borderBottom: `1px solid ${T.border}08`,
-                    background: selectedTrade?.id === t.id ? T.bgActive : "transparent",
+                    background: selectedTrade?.id === t.id ? T.bgActive : (abMode && abStats ? (ti < abStats.split ? `${T.blue}08` : `${T.purple}08`) : "transparent"),
                     transition: "background 0.15s",
                   }}
                   onMouseEnter={e => e.currentTarget.style.background = selectedTrade?.id === t.id ? T.bgActive : T.bgHover}
-                  onMouseLeave={e => e.currentTarget.style.background = selectedTrade?.id === t.id ? T.bgActive : "transparent"}
+                  onMouseLeave={e => e.currentTarget.style.background = selectedTrade?.id === t.id ? T.bgActive : (abMode && abStats ? (ti < abStats.split ? `${T.blue}08` : `${T.purple}08`) : "transparent")}
                 >
                   <span style={{ color: T.textMuted }}>{t.id}</span>
                   <span style={{ color: t.side === "long" ? T.green : T.red, fontWeight: 600 }}>{t.side === "long" ? "LNG" : "SHT"}</span>
