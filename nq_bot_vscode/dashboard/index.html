@@ -179,6 +179,11 @@ function NQForensicVisualizer() {
   const [showSMA, setShowSMA] = useState(true);
   const [showATR, setShowATR] = useState(false);
   const [showVolProfile, setShowVolProfile] = useState(true);
+  // Hover tooltip
+  const [hoveredTrade, setHoveredTrade] = useState(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  // HTF filter threshold (from clicking HTF subpane)
+  const [filterHtfMinStrength, setFilterHtfMinStrength] = useState(0);
   // Filters
   const [filterRegime, setFilterRegime] = useState("all");
   const [filterSide, setFilterSide] = useState("all");
@@ -276,9 +281,10 @@ function NQForensicVisualizer() {
       if (filterSide !== "all" && t.side !== filterSide) return false;
       if (filterExit !== "all" && t.exitType !== filterExit) return false;
       if (t.signalScore < filterMinScore) return false;
+      if (filterHtfMinStrength > 0 && (t.htfStrength || 0) < filterHtfMinStrength) return false;
       return true;
     });
-  }, [trades, filterRegime, filterSide, filterExit, filterMinScore]);
+  }, [trades, filterRegime, filterSide, filterExit, filterMinScore, filterHtfMinStrength]);
   // Visible candles
   const visibleCandles = useMemo(() => {
     return candles.slice(viewStart, viewEnd);
@@ -876,19 +882,40 @@ function NQForensicVisualizer() {
     }
   }, [visibleCandles, candles, viewStart, viewEnd, getChartWidth, regimePerCandle, htfPerCandle, filteredTrades]);
   // ── MOUSE HANDLERS ──────────────────────────────────────────
+  // Find trade near a chart position
+  const findTradeAt = useCallback((x, y) => {
+    const chartW = getChartWidth();
+    const count = viewEnd - viewStart;
+    if (count === 0) return null;
+    for (const t of filteredTrades) {
+      const idx = candles.findIndex(c => c.time >= t.entryTime);
+      if (idx < viewStart || idx >= viewEnd) continue;
+      const tx = ((idx - viewStart) / count) * chartW + (chartW / count) / 2;
+      const ty = priceToY(t.entryPrice);
+      if (Math.abs(x - tx) < 12 && Math.abs(y - ty) < 16) return t;
+    }
+    return null;
+  }, [candles, filteredTrades, viewStart, viewEnd, getChartWidth, priceToY]);
   const handleMouseMove = useCallback((e) => {
     const rect = chartRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const chartW = getChartWidth();
-    if (x > chartW) { setCrosshairPos(null); setHoveredCandle(null); return; }
+    if (x > chartW) { setCrosshairPos(null); setHoveredCandle(null); setHoveredTrade(null); return; }
     setCrosshairPos({ x, y });
     const idx = xToIndex(x);
     if (idx >= 0 && idx < candles.length) {
       setHoveredCandle(candles[idx]);
     }
+    // Detect trade hover
+    if (!isDragging.current) {
+      const trade = findTradeAt(x, y);
+      setHoveredTrade(trade);
+      if (trade) setTooltipPos({ x: e.clientX, y: e.clientY });
+    }
     if (isDragging.current) {
+      setHoveredTrade(null);
       const dx = e.clientX - dragStart.current;
       const pixelsPerCandle = chartW / (viewEnd - viewStart);
       const shift = Math.round(-dx / pixelsPerCandle);
@@ -897,7 +924,15 @@ function NQForensicVisualizer() {
       setViewStart(newStart);
       setViewEnd(Math.min(candles.length, newStart + range));
     }
-  }, [candles, viewStart, viewEnd, getChartWidth, xToIndex]);
+  }, [candles, viewStart, viewEnd, getChartWidth, xToIndex, findTradeAt]);
+  const handleChartClick = useCallback((e) => {
+    const rect = chartRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const trade = findTradeAt(x, y);
+    if (trade) { focusTrade(trade); e.stopPropagation(); }
+  }, [findTradeAt, focusTrade]);
   const handleMouseDown = useCallback((e) => {
     isDragging.current = true;
     dragStart.current = e.clientX;
