@@ -92,8 +92,8 @@ class HTFBiasEngine:
         result = HTFBiasResult(
             consensus_direction=direction,
             consensus_strength=round(strength, 3),
-            htf_allows_long=(direction != "bearish" or strength < 0.7),
-            htf_allows_short=(direction != "bullish" or strength < 0.7),
+            htf_allows_long=(direction != "bearish" or strength < 0.3),
+            htf_allows_short=(direction != "bullish" or strength < 0.3),
             timestamp=timestamp,
             tf_biases=dict(self._biases),
         )
