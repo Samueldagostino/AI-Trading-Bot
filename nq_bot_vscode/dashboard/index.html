@@ -474,125 +474,124 @@ function NQForensicVisualizer() {
       }
       lastDay = day;
     });
-    // ── SELECTED TRADE OVERLAY (background layers)
+    // ── SELECTED TRADE OVERLAY (rich overlay)
     if (selectedTrade) {
       const st = selectedTrade;
       const entryIdx = candles.findIndex(c => c.time >= st.entryTime);
       const exitIdx = candles.findIndex(c => c.time >= st.exitTime);
       if (entryIdx >= viewStart && entryIdx < viewEnd) {
-        const eX = ((entryIdx - viewStart) / count) * chartW;
-        const xX = exitIdx >= viewStart ? ((exitIdx - viewStart) / count) * chartW : chartW;
-        // Stop level line
-        const stopY = priceToY(st.stopPrice);
-        ctx.strokeStyle = T.red;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(eX, stopY);
-        ctx.lineTo(xX, stopY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        // Stop label
-        ctx.fillStyle = T.redBg;
-        ctx.fillRect(eX - 1, stopY - 9, 78, 16);
-        ctx.fillStyle = T.red;
-        ctx.font = "bold 9px monospace";
-        ctx.textAlign = "left";
-        ctx.fillText(`STOP ${formatPrice(st.stopPrice)}`, eX + 3, stopY + 3);
-        // TP1 level
-        const tp1Y = priceToY(st.tp1Price);
-        ctx.strokeStyle = T.blue;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(eX, tp1Y);
-        ctx.lineTo(xX, tp1Y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = T.blueDim;
-        ctx.fillRect(eX - 1, tp1Y - 9, 72, 16);
-        ctx.fillStyle = T.blue;
-        ctx.font = "bold 9px monospace";
-        ctx.fillText(`PT1 ${formatPrice(st.tp1Price)}`, eX + 3, tp1Y + 3);
-        // TP2 level
-        const tp2Y = priceToY(st.tp2Price);
-        ctx.strokeStyle = T.purple;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(eX, tp2Y);
-        ctx.lineTo(xX, tp2Y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = T.purpleDim;
-        ctx.fillRect(eX - 1, tp2Y - 9, 72, 16);
-        ctx.fillStyle = T.purple;
-        ctx.font = "bold 9px monospace";
-        ctx.fillText(`PT2 ${formatPrice(st.tp2Price)}`, eX + 3, tp2Y + 3);
-        // Entry level
+        const eX = ((entryIdx - viewStart) / count) * chartW + (chartW / count) / 2;
+        const xX = exitIdx >= viewStart ? ((exitIdx - viewStart) / count) * chartW + (chartW / count) / 2 : chartW;
         const entryY = priceToY(st.entryPrice);
-        ctx.strokeStyle = T.textBright;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([2, 2]);
-        ctx.beginPath();
-        ctx.moveTo(eX, entryY);
-        ctx.lineTo(xX, entryY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        // Trade "path" line connecting entry to exit
         const exitY = priceToY(st.exitPrice);
+        const stopY = priceToY(st.stopPrice);
+        const tp1Y = priceToY(st.tp1Price);
+        const tp2Y = priceToY(st.tp2Price);
+        const stopDollar = (st.stopDist * 2 * 2).toFixed(0); // 2 contracts, $2/pt
+        // TP1/TP2 shaded bands
+        const tpTopY = Math.min(tp1Y, tp2Y);
+        const tpBotY = Math.max(tp1Y, tp2Y);
+        ctx.fillStyle = T.blueDim; ctx.globalAlpha = 0.12;
+        ctx.fillRect(eX, Math.min(entryY, tp1Y), xX - eX, Math.abs(tp1Y - entryY));
+        ctx.fillStyle = T.purpleDim;
+        ctx.fillRect(eX, Math.min(tp1Y, tp2Y), xX - eX, Math.abs(tp2Y - tp1Y));
+        ctx.globalAlpha = 1;
+        // Stop level line — dashed, labeled with pts and dollars
+        ctx.strokeStyle = T.red; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(eX, stopY); ctx.lineTo(xX, stopY); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = T.redBg; ctx.fillRect(eX - 1, stopY - 9, 110, 16);
+        ctx.fillStyle = T.red; ctx.font = "bold 9px monospace"; ctx.textAlign = "left";
+        ctx.fillText(`STOP ${formatPrice(st.stopPrice)} (${st.stopDist.toFixed(1)}pt $${stopDollar})`, eX + 3, stopY + 3);
+        // TP1 level — labeled with R-multiple
+        const tp1R = st.stopDist > 0 ? (Math.abs(st.tp1Price - st.entryPrice) / st.stopDist).toFixed(1) : "?";
+        ctx.strokeStyle = T.blue; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(eX, tp1Y); ctx.lineTo(xX, tp1Y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = T.blueDim; ctx.fillRect(eX - 1, tp1Y - 9, 90, 16);
+        ctx.fillStyle = T.blue; ctx.font = "bold 9px monospace";
+        ctx.fillText(`TP1 ${formatPrice(st.tp1Price)} (${tp1R}R)`, eX + 3, tp1Y + 3);
+        // TP2 level
+        const tp2R = st.stopDist > 0 ? (Math.abs(st.tp2Price - st.entryPrice) / st.stopDist).toFixed(1) : "?";
+        ctx.strokeStyle = T.purple; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(eX, tp2Y); ctx.lineTo(xX, tp2Y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = T.purpleDim; ctx.fillRect(eX - 1, tp2Y - 9, 90, 16);
+        ctx.fillStyle = T.purple; ctx.font = "bold 9px monospace";
+        ctx.fillText(`TP2 ${formatPrice(st.tp2Price)} (${tp2R}R)`, eX + 3, tp2Y + 3);
+        // Entry level line
+        ctx.strokeStyle = T.textBright; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, entryY); ctx.stroke(); ctx.setLineDash([]);
+        // Trade path line — colored by PnL, thickness by R-multiple
+        const pathWidth = Math.max(1, Math.min(4, Math.abs(st.rMultiple) * 1.5));
         ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red;
-        ctx.lineWidth = 1.5;
-        ctx.globalAlpha = 0.6;
-        ctx.beginPath();
-        ctx.moveTo(eX, entryY);
-        ctx.lineTo(xX, exitY);
-        ctx.stroke();
+        ctx.lineWidth = pathWidth; ctx.globalAlpha = 0.7;
+        ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, exitY); ctx.stroke();
         ctx.globalAlpha = 1;
         // Trade zone shading
-        const topY = Math.min(entryY, exitY);
-        const botY = Math.max(entryY, exitY);
+        const zTop = Math.min(entryY, exitY), zBot = Math.max(entryY, exitY);
         ctx.fillStyle = st.pnl >= 0 ? T.greenBg : T.redBg;
-        ctx.fillRect(eX, topY, xX - eX, botY - topY);
-        // Entry marker
+        ctx.fillRect(eX, zTop, xX - eX, zBot - zTop);
+        // MFE/MAE markers — small vertical lines from entry
+        if (st.mfe > 0) {
+          const mfeY = priceToY(st.entryPrice + (st.side === "long" ? st.mfe : -st.mfe));
+          ctx.strokeStyle = T.green; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+          ctx.beginPath(); ctx.moveTo(eX + 3, entryY); ctx.lineTo(eX + 3, mfeY); ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = T.green; ctx.font = "7px monospace"; ctx.textAlign = "left";
+          ctx.fillText(`MFE ${st.mfe.toFixed(1)}`, eX + 6, mfeY + (st.side === "long" ? -2 : 8));
+        }
+        if (st.mae > 0) {
+          const maeY = priceToY(st.entryPrice + (st.side === "long" ? -st.mae : st.mae));
+          ctx.strokeStyle = T.red; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+          ctx.beginPath(); ctx.moveTo(eX - 3, entryY); ctx.lineTo(eX - 3, maeY); ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = T.red; ctx.font = "7px monospace"; ctx.textAlign = "right";
+          ctx.fillText(`MAE ${st.mae.toFixed(1)}`, eX - 6, maeY + (st.side === "long" ? 8 : -2));
+        }
+        // Entry marker — triangle with signal score label + HTF halo
+        const htfHaloColor = st.htfBias === "bullish" ? T.green : st.htfBias === "bearish" ? T.red : T.textMuted;
+        // HTF consensus halo ring
+        ctx.strokeStyle = htfHaloColor; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+        ctx.beginPath(); ctx.arc(eX, entryY, 12, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+        // Direction triangle
         ctx.fillStyle = st.side === "long" ? T.green : T.red;
         ctx.beginPath();
         if (st.side === "long") {
-          ctx.moveTo(eX, entryY + 8);
-          ctx.lineTo(eX - 6, entryY + 16);
-          ctx.lineTo(eX + 6, entryY + 16);
+          ctx.moveTo(eX, entryY + 6); ctx.lineTo(eX - 5, entryY + 14); ctx.lineTo(eX + 5, entryY + 14);
         } else {
-          ctx.moveTo(eX, entryY - 8);
-          ctx.lineTo(eX - 6, entryY - 16);
-          ctx.lineTo(eX + 6, entryY - 16);
+          ctx.moveTo(eX, entryY - 6); ctx.lineTo(eX - 5, entryY - 14); ctx.lineTo(eX + 5, entryY - 14);
         }
         ctx.fill();
-        // Exit marker
-        ctx.fillStyle = st.pnl >= 0 ? T.green : T.red;
+        // Signal score label on entry
+        ctx.fillStyle = T.blue; ctx.font = "bold 8px monospace"; ctx.textAlign = "center";
+        const scoreLabelY = st.side === "long" ? entryY + 22 : entryY - 18;
+        ctx.fillText(st.signalScore.toFixed(2), eX, scoreLabelY);
+        // Exit marker — diamond, colored by exit type
+        const exitTypeColors = { pt1_partial: T.gold, trailing_stop: T.blue, stop_loss: T.red, pt2_target: T.cyan, be_plus: T.amber, max_target: T.cyan };
+        const exColor = exitTypeColors[st.exitType] || T.text;
+        ctx.fillStyle = exColor;
         ctx.beginPath();
-        ctx.arc(xX, exitY, 5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = T.bg;
+        ctx.moveTo(xX, exitY - 6); ctx.lineTo(xX + 5, exitY); ctx.lineTo(xX, exitY + 6); ctx.lineTo(xX - 5, exitY);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = T.bg; ctx.lineWidth = 1; ctx.stroke();
+        // Compliance badge — small shield on entry
+        const shieldX = eX + 14, shieldY = entryY - 4;
+        const compColor = st.isCompliant ? T.green : (isMaintenance(st.entryTime) ? T.amber : T.red);
+        ctx.fillStyle = compColor; ctx.globalAlpha = 0.9;
         ctx.beginPath();
-        ctx.arc(xX, exitY, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-        // Trade label
+        ctx.moveTo(shieldX, shieldY - 5); ctx.lineTo(shieldX + 4, shieldY - 3);
+        ctx.lineTo(shieldX + 4, shieldY + 2); ctx.lineTo(shieldX, shieldY + 5);
+        ctx.lineTo(shieldX - 4, shieldY + 2); ctx.lineTo(shieldX - 4, shieldY - 3);
+        ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+        // Trade summary label
         const labelX = eX + (xX - eX) / 2;
-        const labelY = st.side === "long" ? Math.min(tp1Y, entryY) - 20 : Math.max(stopY, entryY) + 30;
+        const labelY = st.side === "long" ? Math.min(tp1Y, entryY) - 24 : Math.max(stopY, entryY) + 34;
         const labelText = `${st.rMultiple > 0 ? "+" : ""}${st.rMultiple}R  $${st.pnl > 0 ? "+" : ""}${st.pnl.toFixed(0)}  ${st.exitType.replace(/_/g, " ").toUpperCase()}`;
         ctx.font = "bold 9px monospace";
         const lw = ctx.measureText(labelText).width + 12;
         ctx.fillStyle = st.pnl >= 0 ? "#0a2a1a" : "#2a0a0e";
-        ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red;
-        ctx.lineWidth = 1;
-        const rr = 4;
+        ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red; ctx.lineWidth = 1;
         const lx = labelX - lw / 2, ly = labelY - 8, lh = 18;
-        ctx.beginPath();
-        ctx.roundRect(lx, ly, lw, lh, rr);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = st.pnl >= 0 ? T.green : T.red;
-        ctx.textAlign = "center";
+        ctx.beginPath(); ctx.roundRect(lx, ly, lw, lh, 4); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = st.pnl >= 0 ? T.green : T.red; ctx.textAlign = "center";
         ctx.fillText(labelText, labelX, labelY + 4);
       }
     }
@@ -697,29 +696,43 @@ function NQForensicVisualizer() {
         ctx.fillRect(x, yTop, w2, yBot - yTop);
       });
     }
-    // ── Non-selected trade markers (small)
+    // ── Non-selected trade markers (enriched)
     filteredTrades.forEach(t => {
       if (selectedTrade && t.id === selectedTrade.id) return;
       const entryIdx = candles.findIndex(c => c.time >= t.entryTime);
       if (entryIdx < viewStart || entryIdx >= viewEnd) return;
       const x = ((entryIdx - viewStart) / count) * chartW + (chartW / count) / 2;
       const y = priceToY(t.entryPrice);
+      // HTF halo (subtle ring)
+      const htfC = t.htfBias === "bullish" ? T.green : t.htfBias === "bearish" ? T.red : T.textMuted;
+      ctx.strokeStyle = htfC; ctx.lineWidth = 1; ctx.globalAlpha = 0.25;
+      ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+      // Direction triangle
       ctx.fillStyle = t.pnl >= 0 ? T.green : T.red;
-      ctx.globalAlpha = 0.7;
+      ctx.globalAlpha = 0.8;
       if (t.side === "long") {
-        ctx.beginPath();
-        ctx.moveTo(x, y + 4);
-        ctx.lineTo(x - 4, y + 10);
-        ctx.lineTo(x + 4, y + 10);
-        ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x, y + 4); ctx.lineTo(x - 4, y + 10); ctx.lineTo(x + 4, y + 10); ctx.fill();
       } else {
-        ctx.beginPath();
-        ctx.moveTo(x, y - 4);
-        ctx.lineTo(x - 4, y - 10);
-        ctx.lineTo(x + 4, y - 10);
-        ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x - 4, y - 10); ctx.lineTo(x + 4, y - 10); ctx.fill();
       }
       ctx.globalAlpha = 1;
+      // Exit marker — small diamond at exit
+      const exitIdx = candles.findIndex(c => c.time >= t.exitTime);
+      if (exitIdx >= viewStart && exitIdx < viewEnd) {
+        const ex = ((exitIdx - viewStart) / count) * chartW + (chartW / count) / 2;
+        const ey = priceToY(t.exitPrice);
+        const ecMap = { pt1_partial: T.gold, trailing_stop: T.blue, stop_loss: T.red, pt2_target: T.cyan, be_plus: T.amber };
+        ctx.fillStyle = ecMap[t.exitType] || T.text; ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(ex, ey - 3); ctx.lineTo(ex + 3, ey); ctx.lineTo(ex, ey + 3); ctx.lineTo(ex - 3, ey);
+        ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+      }
+      // Compliance dot
+      if (!t.isCompliant || isMaintenance(t.entryTime)) {
+        const dotColor = !t.isCompliant ? T.red : T.amber;
+        ctx.fillStyle = dotColor; ctx.globalAlpha = 0.8;
+        ctx.beginPath(); ctx.arc(x + 6, y - 6, 2.5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+      }
     });
     // ── Crosshair
     if (crosshairPos) {
