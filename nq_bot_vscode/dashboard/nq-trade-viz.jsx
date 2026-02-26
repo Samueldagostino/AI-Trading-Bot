@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-
 // ═══════════════════════════════════════════════════════════════
 // NQ FORENSIC TRADE VISUALIZER — Institutional-Grade Chart System
 // Canvas-based OHLCV + Trade Overlay + Session Logic + Analytics
 // ═══════════════════════════════════════════════════════════════
-
 // ── THEME ──────────────────────────────────────────────────────
 const T = {
   bg: "#080b12", bgPanel: "#0c1018", bgCard: "#111620",
@@ -23,7 +21,6 @@ const T = {
   crosshair: "#3b82f650",
   selection: "#3b82f620",
 };
-
 // ── SYNTHETIC DATA GENERATION ─────────────────────────────────
 // Matches your NQ HC filter profile: 62 trades, PF~2.35, etc.
 function generateMarketData(startDate, days, intervalMin = 5) {
@@ -31,25 +28,19 @@ function generateMarketData(startDate, days, intervalMin = 5) {
   let price = 21500;
   const barsPerDay = Math.floor((23 * 60) / intervalMin); // NQ trades ~23hrs
   const d = new Date(startDate);
-
   for (let day = 0; day < days; day++) {
     const dayOfWeek = d.getDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) { d.setDate(d.getDate() + 1); continue; }
-
     const dayStart = new Date(d);
     dayStart.setHours(18, 0, 0, 0); // NQ opens 6PM ET prior day
-
     const trendBias = (Math.random() - 0.48) * 0.3;
     const volatility = 8 + Math.random() * 12;
-
     for (let bar = 0; bar < barsPerDay; bar++) {
       const ts = new Date(dayStart.getTime() + bar * intervalMin * 60000);
       const hour = ts.getHours();
       const min = ts.getMinutes();
-
       // Skip maintenance window 4:30-6:00 PM ET
       if ((hour === 16 && min >= 30) || hour === 17 || (hour === 18 && min === 0)) continue;
-
       const sessionVol = (hour >= 9 && hour <= 11) ? 1.8 : (hour >= 14 && hour <= 16) ? 1.4 : 0.7;
       const move = (Math.random() - 0.5 + trendBias) * volatility * sessionVol;
       const o = price;
@@ -57,7 +48,6 @@ function generateMarketData(startDate, days, intervalMin = 5) {
       const l = o - Math.abs(move) - Math.random() * volatility * 0.5;
       const c = o + move;
       const v = Math.floor((500 + Math.random() * 2000) * sessionVol);
-
       candles.push({
         time: ts.getTime(),
         open: Math.round(o * 100) / 100,
@@ -72,7 +62,6 @@ function generateMarketData(startDate, days, intervalMin = 5) {
   }
   return candles;
 }
-
 function generateTrades(candles, count = 62) {
   const trades = [];
   const regimes = ["trending_up", "trending_down", "ranging", "unknown"];
@@ -80,18 +69,14 @@ function generateTrades(candles, count = 62) {
   const htfBiases = ["long", "short", "neutral"];
   const exitTypes = ["pt1_partial", "trailing_stop", "stop_loss", "pt2_target", "be_plus"];
   const exitWeights = [0.25, 0.30, 0.20, 0.15, 0.10];
-
   const rthCandles = candles.filter(c => {
     const h = new Date(c.time).getHours();
     return h >= 9 && h <= 15;
   });
-
   const step = Math.floor(rthCandles.length / (count + 5));
-
   for (let i = 0; i < count; i++) {
     const idx = 20 + i * step + Math.floor(Math.random() * Math.min(step * 0.5, 10));
     if (idx >= rthCandles.length - 30) break;
-
     const entryCandle = rthCandles[idx];
     const side = Math.random() > 0.48 ? "long" : "short";
     const entryPrice = entryCandle.close;
@@ -99,31 +84,25 @@ function generateTrades(candles, count = 62) {
     const stopDist = 12 + Math.random() * 18; // 12-30pts, HC compliant
     const tp1Dist = stopDist * 1.5;
     const tp2Dist = stopDist * 3;
-
     const stopPrice = side === "long" ? entryPrice - stopDist : entryPrice + stopDist;
     const tp1Price = side === "long" ? entryPrice + tp1Dist : entryPrice - tp1Dist;
     const tp2Price = side === "long" ? entryPrice + tp2Dist : entryPrice - tp2Dist;
-
     // Pick regime
     let r = Math.random(), cumW = 0, regime = regimes[3];
     for (let ri = 0; ri < regimes.length; ri++) {
       cumW += regimeWeights[ri]; if (r < cumW) { regime = regimes[ri]; break; }
     }
-
     // Pick exit type
     r = Math.random(); cumW = 0; let exitType = exitTypes[0];
     for (let ei = 0; ei < exitTypes.length; ei++) {
       cumW += exitWeights[ei]; if (r < cumW) { exitType = exitTypes[ei]; break; }
     }
-
     const isWin = exitType !== "stop_loss";
     const holdBars = 5 + Math.floor(Math.random() * 40);
     const exitIdx = Math.min(idx + holdBars, rthCandles.length - 1);
     const exitCandle = rthCandles[exitIdx];
-
     let exitPrice, pnl, c1Pnl, c2Pnl;
     const ptPerDollar = 2; // MNQ $2/point
-
     if (exitType === "stop_loss") {
       exitPrice = stopPrice + (Math.random() - 0.5) * 2;
       pnl = side === "long" ? (exitPrice - entryPrice) * ptPerDollar * 2 : (entryPrice - exitPrice) * ptPerDollar * 2;
@@ -151,13 +130,10 @@ function generateTrades(candles, count = 62) {
       c1Pnl = 2 * ptPerDollar; c2Pnl = 2 * ptPerDollar;
       pnl = c1Pnl + c2Pnl;
     }
-
     const slippage = Math.round((0.25 + Math.random() * 1.5) * 100) / 100;
     pnl = Math.round((pnl - slippage) * 100) / 100;
-
     const mfe = Math.abs(stopDist * (0.5 + Math.random() * 3));
     const mae = Math.abs(stopDist * (0.1 + Math.random() * 0.8));
-
     trades.push({
       id: i + 1,
       entryTime: entryCandle.time,
@@ -187,7 +163,6 @@ function generateTrades(candles, count = 62) {
   }
   return trades;
 }
-
 // ── UTILITIES ─────────────────────────────────────────────────
 function formatPrice(p) { return p.toFixed(2); }
 function formatTime(ts) {
@@ -207,14 +182,12 @@ function isMaintenance(ts) {
   const h = d.getHours(), m = d.getMinutes();
   return (h === 16 && m >= 30) || h === 17 || (h === 18 && m === 0);
 }
-
 // ── MAIN COMPONENT ────────────────────────────────────────────
 export default function NQForensicVisualizer() {
   // Data
   const [candles, setCandles] = useState([]);
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
-
   // View state
   const [viewStart, setViewStart] = useState(0);
   const [viewEnd, setViewEnd] = useState(200);
@@ -222,13 +195,11 @@ export default function NQForensicVisualizer() {
   const [crosshairPos, setCrosshairPos] = useState(null);
   const [hoveredCandle, setHoveredCandle] = useState(null);
   const [timeframe, setTimeframe] = useState("5m");
-
   // Filters
   const [filterRegime, setFilterRegime] = useState("all");
   const [filterSide, setFilterSide] = useState("all");
   const [filterExit, setFilterExit] = useState("all");
   const [filterMinScore, setFilterMinScore] = useState(0.75);
-
   // Refs
   const chartRef = useRef(null);
   const volRef = useRef(null);
@@ -236,7 +207,6 @@ export default function NQForensicVisualizer() {
   const isDragging = useRef(false);
   const dragStart = useRef(0);
   const dragViewStart = useRef(0);
-
   // Chart dimensions
   const CHART_H = 480;
   const VOL_H = 80;
@@ -244,7 +214,6 @@ export default function NQForensicVisualizer() {
   const TIME_AXIS_H = 28;
   const MIN_CANDLE_W = 3;
   const MAX_CANDLE_W = 24;
-
   // Init data
   useEffect(() => {
     const c = generateMarketData("2026-01-06", 40, 5);
@@ -255,7 +224,6 @@ export default function NQForensicVisualizer() {
     setViewEnd(c.length);
     setLoading(false);
   }, []);
-
   // Filtered trades
   const filteredTrades = useMemo(() => {
     return trades.filter(t => {
@@ -266,68 +234,56 @@ export default function NQForensicVisualizer() {
       return true;
     });
   }, [trades, filterRegime, filterSide, filterExit, filterMinScore]);
-
   // Visible candles
   const visibleCandles = useMemo(() => {
     return candles.slice(viewStart, viewEnd);
   }, [candles, viewStart, viewEnd]);
-
   // Price range
   const priceRange = useMemo(() => {
     if (visibleCandles.length === 0) return { min: 0, max: 1 };
     let min = Infinity, max = -Infinity;
     visibleCandles.forEach(c => { min = Math.min(min, c.low); max = Math.max(max, c.high); });
-
     // Include trade levels if a trade is selected
     if (selectedTrade) {
       min = Math.min(min, selectedTrade.stopPrice, selectedTrade.entryPrice);
       max = Math.max(max, selectedTrade.tp2Price, selectedTrade.entryPrice);
     }
-
     const pad = (max - min) * 0.08;
     return { min: min - pad, max: max + pad };
   }, [visibleCandles, selectedTrade]);
-
   // Volume range
   const volRange = useMemo(() => {
     if (visibleCandles.length === 0) return { max: 1 };
     return { max: Math.max(...visibleCandles.map(c => c.volume)) };
   }, [visibleCandles]);
-
   // Get chart width
   const getChartWidth = useCallback(() => {
     if (!containerRef.current) return 800;
     return containerRef.current.offsetWidth - PRICE_AXIS_W;
   }, []);
-
   // Coordinate transforms
   const priceToY = useCallback((price) => {
     const { min, max } = priceRange;
     return CHART_H - ((price - min) / (max - min)) * CHART_H;
   }, [priceRange]);
-
   const indexToX = useCallback((idx) => {
     const w = getChartWidth();
     const count = viewEnd - viewStart;
     if (count === 0) return 0;
     return ((idx - viewStart) / count) * w;
   }, [viewStart, viewEnd, getChartWidth]);
-
   const xToIndex = useCallback((x) => {
     const w = getChartWidth();
     const count = viewEnd - viewStart;
     return Math.floor((x / w) * count) + viewStart;
   }, [viewStart, viewEnd, getChartWidth]);
-
   // ── RENDER CHART ──────────────────────────────────────────
   useEffect(() => {
     const canvas = chartRef.current;
     const volCanvas = volRef.current;
     if (!canvas || !volCanvas || visibleCandles.length === 0) return;
-
     const w = getChartWidth() + PRICE_AXIS_W;
     const dpr = window.devicePixelRatio || 1;
-
     // Setup main canvas
     canvas.width = w * dpr;
     canvas.height = CHART_H * dpr;
@@ -335,7 +291,6 @@ export default function NQForensicVisualizer() {
     canvas.style.height = CHART_H + "px";
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
-
     // Setup volume canvas
     volCanvas.width = w * dpr;
     volCanvas.height = VOL_H * dpr;
@@ -343,42 +298,35 @@ export default function NQForensicVisualizer() {
     volCanvas.style.height = VOL_H + "px";
     const vctx = volCanvas.getContext("2d");
     vctx.scale(dpr, dpr);
-
     const chartW = w - PRICE_AXIS_W;
     const count = visibleCandles.length;
     const candleW = Math.max(MIN_CANDLE_W, Math.min(MAX_CANDLE_W, chartW / count - 1));
     const bodyW = Math.max(1, candleW - 2);
-
     // ── Background
     ctx.fillStyle = T.bg;
     ctx.fillRect(0, 0, w, CHART_H);
     vctx.fillStyle = T.bg;
     vctx.fillRect(0, 0, w, VOL_H);
-
     // ── Grid lines (horizontal)
     const { min: pMin, max: pMax } = priceRange;
     const pRange = pMax - pMin;
     const gridStep = pRange > 200 ? 50 : pRange > 100 ? 25 : pRange > 50 ? 10 : 5;
     const gridStart = Math.ceil(pMin / gridStep) * gridStep;
-
     ctx.strokeStyle = T.grid;
     ctx.lineWidth = 0.5;
     ctx.setLineDash([]);
-
     for (let p = gridStart; p <= pMax; p += gridStep) {
       const y = priceToY(p);
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(chartW, y);
       ctx.stroke();
-
       // Price labels on axis
       ctx.fillStyle = T.textMuted;
       ctx.font = "11px 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace";
       ctx.textAlign = "right";
       ctx.fillText(formatPrice(p), w - 8, y + 4);
     }
-
     // ── Maintenance window shading
     visibleCandles.forEach((c, i) => {
       if (isMaintenance(c.time)) {
@@ -387,7 +335,6 @@ export default function NQForensicVisualizer() {
         ctx.fillRect(x, 0, candleW + 1, CHART_H);
       }
     });
-
     // ── Day separators
     let lastDay = -1;
     visibleCandles.forEach((c, i) => {
@@ -401,7 +348,6 @@ export default function NQForensicVisualizer() {
         ctx.moveTo(x, 0);
         ctx.lineTo(x, CHART_H);
         ctx.stroke();
-
         ctx.fillStyle = T.textMuted;
         ctx.font = "10px 'SF Mono', monospace";
         ctx.textAlign = "center";
@@ -409,17 +355,14 @@ export default function NQForensicVisualizer() {
       }
       lastDay = day;
     });
-
     // ── SELECTED TRADE OVERLAY (background layers)
     if (selectedTrade) {
       const st = selectedTrade;
       const entryIdx = candles.findIndex(c => c.time >= st.entryTime);
       const exitIdx = candles.findIndex(c => c.time >= st.exitTime);
-
       if (entryIdx >= viewStart && entryIdx < viewEnd) {
         const eX = ((entryIdx - viewStart) / count) * chartW;
         const xX = exitIdx >= viewStart ? ((exitIdx - viewStart) / count) * chartW : chartW;
-
         // Stop level line
         const stopY = priceToY(st.stopPrice);
         ctx.strokeStyle = T.red;
@@ -430,7 +373,6 @@ export default function NQForensicVisualizer() {
         ctx.lineTo(xX, stopY);
         ctx.stroke();
         ctx.setLineDash([]);
-
         // Stop label
         ctx.fillStyle = T.redBg;
         ctx.fillRect(eX - 1, stopY - 9, 78, 16);
@@ -438,7 +380,6 @@ export default function NQForensicVisualizer() {
         ctx.font = "bold 9px monospace";
         ctx.textAlign = "left";
         ctx.fillText(`STOP ${formatPrice(st.stopPrice)}`, eX + 3, stopY + 3);
-
         // TP1 level
         const tp1Y = priceToY(st.tp1Price);
         ctx.strokeStyle = T.blue;
@@ -449,13 +390,11 @@ export default function NQForensicVisualizer() {
         ctx.lineTo(xX, tp1Y);
         ctx.stroke();
         ctx.setLineDash([]);
-
         ctx.fillStyle = T.blueDim;
         ctx.fillRect(eX - 1, tp1Y - 9, 72, 16);
         ctx.fillStyle = T.blue;
         ctx.font = "bold 9px monospace";
         ctx.fillText(`PT1 ${formatPrice(st.tp1Price)}`, eX + 3, tp1Y + 3);
-
         // TP2 level
         const tp2Y = priceToY(st.tp2Price);
         ctx.strokeStyle = T.purple;
@@ -466,13 +405,11 @@ export default function NQForensicVisualizer() {
         ctx.lineTo(xX, tp2Y);
         ctx.stroke();
         ctx.setLineDash([]);
-
         ctx.fillStyle = T.purpleDim;
         ctx.fillRect(eX - 1, tp2Y - 9, 72, 16);
         ctx.fillStyle = T.purple;
         ctx.font = "bold 9px monospace";
         ctx.fillText(`PT2 ${formatPrice(st.tp2Price)}`, eX + 3, tp2Y + 3);
-
         // Entry level
         const entryY = priceToY(st.entryPrice);
         ctx.strokeStyle = T.textBright;
@@ -483,7 +420,6 @@ export default function NQForensicVisualizer() {
         ctx.lineTo(xX, entryY);
         ctx.stroke();
         ctx.setLineDash([]);
-
         // Trade "path" line connecting entry to exit
         const exitY = priceToY(st.exitPrice);
         ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red;
@@ -494,13 +430,11 @@ export default function NQForensicVisualizer() {
         ctx.lineTo(xX, exitY);
         ctx.stroke();
         ctx.globalAlpha = 1;
-
         // Trade zone shading
         const topY = Math.min(entryY, exitY);
         const botY = Math.max(entryY, exitY);
         ctx.fillStyle = st.pnl >= 0 ? T.greenBg : T.redBg;
         ctx.fillRect(eX, topY, xX - eX, botY - topY);
-
         // Entry marker
         ctx.fillStyle = st.side === "long" ? T.green : T.red;
         ctx.beginPath();
@@ -514,7 +448,6 @@ export default function NQForensicVisualizer() {
           ctx.lineTo(eX + 6, entryY - 16);
         }
         ctx.fill();
-
         // Exit marker
         ctx.fillStyle = st.pnl >= 0 ? T.green : T.red;
         ctx.beginPath();
@@ -524,43 +457,36 @@ export default function NQForensicVisualizer() {
         ctx.beginPath();
         ctx.arc(xX, exitY, 2.5, 0, Math.PI * 2);
         ctx.fill();
-
         // Trade label
         const labelX = eX + (xX - eX) / 2;
         const labelY = st.side === "long" ? Math.min(tp1Y, entryY) - 20 : Math.max(stopY, entryY) + 30;
         const labelText = `${st.rMultiple > 0 ? "+" : ""}${st.rMultiple}R  $${st.pnl > 0 ? "+" : ""}${st.pnl.toFixed(0)}  ${st.exitType.replace(/_/g, " ").toUpperCase()}`;
-
         ctx.font = "bold 9px monospace";
         const lw = ctx.measureText(labelText).width + 12;
         ctx.fillStyle = st.pnl >= 0 ? "#0a2a1a" : "#2a0a0e";
         ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red;
         ctx.lineWidth = 1;
-
         const rr = 4;
         const lx = labelX - lw / 2, ly = labelY - 8, lh = 18;
         ctx.beginPath();
         ctx.roundRect(lx, ly, lw, lh, rr);
         ctx.fill();
         ctx.stroke();
-
         ctx.fillStyle = st.pnl >= 0 ? T.green : T.red;
         ctx.textAlign = "center";
         ctx.fillText(labelText, labelX, labelY + 4);
       }
     }
-
     // ── CANDLES
     visibleCandles.forEach((c, i) => {
       const x = (i / count) * chartW + (chartW / count - bodyW) / 2;
       const xCenter = (i / count) * chartW + (chartW / count) / 2;
       const isGreen = c.close >= c.open;
       const color = isGreen ? T.green : T.red;
-
       const oY = priceToY(c.open);
       const cY = priceToY(c.close);
       const hY = priceToY(c.high);
       const lY = priceToY(c.low);
-
       // Wick
       ctx.strokeStyle = color;
       ctx.lineWidth = 1;
@@ -568,7 +494,6 @@ export default function NQForensicVisualizer() {
       ctx.moveTo(xCenter, hY);
       ctx.lineTo(xCenter, lY);
       ctx.stroke();
-
       // Body
       ctx.fillStyle = isGreen ? color : color;
       const bodyTop = Math.min(oY, cY);
@@ -583,22 +508,18 @@ export default function NQForensicVisualizer() {
         ctx.fillStyle = color;
         ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
       }
-
       // Volume bars
       const vH = (c.volume / volRange.max) * (VOL_H - 8);
       vctx.fillStyle = isGreen ? T.greenDim : T.redDim;
       vctx.fillRect(x, VOL_H - vH, bodyW, vH);
     });
-
     // ── Non-selected trade markers (small)
     filteredTrades.forEach(t => {
       if (selectedTrade && t.id === selectedTrade.id) return;
       const entryIdx = candles.findIndex(c => c.time >= t.entryTime);
       if (entryIdx < viewStart || entryIdx >= viewEnd) return;
-
       const x = ((entryIdx - viewStart) / count) * chartW + (chartW / count) / 2;
       const y = priceToY(t.entryPrice);
-
       ctx.fillStyle = t.pnl >= 0 ? T.green : T.red;
       ctx.globalAlpha = 0.7;
       if (t.side === "long") {
@@ -616,7 +537,6 @@ export default function NQForensicVisualizer() {
       }
       ctx.globalAlpha = 1;
     });
-
     // ── Crosshair
     if (crosshairPos) {
       const { x, y } = crosshairPos;
@@ -632,7 +552,6 @@ export default function NQForensicVisualizer() {
       ctx.lineTo(chartW, y);
       ctx.stroke();
       ctx.setLineDash([]);
-
       // Price label on axis
       const price = pMin + ((CHART_H - y) / CHART_H) * pRange;
       ctx.fillStyle = T.bgActive;
@@ -642,7 +561,6 @@ export default function NQForensicVisualizer() {
       ctx.textAlign = "right";
       ctx.fillText(formatPrice(price), w - 8, y + 4);
     }
-
     // ── Price axis border
     ctx.strokeStyle = T.border;
     ctx.lineWidth = 1;
@@ -650,16 +568,13 @@ export default function NQForensicVisualizer() {
     ctx.moveTo(chartW, 0);
     ctx.lineTo(chartW, CHART_H);
     ctx.stroke();
-
     vctx.strokeStyle = T.border;
     vctx.lineWidth = 1;
     vctx.beginPath();
     vctx.moveTo(chartW, 0);
     vctx.lineTo(chartW, VOL_H);
     vctx.stroke();
-
   }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, indexToX, getChartWidth]);
-
   // ── MOUSE HANDLERS ──────────────────────────────────────────
   const handleMouseMove = useCallback((e) => {
     const rect = chartRef.current?.getBoundingClientRect();
@@ -668,14 +583,11 @@ export default function NQForensicVisualizer() {
     const y = e.clientY - rect.top;
     const chartW = getChartWidth();
     if (x > chartW) { setCrosshairPos(null); setHoveredCandle(null); return; }
-
     setCrosshairPos({ x, y });
-
     const idx = xToIndex(x);
     if (idx >= 0 && idx < candles.length) {
       setHoveredCandle(candles[idx]);
     }
-
     if (isDragging.current) {
       const dx = e.clientX - dragStart.current;
       const pixelsPerCandle = chartW / (viewEnd - viewStart);
@@ -686,42 +598,34 @@ export default function NQForensicVisualizer() {
       setViewEnd(Math.min(candles.length, newStart + range));
     }
   }, [candles, viewStart, viewEnd, getChartWidth, xToIndex]);
-
   const handleMouseDown = useCallback((e) => {
     isDragging.current = true;
     dragStart.current = e.clientX;
     dragViewStart.current = viewStart;
     e.preventDefault();
   }, [viewStart]);
-
   const handleMouseUp = useCallback(() => {
     isDragging.current = false;
   }, []);
-
   const handleMouseLeave = useCallback(() => {
     setCrosshairPos(null);
     setHoveredCandle(null);
     isDragging.current = false;
   }, []);
-
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 1.1 : 0.9;
     const range = viewEnd - viewStart;
     const newRange = Math.max(30, Math.min(candles.length, Math.round(range * delta)));
-
     const chartW = getChartWidth();
     const rect = chartRef.current?.getBoundingClientRect();
     const mouseX = rect ? (e.clientX - rect.left) / chartW : 0.5;
-
     const center = viewStart + range * mouseX;
     const newStart = Math.max(0, Math.round(center - newRange * mouseX));
     const newEnd = Math.min(candles.length, newStart + newRange);
-
     setViewStart(newStart);
     setViewEnd(newEnd);
   }, [candles, viewStart, viewEnd, getChartWidth]);
-
   // Focus on trade
   const focusTrade = useCallback((trade) => {
     setSelectedTrade(trade);
@@ -733,7 +637,6 @@ export default function NQForensicVisualizer() {
     setViewStart(newStart);
     setViewEnd(newEnd);
   }, [candles]);
-
   // Stats
   const stats = useMemo(() => {
     const ft = filteredTrades;
@@ -753,7 +656,6 @@ export default function NQForensicVisualizer() {
       avgLoss: losses.length > 0 ? (grossLoss / losses.length).toFixed(2) : "0",
     };
   }, [filteredTrades]);
-
   if (loading) {
     return (
       <div style={{ background: T.bg, color: T.text, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'SF Mono', monospace" }}>
@@ -761,20 +663,16 @@ export default function NQForensicVisualizer() {
       </div>
     );
   }
-
   const exitColor = (type) => {
     const m = { pt1_partial: T.blue, pt2_target: T.purple, trailing_stop: T.green, stop_loss: T.red, be_plus: T.amber };
     return m[type] || T.text;
   };
-
   const regimeColor = (r) => {
     const m = { trending_up: T.green, trending_down: T.red, ranging: T.amber, unknown: T.textMuted };
     return m[r] || T.text;
   };
-
   return (
     <div style={{ background: T.bg, color: T.text, minHeight: "100vh", fontFamily: "'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace", fontSize: 12, overflow: "hidden" }}>
-
       {/* ── HEADER BAR */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 16px", borderBottom: `1px solid ${T.border}`, background: T.bgPanel }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -789,7 +687,6 @@ export default function NQForensicVisualizer() {
             ))}
           </div>
         </div>
-
         {hoveredCandle && (
           <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
             <span style={{ color: T.textMuted }}>{formatFull(hoveredCandle.time)}</span>
@@ -801,12 +698,9 @@ export default function NQForensicVisualizer() {
           </div>
         )}
       </div>
-
       <div style={{ display: "flex", height: "calc(100vh - 42px)" }}>
-
         {/* ── CHART AREA */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }} ref={containerRef}>
-
           {/* Main chart canvas */}
           <div style={{ position: "relative", cursor: isDragging.current ? "grabbing" : "crosshair" }}
             onMouseMove={handleMouseMove} onMouseDown={handleMouseDown}
@@ -815,12 +709,10 @@ export default function NQForensicVisualizer() {
           >
             <canvas ref={chartRef} style={{ display: "block" }} />
           </div>
-
           {/* Volume canvas */}
           <div style={{ borderTop: `1px solid ${T.border}` }}>
             <canvas ref={volRef} style={{ display: "block" }} />
           </div>
-
           {/* ── STATS BAR */}
           {stats && (
             <div style={{ display: "flex", gap: 1, padding: 0, borderTop: `1px solid ${T.border}`, background: T.bgPanel }}>
@@ -841,10 +733,8 @@ export default function NQForensicVisualizer() {
             </div>
           )}
         </div>
-
         {/* ── SIDEBAR: FILTERS + TRADE TABLE */}
         <div style={{ width: 340, borderLeft: `1px solid ${T.border}`, display: "flex", flexDirection: "column", background: T.bgPanel }}>
-
           {/* Filters */}
           <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2, marginBottom: 8 }}>FILTERS</div>
@@ -881,7 +771,6 @@ export default function NQForensicVisualizer() {
               <span style={{ fontSize: 11, color: T.textBright, fontWeight: 600, minWidth: 36 }}>{filterMinScore.toFixed(2)}</span>
             </div>
           </div>
-
           {/* Selected trade detail */}
           {selectedTrade && (
             <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, background: T.bgCard }}>
@@ -915,7 +804,6 @@ export default function NQForensicVisualizer() {
               </div>
             </div>
           )}
-
           {/* Trade table */}
           <div style={{ flex: 1, overflow: "auto" }}>
             <div style={{ padding: "8px 12px 4px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>
@@ -951,7 +839,6 @@ export default function NQForensicVisualizer() {
               ))}
             </div>
           </div>
-
           {/* Legend */}
           <div style={{ padding: "8px 12px", borderTop: `1px solid ${T.border}`, fontSize: 9, color: T.textMuted }}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
