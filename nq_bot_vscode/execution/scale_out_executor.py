@@ -168,10 +168,11 @@ class ScaleOutExecutor:
         atr: float,
         signal_score: float = 0.0,
         regime: str = "unknown",
+        c1_target_override: float = 0.0,
     ) -> Optional[ScaleOutTrade]:
         """
         Enter a new 2-contract scale-out trade.
-        
+
         Args:
             direction: "long" or "short"
             entry_price: Current market price
@@ -179,13 +180,17 @@ class ScaleOutExecutor:
             atr: Current ATR for target calculation
             signal_score: Confluence score from signal engine
             regime: Current market regime
+            c1_target_override: If > 0, use this as C1 target pts instead of ATR-based
         """
         if self.has_active_trade:
             logger.warning("Cannot enter: active trade exists")
             return None
 
-        # Compute C1 target
-        c1_target_pts = self._compute_c1_target(atr)
+        # Compute C1 target (HC override takes precedence)
+        if c1_target_override > 0:
+            c1_target_pts = c1_target_override
+        else:
+            c1_target_pts = self._compute_c1_target(atr)
         
         # Compute prices
         if direction == "long":
