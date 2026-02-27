@@ -44,13 +44,15 @@ EXECUTION_TIMEFRAMES = {"2m", "3m", "1m"}
 # ── HIGH-CONVICTION FILTER ──────────────────────────────────────────
 # Derived from backtest forensics + C1 exit research (Feb 2026).
 # Only the intersection of tight stops + strong signals showed
-# durable edge. C1 exits via time (10 bars), not fixed target.
+# durable edge.
 #
 #   Rule 1 – Min signal score >= 0.75   (eliminates low-conviction noise)
 #   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
 #
-# C1 target is no longer price-based. C1 exits after 10 bars if
-# profitable (configured in ScaleOutConfig.c1_time_exit_bars).
+# C1 exit: Trail-from-profit (Variant C, validated Feb 2026).
+# Once unrealized profit >= 3.0pts, activate 2.5pt trailing stop
+# from HWM. Fallback: market exit at bar 12 if trailing never
+# activates. (See ScaleOutConfig for params.)
 #
 # These are HARD gates. If a setup doesn't meet both, we skip it
 # and wait. The bot's job is survival, not activity.
@@ -128,7 +130,9 @@ class TradingOrchestrator:
         logger.info(f"  Broker:       Tradovate ({self.config.tradovate.environment})")
         logger.info(f"  Symbol:       {self.config.tradovate.symbol}")
         logger.info(f"  Strategy:     2-contract scale-out (HC filtered)")
-        logger.info(f"  C1 Exit:      Time-based ({self.config.scale_out.c1_time_exit_bars} bars, if profitable)")
+        logger.info(f"  C1 Exit:      Trail from +{self.config.scale_out.c1_profit_threshold_pts}pts "
+                     f"(trail {self.config.scale_out.c1_trail_distance_pts}pts, "
+                     f"fallback {self.config.scale_out.c1_max_bars_fallback} bars)")
         logger.info(f"  HC Min Score: {HIGH_CONVICTION_MIN_SCORE}")
         logger.info(f"  HC Max Stop:  {HIGH_CONVICTION_MAX_STOP_PTS} pts")
         logger.info(f"  Account:      ${self.config.risk.account_size:,.2f}")
@@ -291,7 +295,7 @@ class TradingOrchestrator:
 
             if risk_assessment.decision in (RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE):
                 # === 7. ENTER SCALE-OUT TRADE ===
-                # C1 exits via time-based rule (10 bars if profitable).
+                # C1 exits via trail-from-profit (Variant C).
                 # No fixed TP1 target — managed by ScaleOutExecutor.
                 trade = await self.executor.enter_trade(
                     direction=direction,
@@ -312,7 +316,7 @@ class TradingOrchestrator:
                         "contracts": 2,
                         "entry_price": trade.entry_price,
                         "stop": trade.initial_stop,
-                        "c1_exit_rule": f"time_{self.config.scale_out.c1_time_exit_bars}bars",
+                        "c1_exit_rule": f"trail_from_+{self.config.scale_out.c1_profit_threshold_pts}pts",
                         "signal_score": signal.combined_score,
                         "regime": self._current_regime,
                         "htf_bias": htf_dir,

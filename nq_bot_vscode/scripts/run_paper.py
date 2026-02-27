@@ -105,9 +105,9 @@ class PaperTradingRunner:
     async def start(self) -> None:
         """Initialize pipeline and connect to Tradovate demo."""
         logger.info("=" * 60)
-        logger.info("  PAPER TRADING — CONFIG D + C1 TIME EXIT")
+        logger.info("  PAPER TRADING — CONFIG D + C1 TRAIL FROM PROFIT")
         logger.info("  HC filter: score>=0.75, stop<=30pts")
-        logger.info("  C1 exit: time-based (10 bars, if profitable)")
+        logger.info("  C1 exit: trail from +3pts (trail 2.5pts, fallback 12 bars)")
         logger.info("  HTF gate: strength>=0.3")
         logger.info(f"  Max contracts: {MAX_POSITION_CONTRACTS}")
         logger.info(f"  Daily loss limit: ${DAILY_LOSS_LIMIT_DOLLARS}")

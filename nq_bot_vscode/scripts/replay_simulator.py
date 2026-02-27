@@ -23,12 +23,17 @@ Session rules enforced:
   - Daily loss limit: $500 → halt for the day
   - Max position: 2 contracts
 
-Fill simulation (calibrated slippage v2):
+Fill simulation (calibrated slippage — permanent model):
   - RTH (9:30-16:00 ET): 0.50pt base, +0.50 vol spike, cap 1.50pt
   - ETH (18:01-9:29 ET): 1.00pt base, +0.75 vol spike, cap 2.50pt
   - News window (FOMC/CPI/NFP): +1.00pt, cap 3.00pt
   - All fills (entry + exit + stop) get adverse slippage
-  - Limit orders (Variant B C1 TP) get 0 slippage
+
+C1 Exit: Variant C (Trail from Profit) is now the DEFAULT.
+  - Trail activates once unrealized profit >= 3.0pts
+  - Trail distance: 2.5pts from HWM
+  - Fallback: market exit at bar 12 if trailing never activates
+  Old variants (baseline/A/B/D) still available via --c1-variant flag.
 
 Usage:
     # Real-time replay at 100x speed, starting from 2025-10-01
@@ -37,11 +42,11 @@ Usage:
     # Max speed with dashboard
     python scripts/replay_simulator.py --speed max --start-date 2025-09-01
 
-    # Validate mode — compare to OOS baseline
+    # Validate mode — compare to OOS baseline (uses Variant C by default)
     python scripts/replay_simulator.py --validate
 
-    # Test C1 variant A with calibrated slippage
-    python scripts/replay_simulator.py --validate --c1-variant A
+    # Test old baseline C1 (Time 10) for comparison
+    python scripts/replay_simulator.py --validate --c1-variant baseline
 
     # Compare all 5 variants (baseline + A/B/C/D)
     python scripts/replay_simulator.py --validate --compare-all
@@ -85,18 +90,18 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 TRADES_LOG = LOGS_DIR / "paper_trades.json"
 DECISIONS_LOG = LOGS_DIR / "paper_decisions.json"
 
-# ── OOS Baseline (Config D + C1 Time Exit, Sep 2025 – Feb 2026) ──
+# ── OOS Baseline (Config D + C1 Variant C + Calibrated Slippage, Sep 2025 – Feb 2026) ──
 OOS_BASELINE = {
-    "total_trades": 948,
-    "trades_per_month": 158,
-    "win_rate": 68.1,
-    "profit_factor": 1.59,
-    "total_pnl": 14543.64,
-    "pnl_per_month": 2424.0,
-    "expectancy": 15.34,
-    "max_drawdown_pct": 1.7,
-    "c1_pnl": 3842.58,
-    "c2_pnl": 10701.06,
+    "total_trades": 1161,
+    "trades_per_month": 194,
+    "win_rate": 62.0,
+    "profit_factor": 1.61,
+    "total_pnl": 15894.0,
+    "pnl_per_month": 2649.0,
+    "expectancy": 13.69,
+    "max_drawdown_pct": 1.4,
+    "c1_pnl": 6382.0,
+    "c2_pnl": 9512.0,
     "months": 6,
 }
 
@@ -544,7 +549,7 @@ def render_dashboard(state: ReplayState, speed: str, elapsed_secs: float) -> str
     lines = []
 
     lines.append("")
-    lines.append(f"  REPLAY SIMULATOR — Config D + C1 Time Exit")
+    lines.append(f"  REPLAY SIMULATOR — Config D + C1 Trail from Profit")
     lines.append(f"  Speed: {speed} | Elapsed: {elapsed_secs:.0f}s | "
                  f"Bar: {state.current_time[:19] if state.current_time else '—'}")
     lines.append(f"  {'=' * 60}")
@@ -632,7 +637,7 @@ class ReplaySimulator:
         end_date: Optional[str] = None,
         validate: bool = False,
         data_dir: Optional[str] = None,
-        c1_variant: str = "baseline",
+        c1_variant: str = "C",
         quiet: bool = False,
     ):
         # Default validate mode to the OOS window
@@ -1208,6 +1213,8 @@ class ReplaySimulator:
             return None
 
         # Select C1 phase 1 strategy
+        # "C" uses the native executor Variant C (now the production default)
+        # "baseline" and "D" use the old Time 10 logic
         phase1_map = {
             "baseline": phase1_baseline,
             "A": phase1_variant_a,
@@ -1215,7 +1222,7 @@ class ReplaySimulator:
             "C": phase1_variant_c,
             "D": phase1_baseline,  # D uses original Time 10, RTH restriction is in the loop
         }
-        selected_phase1 = phase1_map.get(variant, phase1_baseline)
+        selected_phase1 = phase1_map.get(variant, phase1_variant_c)
 
         # ── Patched runner (same for all variants) ────────────
 
@@ -1765,9 +1772,9 @@ async def async_main():
         help="Data directory (default: data/firstrate/)"
     )
     parser.add_argument(
-        "--c1-variant", type=str, default="baseline",
+        "--c1-variant", type=str, default="C",
         choices=["baseline", "A", "B", "C", "D"],
-        help="C1 exit strategy variant (default: baseline)"
+        help="C1 exit strategy variant (default: C — trail from profit)"
     )
     parser.add_argument(
         "--compare-all", action="store_true",

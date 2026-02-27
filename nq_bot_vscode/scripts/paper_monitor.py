@@ -177,7 +177,7 @@ class MonitorState:
                 self.position_direction = decision.get("direction", "")
                 self.position_entry_price = decision.get("entry_price", 0)
                 self.position_stop = decision.get("stop", 0)
-                self.position_c1_exit_rule = decision.get("c1_exit_rule", "time_10bars")
+                self.position_c1_exit_rule = decision.get("c1_exit_rule", "trail_from_profit")
                 self.position_entry_time = ts
                 self.position_score = decision.get("signal_score", 0)
                 self.position_regime = decision.get("regime", "")
