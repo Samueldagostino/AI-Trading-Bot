@@ -288,9 +288,15 @@ When using Claude Code Agent Teams, these roles map to the project:
 
 ## Current State & Known Issues
 
-### System Status: VALIDATED FOR PAPER TRADING
+### System Status: READY FOR PAPER TRADING
 
-Config D + C1 Time Exit passed 6-month out-of-sample validation on FirstRate 1-minute absolute-adjusted NQ data (Sep 2025 – Feb 2026). PF 1.59, 6/6 months profitable, max DD 1.7%. Approved for paper trading.
+Config D + C1 Time Exit + Regime Analysis complete. 6-month OOS validated on FirstRate 1-minute absolute-adjusted NQ data (Sep 2025 – Feb 2026). All research phases done. System is ready for live paper trading on Tradovate demo.
+
+**Current Config:**
+- HC filter: score >= 0.75, stop <= 30pts
+- HTF gate: strength >= 0.3 (Config D)
+- C1 exit: time-based (10 bars, if profitable)
+- C2: ATR-based trailing runner
 
 ### Working
 - HC filter (2 gates: score >= 0.75, stop <= 30pts) fully operational
@@ -301,18 +307,24 @@ Config D + C1 Time Exit passed 6-month out-of-sample validation on FirstRate 1-m
 - Paper trading mode via Tradovate
 - 6-month OOS validation pipeline (`scripts/aggregate_1m.py` + `scripts/run_oos_validation.py`)
 - Institutional-grade validation report (`docs/validation_report.html`)
+- Regime cross-analysis complete — no additional gates recommended (`scripts/regime_analysis.py`)
 
-### Planned / In Progress
-- Live paper trading deployment
-- Investigate toxic filter combos identified in MTF confluence analysis (see `docs/mtf_confluence_analysis.md`)
+### Next Milestone
+- Paper trading on Tradovate demo
+
+### Key Edges (from Regime Analysis)
+- **Morning session** (09:30–11:30 ET): PF 3.62, $50/trade, 78% WR — strongest edge
+- **Shorts** outperform longs: +$8,790 vs +$5,904
+- **HTF bearish** is best HTF direction: +$6,357, PF 1.91
+- **Ranging regime**: PF 2.07, $23/trade — best regime
+- **High volatility**: PF 2.26, 83% WR — small sample (23 trades) but strong
 
 ### Watch Items
-- **Sep 2025 is a losing month** for all strategies. Time 10 bars limits Sep loss to -$698 (vs -$1,403 with old 1.5x target).
-- **Oct 2025 was losing with old strategy** (-$387). Time 10 bars turns Oct profitable (+$1,591).
-- **C1 is now net-positive** with time-based exit. No longer a drag on the system.
-- `trending_up + htf=bearish`: 7 trades, 28.6% WR, -$236. Strong candidate for blocking.
-- `session=afternoon + htf=neutral`: 3 trades, 0% WR, -$335. Block if sample grows.
-- Slippage model can push stop distances to ~30.3pts (just past 30pt cap). This is acceptable — it's fill slippage, not a filter leak.
+- **Sep 2025** is weakest month (PF 1.10, +$405) but still profitable
+- **C1 is net-positive** with time-based exit (+$3,843). No longer a drag on the system.
+- Remaining toxic combos are mild (5-12 trades, -$5 to -$34/trade) — too small to gate reliably
+- Previously identified toxic combos (`trending_up + htf=bearish`, `overnight + htf=bearish`) **all resolved** by C1 time exit
+- Slippage model can push stop distances to ~30.3pts (just past 30pt cap). Acceptable — fill slippage, not filter leak.
 
 ---
 
