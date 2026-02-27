@@ -1,0 +1,127 @@
+{
+  "period_id": "period_6",
+  "label": "Sep 2025 - Feb 2026",
+  "regime": "current",
+  "date_range": "2025-09-01 to 2026-03-01",
+  "config": {
+    "c1_variant": "C",
+    "hc_min_score": 0.75,
+    "hc_max_stop": 30.0,
+    "htf_gate": 0.3,
+    "sweep_detector": true,
+    "slippage": "calibrated_v2"
+  },
+  "results": {
+    "total_trades": 1524,
+    "win_rate": 61.9,
+    "profit_factor": 1.73,
+    "total_pnl": 25580.66,
+    "c1_pnl": 10008.04,
+    "c2_pnl": 15572.62,
+    "max_drawdown_pct": 1.4,
+    "expectancy_per_trade": 16.79,
+    "avg_slippage_per_fill": 0.96
+  },
+  "sweep_analysis": {
+    "sweep_trades": 338,
+    "sweep_pnl": 9895.76,
+    "sweep_wr": 61.8,
+    "confluence_trades": 161,
+    "confluence_pnl": 3058.68,
+    "confluence_wr": 67.7,
+    "signal_only_trades": 1025,
+    "signal_only_pnl": 12626.22
+  },
+  "monthly_breakdown": [
+    {
+      "month": "2025-09",
+      "trades": 240,
+      "win_rate": 56.7,
+      "profit_factor": 1.79,
+      "pnl": 3608.02,
+      "c1_pnl": 1230.4,
+      "c2_pnl": 2377.62,
+      "sweep_trades": 63,
+      "sweep_pnl": 2919.88,
+      "confluence_trades": 15,
+      "confluence_pnl": -29.36
+    },
+    {
+      "month": "2025-10",
+      "trades": 292,
+      "win_rate": 57.5,
+      "profit_factor": 1.36,
+      "pnl": 2797.72,
+      "c1_pnl": 903.32,
+      "c2_pnl": 1894.4,
+      "sweep_trades": 81,
+      "sweep_pnl": 332.26,
+      "confluence_trades": 20,
+      "confluence_pnl": 684.16
+    },
+    {
+      "month": "2025-11",
+      "trades": 172,
+      "win_rate": 70.9,
+      "profit_factor": 2.78,
+      "pnl": 6496.18,
+      "c1_pnl": 2369.62,
+      "c2_pnl": 4126.56,
+      "sweep_trades": 49,
+      "sweep_pnl": 2519.84,
+      "confluence_trades": 18,
+      "confluence_pnl": 211.1
+    },
+    {
+      "month": "2025-12",
+      "trades": 305,
+      "win_rate": 61.0,
+      "profit_factor": 1.76,
+      "pnl": 4384.8,
+      "c1_pnl": 1698.55,
+      "c2_pnl": 2686.25,
+      "sweep_trades": 59,
+      "sweep_pnl": 1310.52,
+      "confluence_trades": 45,
+      "confluence_pnl": 752.78
+    },
+    {
+      "month": "2026-01",
+      "trades": 288,
+      "win_rate": 60.8,
+      "profit_factor": 1.67,
+      "pnl": 4701.62,
+      "c1_pnl": 1740.98,
+      "c2_pnl": 2960.64,
+      "sweep_trades": 48,
+      "sweep_pnl": 2404.9,
+      "confluence_trades": 34,
+      "confluence_pnl": 538.18
+    },
+    {
+      "month": "2026-02",
+      "trades": 227,
+      "win_rate": 68.7,
+      "profit_factor": 1.58,
+      "pnl": 3592.32,
+      "c1_pnl": 2065.17,
+      "c2_pnl": 1527.15,
+      "sweep_trades": 38,
+      "sweep_pnl": 408.36,
+      "confluence_trades": 29,
+      "confluence_pnl": 901.82
+    }
+  ],
+  "slippage_summary": {
+    "total_fills": 4479,
+    "total_slippage_points": 4287.5,
+    "avg_slippage_per_fill": 0.96,
+    "entry_slippage_total": 1463.25,
+    "exit_slippage_total": 2824.25,
+    "news_window_fills": 38,
+    "volume_spike_fills": 631
+  },
+  "elapsed_seconds": 509.4,
+  "exec_bars": 85752,
+  "htf_bars": 55246
+}

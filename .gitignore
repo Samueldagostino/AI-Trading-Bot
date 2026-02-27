@@ -34,3 +34,5 @@ backtest_viz_data.json
 
 # FirstRate data (large CSV files, not committed)
 nq_bot_vscode/data/firstrate/
+data/firstrate/raw/
+data/firstrate/historical/
