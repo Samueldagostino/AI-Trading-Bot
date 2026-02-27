@@ -5,23 +5,23 @@ Manages the 2-contract scale-out lifecycle.
 
 THE STRATEGY:
   Entry:  2 MNQ contracts at same price
-  C1:     Fixed target (20-40 pts, ATR-scaled) → close on hit
-  C2:     Runner → stop to breakeven+1 after C1 fills, then trail
+  C1:     Time exit — after 10 bars, exit at market if profitable
+  C2:     Runner → stop to breakeven+1 after C1 exits, then trail
 
 LIFECYCLE:
   1. SIGNAL  → Risk approved → Enter 2 MNQ
-  2. PHASE_1 → Both contracts open, initial stop on both
-  3. C1_HIT  → Contract 1 hits target → close C1, move C2 stop to BE+1
+  2. PHASE_1 → Both contracts open, initial stop on both, counting bars
+  3. C1_EXIT → After 10 bars + C1 in profit → close C1, move C2 stop to BE+1
   4. RUNNING → C2 trailing with ATR-based or fixed trail
   5. C2_EXIT → C2 hits trailing stop, time stop, or max target
   6. DONE    → Record PnL, update risk engine
 
 Win-win math ($2/point MNQ):
-  C1 target 25pts = $50
+  C1 exits 10pts profit after 10 bars = $20
   C2 at breakeven+1 = $2
-  Total minimum win: $52
+  Total minimum win: $22
   C2 runs 80pts = $160
-  Total upside win: $210
+  Total upside win: $180
 
 Worst case (both stopped):
   Stop 20pts = 2 contracts × 20 × $2 = $80 loss
@@ -108,6 +108,9 @@ class ScaleOutTrade:
     market_regime: str = "unknown"
     atr_at_entry: float = 0.0
     
+    # C1 time-based exit tracking
+    c1_bars_elapsed: int = 0      # Bars since entry (for C1 time exit)
+
     # Trailing stop state (for C2)
     c2_trailing_stop: float = 0.0
     c2_best_price: float = 0.0    # Best favorable price seen since entry
@@ -168,37 +171,30 @@ class ScaleOutExecutor:
         atr: float,
         signal_score: float = 0.0,
         regime: str = "unknown",
-        c1_target_override: float = 0.0,
     ) -> Optional[ScaleOutTrade]:
         """
         Enter a new 2-contract scale-out trade.
+
+        C1 exits via time-based rule (10 bars if profitable).
+        C2 trails as runner. Both share initial stop.
 
         Args:
             direction: "long" or "short"
             entry_price: Current market price
             stop_distance: Distance to stop in NQ points
-            atr: Current ATR for target calculation
+            atr: Current ATR for trailing stop calculation
             signal_score: Confluence score from signal engine
             regime: Current market regime
-            c1_target_override: If > 0, use this as C1 target pts instead of ATR-based
         """
         if self.has_active_trade:
             logger.warning("Cannot enter: active trade exists")
             return None
 
-        # Compute C1 target (HC override takes precedence)
-        if c1_target_override > 0:
-            c1_target_pts = c1_target_override
-        else:
-            c1_target_pts = self._compute_c1_target(atr)
-        
-        # Compute prices
+        # Compute stop price
         if direction == "long":
             stop_price = entry_price - stop_distance
-            c1_target_price = entry_price + c1_target_pts
         else:
             stop_price = entry_price + stop_distance
-            c1_target_price = entry_price - c1_target_pts
 
         # Create trade object
         trade = ScaleOutTrade(
@@ -210,13 +206,13 @@ class ScaleOutExecutor:
             atr_at_entry=atr,
         )
 
-        # C1 setup
+        # C1 setup — no fixed target, exits via time-based rule
         trade.c1.entry_price = entry_price
         trade.c1.stop_price = round(stop_price, 2)
-        trade.c1.target_price = round(c1_target_price, 2)
+        trade.c1.target_price = 0  # No fixed target — time-based exit
         trade.c1.contracts = self.scale_config.c1_contracts
 
-        # C2 setup (no fixed target — will trail)
+        # C2 setup — no fixed target, will trail
         trade.c2.entry_price = entry_price
         trade.c2.stop_price = round(stop_price, 2)
         trade.c2.target_price = 0  # No fixed target
@@ -231,29 +227,15 @@ class ScaleOutExecutor:
             await self._live_enter(trade)
 
         self._active_trade = trade
-        
+
+        c1_exit_bars = self.scale_config.c1_time_exit_bars
         logger.info(
             f"SCALE-OUT ENTRY: {direction.upper()} 2x MNQ @ {entry_price:.2f} | "
-            f"Stop: {stop_price:.2f} | C1 Target: {c1_target_price:.2f} ({c1_target_pts:.0f}pts) | "
+            f"Stop: {stop_price:.2f} | C1: time exit after {c1_exit_bars} bars | "
             f"Score: {signal_score:.2f} | Regime: {regime}"
         )
 
         return trade
-
-    def _compute_c1_target(self, atr: float) -> float:
-        """Compute C1 fixed target, clamped to min/max range."""
-        cfg = self.scale_config
-        
-        if cfg.c1_use_atr_target and atr > 0:
-            target = atr * cfg.c1_atr_target_multiplier
-        else:
-            target = cfg.c1_target_default_points
-
-        # Clamp to configured range
-        target = max(target, cfg.c1_target_min_points)
-        target = min(target, cfg.c1_target_max_points)
-        
-        return round(target, 2)
 
     async def _paper_enter(self, trade: ScaleOutTrade, price: float) -> None:
         """Simulated entry fill."""
@@ -290,7 +272,6 @@ class ScaleOutExecutor:
 
         result = await self.broker.place_scale_out_entry(
             direction=trade.direction,
-            c1_target=trade.c1.target_price,
             c2_initial_stop=trade.initial_stop,
         )
 
@@ -325,7 +306,7 @@ class ScaleOutExecutor:
         if trade.phase == ScaleOutPhase.PHASE_1:
             action = await self._manage_phase_1(trade, current_price, current_time)
 
-        # ---- C1 HIT / RUNNING: C2 trailing ----
+        # ---- C1 EXITED / RUNNING: C2 trailing ----
         elif trade.phase in (ScaleOutPhase.C1_HIT, ScaleOutPhase.RUNNING):
             action = await self._manage_runner(trade, current_price, current_time)
 
@@ -334,7 +315,7 @@ class ScaleOutExecutor:
     async def _manage_phase_1(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
         """
         Phase 1: Both contracts open.
-        Check for: C1 target hit, initial stop hit on both.
+        Check for: initial stop hit, C1 time-based exit (10 bars + profitable).
         """
         direction = trade.direction
 
@@ -349,55 +330,63 @@ class ScaleOutExecutor:
             # Both contracts stopped out — full loss
             return await self._close_all(trade, price, time, "stop")
 
-        # --- Check C1 TARGET ---
-        c1_hit = False
-        if direction == "long" and price >= trade.c1.target_price:
-            c1_hit = True
-        elif direction == "short" and price <= trade.c1.target_price:
-            c1_hit = True
+        # --- Count bars for C1 time exit ---
+        trade.c1_bars_elapsed += 1
 
-        if c1_hit:
-            # Close C1 at target
-            trade.c1.exit_price = trade.c1.target_price
-            trade.c1.exit_time = time
-            trade.c1.exit_reason = "target"
-            trade.c1.is_open = False
-            trade.c1.gross_pnl = self._compute_leg_pnl(trade.c1, trade.direction)
-            trade.c1.net_pnl = trade.c1.gross_pnl - trade.c1.commission
+        # --- Check C1 TIME EXIT ---
+        c1_exit_bars = self.scale_config.c1_time_exit_bars
+        if trade.c1_bars_elapsed >= c1_exit_bars:
+            # Exit C1 at market if profitable
+            if direction == "long":
+                c1_in_profit = price > trade.entry_price
+            else:
+                c1_in_profit = price < trade.entry_price
 
-            # Move C2 stop to breakeven + buffer
-            if self.scale_config.c2_move_stop_to_breakeven:
-                buffer = self.scale_config.c2_breakeven_buffer_points
-                if direction == "long":
-                    new_stop = trade.entry_price + buffer
-                else:
-                    new_stop = trade.entry_price - buffer
-                
-                trade.c2.stop_price = round(new_stop, 2)
-                
-                # If live, modify the stop order
-                if not self.config.execution.paper_trading and self.broker:
-                    if trade.c2.stop_order_id:
-                        await self.broker.modify_stop(trade.c2.stop_order_id, new_stop)
+            if c1_in_profit:
+                # Close C1 at market
+                trade.c1.exit_price = round(price, 2)
+                trade.c1.exit_time = time
+                trade.c1.exit_reason = f"time_{c1_exit_bars}bars"
+                trade.c1.is_open = False
+                trade.c1.gross_pnl = self._compute_leg_pnl(trade.c1, trade.direction)
+                trade.c1.net_pnl = trade.c1.gross_pnl - trade.c1.commission
 
-            trade._set_phase(ScaleOutPhase.C1_HIT)
-            trade.c2_best_price = price
+                # Move C2 stop to breakeven + buffer
+                if self.scale_config.c2_move_stop_to_breakeven:
+                    buffer = self.scale_config.c2_breakeven_buffer_points
+                    if direction == "long":
+                        new_stop = trade.entry_price + buffer
+                    else:
+                        new_stop = trade.entry_price - buffer
 
-            logger.info(
-                f"C1 TARGET HIT @ {trade.c1.target_price:.2f} | "
-                f"C1 PnL: ${trade.c1.net_pnl:.2f} | "
-                f"C2 stop moved to BE+1: {trade.c2.stop_price:.2f}"
-            )
+                    trade.c2.stop_price = round(new_stop, 2)
 
-            # Transition to running
-            trade._set_phase(ScaleOutPhase.RUNNING)
+                    # If live, modify the stop order
+                    if not self.config.execution.paper_trading and self.broker:
+                        if trade.c2.stop_order_id:
+                            await self.broker.modify_stop(trade.c2.stop_order_id, new_stop)
 
-            return {
-                "action": "c1_target_hit",
-                "c1_pnl": trade.c1.net_pnl,
-                "c2_new_stop": trade.c2.stop_price,
-                "price": price,
-            }
+                trade._set_phase(ScaleOutPhase.C1_HIT)
+                trade.c2_best_price = price
+
+                c1_pts = abs(price - trade.entry_price)
+                logger.info(
+                    f"C1 TIME EXIT @ bar {trade.c1_bars_elapsed} | "
+                    f"Price: {price:.2f} ({c1_pts:.1f}pts) | "
+                    f"C1 PnL: ${trade.c1.net_pnl:.2f} | "
+                    f"C2 stop moved to BE+1: {trade.c2.stop_price:.2f}"
+                )
+
+                # Transition to running
+                trade._set_phase(ScaleOutPhase.RUNNING)
+
+                return {
+                    "action": "c1_time_exit",
+                    "c1_pnl": trade.c1.net_pnl,
+                    "c1_bars": trade.c1_bars_elapsed,
+                    "c2_new_stop": trade.c2.stop_price,
+                    "price": price,
+                }
 
         # Update best price for tracking
         if direction == "long":

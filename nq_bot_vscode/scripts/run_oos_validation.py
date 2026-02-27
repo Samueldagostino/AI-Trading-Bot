@@ -9,7 +9,8 @@ This is pure out-of-sample validation — NO parameter changes allowed.
 The system under test is identical to the Feb 2026 baseline.
 
 Config D (locked):
-  - HC filter: score >= 0.75, stop <= 30pts, TP1 = 1.5x stop
+  - HC filter: score >= 0.75, stop <= 30pts
+  - C1 exit: time-based (10 bars, if profitable)
   - HTF gate: strength >= 0.3 (blocks when 2+ of 6 HTFs oppose)
   - Execution TF: 2m
   - HTF timeframes: 5m, 15m, 30m, 1H, 4H, 1D
@@ -234,10 +235,10 @@ def generate_markdown_report(
     lines.append("|-----------|-------|")
     lines.append("| HC Min Score | >= 0.75 |")
     lines.append("| HC Max Stop | <= 30 pts |")
-    lines.append("| HC TP1 Ratio | 1.5x stop |")
+    lines.append("| C1 Exit | Time-based (10 bars, if profitable) |")
     lines.append("| HTF Gate | strength >= 0.3 |")
     lines.append("| HTF Timeframes | 5m, 15m, 30m, 1H, 4H, 1D |")
-    lines.append("| Contracts | 2 (C1 fixed target + C2 runner) |")
+    lines.append("| Contracts | 2 (C1 time exit + C2 runner) |")
     lines.append("| Account Size | $50,000 |")
     lines.append("")
     lines.append("## February Baseline (In-Sample)")
@@ -426,7 +427,7 @@ async def main():
     print(f"  Data dir:     {data_dir}")
     print(f"  Exec TF:      {EXEC_TF}")
     print(f"  HTF Gate:     0.3 (Config D)")
-    print(f"  HC Filter:    score>=0.75, stop<=30pts, TP1=1.5x")
+    print(f"  HC Filter:    score>=0.75, stop<=30pts")
     print(f"  Months:       {args.months}")
     print(f"{'=' * 60}\n")
 

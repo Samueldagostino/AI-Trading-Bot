@@ -123,24 +123,20 @@ class TradovateConfig:
 class ScaleOutConfig:
     """
     2-Contract Scale-Out — THE BREAD AND BUTTER.
-    
-    Contract 1: Fixed target (20-40 pts, ATR-scaled)
-    Contract 2: Runner, stop to breakeven+1 after C1 fills, then trail
-    
+
+    Contract 1: Time-based exit — after N bars, exit at market if profitable
+    Contract 2: Runner, stop to breakeven+1 after C1 exits, then trail
+
     Win-win architecture:
-      Best:  C1 target + C2 runs big  → $50 + $200 = $250
-      Good:  C1 target + C2 at BE     → $50 + $2   = $52
-      Worst: Both at initial stop     → Controlled loss (~$60-80)
+      Best:  C1 time exit + C2 runs big  → $20 + $200 = $220
+      Good:  C1 time exit + C2 at BE     → $20 + $2   = $22
+      Worst: Both at initial stop        → Controlled loss (~$60-80)
     """
     total_contracts: int = 2
-    
-    # Contract 1 — Fixed target
+
+    # Contract 1 — Time-based exit
     c1_contracts: int = 1
-    c1_target_min_points: float = 20.0
-    c1_target_max_points: float = 40.0
-    c1_target_default_points: float = 25.0
-    c1_use_atr_target: bool = True
-    c1_atr_target_multiplier: float = 1.5
+    c1_time_exit_bars: int = 10             # Exit C1 after N bars if profitable
     
     # Contract 2 — Runner
     c2_contracts: int = 1
@@ -153,7 +149,7 @@ class ScaleOutConfig:
     c2_max_target_points: float = 150.0
     c2_time_stop_minutes: int = 120
     
-    c2_be_trigger: str = "c1_filled"          # Move stop to BE when C1 fills
+    c2_be_trigger: str = "c1_exited"           # Move stop to BE when C1 exits (time or stop)
 
 
 @dataclass
