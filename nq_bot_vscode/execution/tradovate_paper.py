@@ -292,7 +292,6 @@ class TradovatePaperConnector:
     async def place_scale_out_entry(
         self,
         direction: str,
-        c1_target: float,
         c2_initial_stop: float,
         entry_price: float = 0.0,
     ) -> Dict:
@@ -314,14 +313,12 @@ class TradovatePaperConnector:
 
         self._log_event("entry_attempt", {
             "direction": direction,
-            "c1_target": c1_target,
             "c2_initial_stop": c2_initial_stop,
             "entry_price": entry_price,
         })
 
         result = await self._client.place_scale_out_entry(
             direction=direction,
-            c1_target=c1_target,
             c2_initial_stop=c2_initial_stop,
             entry_price=entry_price,
         )

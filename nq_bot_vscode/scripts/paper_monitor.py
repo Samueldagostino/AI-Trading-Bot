@@ -34,11 +34,11 @@ LOGS_DIR = project_dir / "logs"
 TRADES_LOG = LOGS_DIR / "paper_trades.json"
 DECISIONS_LOG = LOGS_DIR / "paper_decisions.json"
 
-# OOS baseline
-OOS_EXPECTANCY = 7.72
-OOS_WIN_RATE = 46.7
-OOS_PF = 1.15
-OOS_TRADES_PER_MONTH = 125
+# OOS baseline (Config D + C1 Time Exit, Sep 2025 – Feb 2026)
+OOS_EXPECTANCY = 15.34
+OOS_WIN_RATE = 68.1
+OOS_PF = 1.59
+OOS_TRADES_PER_MONTH = 158
 
 # Safety limits
 DAILY_LOSS_LIMIT = 500.0
@@ -80,7 +80,7 @@ class MonitorState:
         self.position_direction = ""
         self.position_entry_price = 0.0
         self.position_stop = 0.0
-        self.position_c1_target = 0.0
+        self.position_c1_exit_rule = ""
         self.position_entry_time = ""
         self.position_score = 0.0
         self.position_regime = ""
@@ -177,12 +177,15 @@ class MonitorState:
                 self.position_direction = decision.get("direction", "")
                 self.position_entry_price = decision.get("entry_price", 0)
                 self.position_stop = decision.get("stop", 0)
-                self.position_c1_target = decision.get("c1_target", 0)
+                self.position_c1_exit_rule = decision.get("c1_exit_rule", "time_10bars")
                 self.position_entry_time = ts
                 self.position_score = decision.get("signal_score", 0)
                 self.position_regime = decision.get("regime", "")
                 if event_date == today:
                     self.today_entries += 1
+
+            elif dec == "c1_time_exit":
+                pass  # C1 exited, position still open (C2 running)
 
             elif dec == "trade_closed":
                 self.has_position = False
@@ -237,14 +240,12 @@ def render_dashboard(state: MonitorState) -> str:
         direction = state.position_direction.upper()
         entry = state.position_entry_price
         stop = state.position_stop
-        target = state.position_c1_target
         stop_dist = abs(entry - stop) if entry and stop else 0
-        target_dist = abs(target - entry) if target and entry else 0
 
         lines.append(f"  Direction:  {direction}")
         lines.append(f"  Entry:      {entry:.2f}")
         lines.append(f"  Stop:       {stop:.2f}  ({stop_dist:.1f}pts)")
-        lines.append(f"  C1 Target:  {target:.2f}  ({target_dist:.1f}pts)")
+        lines.append(f"  C1 Exit:    {state.position_c1_exit_rule}")
         lines.append(f"  Score:      {state.position_score:.3f}")
         lines.append(f"  Regime:     {state.position_regime}")
         lines.append(f"  Since:      {state.position_entry_time[:19]}")
