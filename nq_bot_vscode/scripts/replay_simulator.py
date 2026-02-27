@@ -81,6 +81,7 @@ from data_pipeline.pipeline import (
     MINUTES_TO_LABEL,
 )
 from main import TradingOrchestrator, HTF_TIMEFRAMES
+from signals.liquidity_sweep import LiquiditySweepDetector
 
 logger = logging.getLogger(__name__)
 
@@ -481,6 +482,18 @@ class ReplayState:
         self.total_slippage_cost = 0.0  # Dollars lost to slippage
         self.friction_losses = 0  # Trades where C1 profit < slippage cost
 
+        # Sweep tracking
+        self.sweep_trades = 0         # Trades triggered by sweep signal
+        self.sweep_wins = 0
+        self.sweep_losses = 0
+        self.sweep_pnl = 0.0
+        self.confluence_trades = 0    # Trades with sweep+signal confluence
+        self.confluence_wins = 0
+        self.confluence_pnl = 0.0
+        self.signal_only_trades = 0   # Trades from existing signals only
+        self.signal_only_wins = 0
+        self.signal_only_pnl = 0.0
+
     def reset_daily(self, date_str: str) -> None:
         """Reset daily counters for a new trading day."""
         self.daily_pnl = 0.0
@@ -639,6 +652,7 @@ class ReplaySimulator:
         data_dir: Optional[str] = None,
         c1_variant: str = "C",
         quiet: bool = False,
+        sweep_enabled: bool = True,
     ):
         # Default validate mode to the OOS window
         if validate and not start_date:
@@ -653,6 +667,7 @@ class ReplaySimulator:
         self.data_dir = data_dir or str(project_dir / "data" / "firstrate")
         self.c1_variant = c1_variant
         self.quiet = quiet  # suppress verbose output in compare-all mode
+        self.sweep_enabled = sweep_enabled
 
         self.state = ReplayState()
         self.bot: Optional[TradingOrchestrator] = None
@@ -665,6 +680,9 @@ class ReplaySimulator:
         self._current_bar_volume = 0
         self._current_bar_time: Optional[datetime] = None
         self._current_et_time: Optional[datetime] = None
+
+        # Track signal source for current open trade
+        self._current_trade_source = "signal"
 
         # Speed → delay between exec bars (seconds)
         self._delay = self._parse_speed(speed)
@@ -690,10 +708,12 @@ class ReplaySimulator:
 
         # ── Load data ──
         variant_desc = self.C1_VARIANTS.get(self.c1_variant, self.c1_variant)
+        sweep_str = "ENABLED" if self.sweep_enabled else "DISABLED"
         if not self.quiet:
             print(f"\n{'=' * 62}")
             print(f"  REPLAY SIMULATOR — Config D")
             print(f"  C1 variant: {self.c1_variant} — {variant_desc}")
+            print(f"  Sweep detector: {sweep_str}")
             print(f"  Speed: {self.speed} | Validate: {self.validate}")
             if self.start_date:
                 print(f"  Start: {self.start_date}")
@@ -738,6 +758,7 @@ class ReplaySimulator:
         # ── Initialize orchestrator ──
         CONFIG.execution.paper_trading = True
         self.bot = TradingOrchestrator(CONFIG)
+        self.bot._sweep_enabled = self.sweep_enabled
         await self.bot.initialize(skip_db=True)
 
         # ── Patch executor with dynamic slippage ──
@@ -1295,15 +1316,21 @@ class ReplaySimulator:
             self.state.position_score = result.get("signal_score", 0)
             self.state.position_entry_time = result.get("timestamp", "")
 
+            # Track signal source for sweep analysis
+            self._current_trade_source = result.get("signal_source", "signal")
+
             self._log_decision("entry", {
                 "direction": result.get("direction"),
                 "entry_price": result.get("entry_price"),
                 "stop": result.get("stop"),
                 "c1_exit_rule": result.get("c1_exit_rule"),
                 "signal_score": result.get("signal_score"),
+                "signal_source": result.get("signal_source"),
                 "regime": result.get("regime"),
                 "htf_bias": result.get("htf_bias"),
                 "htf_strength": result.get("htf_strength"),
+                "sweep_levels": result.get("sweep_levels"),
+                "sweep_score": result.get("sweep_score"),
             }, timestamp)
 
         elif action == "c1_time_exit":
@@ -1340,6 +1367,27 @@ class ReplaySimulator:
         self.state.record_trade(pnl, c1_pnl, c2_pnl)
         self.state.has_position = False
 
+        # Track sweep-specific metrics
+        source = getattr(self, '_current_trade_source', 'signal')
+        if source == "sweep":
+            self.state.sweep_trades += 1
+            self.state.sweep_pnl += pnl
+            if pnl > 0:
+                self.state.sweep_wins += 1
+            elif pnl < 0:
+                self.state.sweep_losses += 1
+        elif source == "confluence":
+            self.state.confluence_trades += 1
+            self.state.confluence_pnl += pnl
+            if pnl > 0:
+                self.state.confluence_wins += 1
+        else:
+            self.state.signal_only_trades += 1
+            self.state.signal_only_pnl += pnl
+            if pnl > 0:
+                self.state.signal_only_wins += 1
+        self._current_trade_source = "signal"  # Reset
+
         self.state.trades_log.append({
             "timestamp": timestamp.isoformat(),
             "event": "trade_closed",
@@ -1354,6 +1402,7 @@ class ReplaySimulator:
             "exit_slippage_pts": exit_slip,
             "total_slippage_pts": total_slip,
             "daily_pnl": self.state.daily_pnl,
+            "signal_source": source,
         })
 
         self._log_decision("trade_closed", {
@@ -1393,6 +1442,30 @@ class ReplaySimulator:
         """Build results dict for validation comparison."""
         stats = self.bot.executor.get_stats() if self.bot else {}
         slippage_summary = self.slippage_engine.summary()
+
+        # Sweep detector stats
+        sweep_stats = {}
+        if self.sweep_enabled and self.bot:
+            sweep_det = self.bot.sweep_detector
+            sweep_stats = sweep_det.get_stats()
+            sweep_stats["sweep_trades"] = self.state.sweep_trades
+            sweep_stats["sweep_wins"] = self.state.sweep_wins
+            sweep_stats["sweep_losses"] = self.state.sweep_losses
+            sweep_stats["sweep_pnl"] = round(self.state.sweep_pnl, 2)
+            sweep_stats["sweep_wr"] = round(
+                self.state.sweep_wins / self.state.sweep_trades * 100, 1
+            ) if self.state.sweep_trades > 0 else 0.0
+            sweep_stats["confluence_trades"] = self.state.confluence_trades
+            sweep_stats["confluence_wins"] = self.state.confluence_wins
+            sweep_stats["confluence_pnl"] = round(self.state.confluence_pnl, 2)
+            sweep_stats["confluence_wr"] = round(
+                self.state.confluence_wins / self.state.confluence_trades * 100, 1
+            ) if self.state.confluence_trades > 0 else 0.0
+            sweep_stats["signal_only_trades"] = self.state.signal_only_trades
+            sweep_stats["signal_only_wins"] = self.state.signal_only_wins
+            sweep_stats["signal_only_pnl"] = round(self.state.signal_only_pnl, 2)
+            sweep_stats["sweep_log"] = sweep_det.sweep_log
+
         return {
             "total_trades": self.state.total_trades,
             "total_pnl": round(self.state.total_pnl, 2),
@@ -1414,6 +1487,8 @@ class ReplaySimulator:
             "total_slippage_cost": round(self.state.total_slippage_cost, 2),
             "friction_losses": self.state.friction_losses,
             "c1_variant": self.c1_variant,
+            "sweep_enabled": self.sweep_enabled,
+            "sweep_stats": sweep_stats,
         }
 
     # ================================================================
@@ -1745,6 +1820,232 @@ async def run_compare_all(args):
 
 
 # ================================================================
+# SWEEP COMPARE: Baseline (no sweep) vs Test (with sweep)
+# ================================================================
+SWEEP_ANALYSIS_LOG = LOGS_DIR / "sweep_analysis.json"
+
+
+async def run_sweep_compare(args):
+    """Run BASELINE (no sweeps) vs TEST (with sweeps), print comparison."""
+    print(f"\n{'=' * 70}")
+    print(f"  SWEEP DETECTOR A/B TEST — BASELINE vs BASELINE+SWEEPS")
+    print(f"  C1 variant: {args.c1_variant} | OOS window: Sep 2025 – Feb 2026")
+    print(f"{'=' * 70}\n")
+
+    runs = {}
+    for label, sweep_on in [("BASELINE", False), ("TEST", True)]:
+        sweep_str = "ENABLED" if sweep_on else "DISABLED"
+        print(f"\n{'#' * 62}")
+        print(f"  RUNNING: {label} (sweep detector {sweep_str})")
+        print(f"{'#' * 62}")
+
+        sim = ReplaySimulator(
+            speed="max",
+            start_date=args.start_date or "2025-09-01",
+            end_date=args.end_date or "2026-03-01",
+            validate=False,
+            data_dir=args.data_dir,
+            c1_variant=args.c1_variant,
+            quiet=True,
+            sweep_enabled=sweep_on,
+        )
+        results = await sim.run()
+
+        # Attach monthly breakdown
+        monthly = {}
+        for t in sim.state.trades_log:
+            ts = t.get("timestamp", "")
+            month = ts[:7]
+            if not month:
+                continue
+            if month not in monthly:
+                monthly[month] = {
+                    "trades": 0, "wins": 0, "pnl": 0.0,
+                    "c1_pnl": 0.0, "c2_pnl": 0.0,
+                    "gross_profit": 0.0, "gross_loss": 0.0,
+                    "sweep_trades": 0, "sweep_pnl": 0.0, "sweep_wins": 0,
+                    "confluence_trades": 0, "confluence_pnl": 0.0,
+                }
+            m = monthly[month]
+            pnl = t.get("total_pnl", 0)
+            m["trades"] += 1
+            m["pnl"] += pnl
+            m["c1_pnl"] += t.get("c1_pnl", 0)
+            m["c2_pnl"] += t.get("c2_pnl", 0)
+            if pnl > 0:
+                m["wins"] += 1
+                m["gross_profit"] += pnl
+            else:
+                m["gross_loss"] += abs(pnl)
+            src = t.get("signal_source", "signal")
+            if src == "sweep":
+                m["sweep_trades"] += 1
+                m["sweep_pnl"] += pnl
+                if pnl > 0:
+                    m["sweep_wins"] += 1
+            elif src == "confluence":
+                m["confluence_trades"] += 1
+                m["confluence_pnl"] += pnl
+
+        results["monthly"] = monthly
+        runs[label] = results
+
+        print(f"  → {label}: PF {results['profit_factor']:.2f} | "
+              f"PnL ${results['total_pnl']:+,.0f} | "
+              f"WR {results['win_rate']:.1f}% | "
+              f"DD {results['max_drawdown_pct']:.1f}% | "
+              f"Trades {results['total_trades']}")
+
+    # ── Side-by-side comparison ──
+    base = runs["BASELINE"]
+    test = runs["TEST"]
+
+    print(f"\n\n{'=' * 70}")
+    print(f"  SWEEP DETECTOR COMPARISON — BASELINE vs TEST")
+    print(f"{'=' * 70}")
+    print(f"  {'Metric':<25} {'BASELINE':>12} {'TEST':>12} {'Delta':>12}")
+    print(f"  {'─' * 65}")
+
+    def compare(name, bv, tv, unit="", fmt=".1f"):
+        delta = tv - bv
+        d_str = f"{delta:+{fmt}}{unit}"
+        print(f"  {name:<25} {bv:>11{fmt}}{unit} {tv:>11{fmt}}{unit} {d_str:>12}")
+
+    compare("Trades", base["total_trades"], test["total_trades"], "", ".0f")
+    compare("Win Rate", base["win_rate"], test["win_rate"], "%")
+    compare("Profit Factor", base["profit_factor"], test["profit_factor"], "", ".2f")
+    compare("Total PnL ($)", base["total_pnl"], test["total_pnl"], "", ".0f")
+    compare("Expectancy/Trade ($)", base["expectancy"], test["expectancy"], "", ".2f")
+    compare("Max Drawdown (%)", base["max_drawdown_pct"], test["max_drawdown_pct"], "%")
+    compare("C1 PnL ($)", base["c1_pnl"], test["c1_pnl"], "", ".0f")
+    compare("C2 PnL ($)", base["c2_pnl"], test["c2_pnl"], "", ".0f")
+
+    # ── Sweep-specific breakdown (test only) ──
+    sweep = test.get("sweep_stats", {})
+    print(f"\n{'=' * 70}")
+    print(f"  SWEEP DETECTOR METRICS (TEST run)")
+    print(f"{'=' * 70}")
+    print(f"  Sweeps detected:        {sweep.get('total_sweeps_detected', 0)}")
+    print(f"  Sweeps confirmed:       {sweep.get('total_sweeps_confirmed', 0)}")
+    conf_rate = sweep.get('confirmation_rate', 0)
+    print(f"  Confirmation rate:      {conf_rate:.1f}%")
+    print(f"  Sweep-only trades:      {sweep.get('sweep_trades', 0)}")
+    print(f"  Sweep-only WR:          {sweep.get('sweep_wr', 0):.1f}%")
+    print(f"  Sweep-only PnL:         ${sweep.get('sweep_pnl', 0):+,.2f}")
+    print(f"  Confluence trades:      {sweep.get('confluence_trades', 0)}")
+    print(f"  Confluence WR:          {sweep.get('confluence_wr', 0):.1f}%")
+    print(f"  Confluence PnL:         ${sweep.get('confluence_pnl', 0):+,.2f}")
+    print(f"  Signal-only trades:     {sweep.get('signal_only_trades', 0)}")
+    print(f"  Signal-only PnL:        ${sweep.get('signal_only_pnl', 0):+,.2f}")
+
+    # ── Sample size warning ──
+    total_sweep_trades = sweep.get('sweep_trades', 0) + sweep.get('confluence_trades', 0)
+    if total_sweep_trades < 20:
+        print(f"\n  *** WARNING: Only {total_sweep_trades} sweep-related trades. "
+              f"Insufficient sample size (<20). "
+              f"Results may not be statistically significant. ***")
+
+    # ── Monthly breakdown for TEST ──
+    monthly = test.get("monthly", {})
+    if monthly:
+        print(f"\n{'=' * 70}")
+        print(f"  MONTHLY BREAKDOWN — TEST (with sweeps)")
+        print(f"{'=' * 70}")
+        print(f"  {'Month':<10} {'Trades':>6} {'WR':>6} {'PF':>6} "
+              f"{'PnL':>10} {'SwpTrd':>6} {'SwpPnL':>9} {'ConfTrd':>7}")
+        print(f"  {'─' * 65}")
+
+        prof_months = 0
+        for month in sorted(monthly.keys()):
+            m = monthly[month]
+            wr = (m["wins"] / m["trades"] * 100) if m["trades"] > 0 else 0
+            pf = (m["gross_profit"] / m["gross_loss"]) if m["gross_loss"] > 0 else (
+                float('inf') if m["gross_profit"] > 0 else 0)
+            pf_str = f"{pf:.2f}" if pf < 100 else "inf"
+            if m["pnl"] > 0:
+                prof_months += 1
+            print(f"  {month:<10} {m['trades']:>6} {wr:>5.1f}% {pf_str:>6} "
+                  f"${m['pnl']:>+9,.0f} {m['sweep_trades']:>6} "
+                  f"${m['sweep_pnl']:>+8,.0f} {m['confluence_trades']:>7}")
+
+        print(f"  {'─' * 65}")
+        print(f"  Profitable months: {prof_months}/{len(monthly)}")
+
+    # ── Feb 27, 2026 analysis (if data exists) ──
+    sweep_log = sweep.get("sweep_log", [])
+    feb27_sweeps = [s for s in sweep_log if s.get("timestamp", "").startswith("2026-02-27")]
+    if feb27_sweeps:
+        print(f"\n{'=' * 70}")
+        print(f"  FEB 27, 2026 — SWEEP ACTIVITY (330pt MNQ reversal)")
+        print(f"{'=' * 70}")
+        for s in feb27_sweeps:
+            print(f"  {s['timestamp'][:19]} | {s['direction']} | "
+                  f"Levels: {', '.join(s['swept_levels'])} | "
+                  f"Depth: {s['sweep_depth_pts']:.1f}pts | "
+                  f"Vol: {s['volume_ratio']:.1f}x | "
+                  f"Score: {s['score']:.2f}")
+    else:
+        print(f"\n  Note: No sweep signals detected on Feb 27, 2026.")
+        print(f"  (Data may not extend to that date, or no key levels were swept.)")
+
+    # ── Save sweep_analysis.json ──
+    analysis = {
+        "run_date": datetime.now(timezone.utc).isoformat(),
+        "c1_variant": args.c1_variant,
+        "oos_window": f"{args.start_date or '2025-09-01'} to {args.end_date or '2026-03-01'}",
+        "baseline": {
+            "total_trades": base["total_trades"],
+            "win_rate": base["win_rate"],
+            "profit_factor": base["profit_factor"],
+            "total_pnl": base["total_pnl"],
+            "expectancy": base["expectancy"],
+            "max_drawdown_pct": base["max_drawdown_pct"],
+        },
+        "test": {
+            "total_trades": test["total_trades"],
+            "win_rate": test["win_rate"],
+            "profit_factor": test["profit_factor"],
+            "total_pnl": test["total_pnl"],
+            "expectancy": test["expectancy"],
+            "max_drawdown_pct": test["max_drawdown_pct"],
+        },
+        "delta": {
+            "trades": test["total_trades"] - base["total_trades"],
+            "win_rate": round(test["win_rate"] - base["win_rate"], 1),
+            "profit_factor": round(test["profit_factor"] - base["profit_factor"], 2),
+            "total_pnl": round(test["total_pnl"] - base["total_pnl"], 2),
+            "expectancy": round(test["expectancy"] - base["expectancy"], 2),
+        },
+        "sweep_metrics": {
+            "total_sweeps_detected": sweep.get("total_sweeps_detected", 0),
+            "total_sweeps_confirmed": sweep.get("total_sweeps_confirmed", 0),
+            "confirmation_rate": conf_rate,
+            "sweep_only_trades": sweep.get("sweep_trades", 0),
+            "sweep_only_wr": sweep.get("sweep_wr", 0),
+            "sweep_only_pnl": sweep.get("sweep_pnl", 0),
+            "confluence_trades": sweep.get("confluence_trades", 0),
+            "confluence_wr": sweep.get("confluence_wr", 0),
+            "confluence_pnl": sweep.get("confluence_pnl", 0),
+            "total_sweep_related_trades": total_sweep_trades,
+            "insufficient_sample": total_sweep_trades < 20,
+        },
+        "feb_27_2026_sweeps": feb27_sweeps,
+        "monthly_test": {m: {k: v for k, v in d.items()}
+                         for m, d in monthly.items()},
+        "full_sweep_log": sweep_log,
+    }
+
+    try:
+        with open(str(SWEEP_ANALYSIS_LOG), "w") as f:
+            json.dump(analysis, f, indent=2, default=str)
+        print(f"\n  Sweep analysis saved: {SWEEP_ANALYSIS_LOG}")
+    except Exception as e:
+        print(f"  WARNING: Failed to save sweep analysis: {e}")
+
+    print(f"\n{'=' * 70}\n")
+
+
+# ================================================================
 # ENTRYPOINT
 # ================================================================
 async def async_main():
@@ -1780,6 +2081,14 @@ async def async_main():
         "--compare-all", action="store_true",
         help="Run all 5 C1 variants and print comparison table"
     )
+    parser.add_argument(
+        "--sweep-compare", action="store_true",
+        help="A/B test: baseline (no sweeps) vs test (with sweeps)"
+    )
+    parser.add_argument(
+        "--no-sweep", action="store_true",
+        help="Disable the liquidity sweep detector"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -1792,6 +2101,10 @@ async def async_main():
         await run_compare_all(args)
         return
 
+    if args.sweep_compare:
+        await run_sweep_compare(args)
+        return
+
     speed = "max" if args.validate else args.speed
 
     sim = ReplaySimulator(
@@ -1801,6 +2114,7 @@ async def async_main():
         validate=args.validate,
         data_dir=args.data_dir,
         c1_variant=args.c1_variant,
+        sweep_enabled=not args.no_sweep,
     )
 
     await sim.run()
