@@ -70,10 +70,10 @@ LOGS_DIR = project_dir / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 DECISION_LOG_PATH = str(LOGS_DIR / "paper_decisions.json")
 
-# OOS baseline for comparison
-OOS_EXPECTANCY = 7.72     # $/trade from 6-month OOS
-OOS_WIN_RATE = 46.7       # % from 6-month OOS
-OOS_TRADES_PER_MONTH = 125
+# OOS baseline for comparison (Config D + C1 Time Exit, Sep 2025 – Feb 2026)
+OOS_EXPECTANCY = 15.34    # $/trade from 6-month OOS
+OOS_WIN_RATE = 68.1       # % from 6-month OOS
+OOS_TRADES_PER_MONTH = 158
 
 
 class PaperTradingRunner:
@@ -105,8 +105,9 @@ class PaperTradingRunner:
     async def start(self) -> None:
         """Initialize pipeline and connect to Tradovate demo."""
         logger.info("=" * 60)
-        logger.info("  PAPER TRADING — CONFIG D")
-        logger.info("  HC filter: score>=0.75, stop<=30pts, TP1=1.5x")
+        logger.info("  PAPER TRADING — CONFIG D + C1 TIME EXIT")
+        logger.info("  HC filter: score>=0.75, stop<=30pts")
+        logger.info("  C1 exit: time-based (10 bars, if profitable)")
         logger.info("  HTF gate: strength>=0.3")
         logger.info(f"  Max contracts: {MAX_POSITION_CONTRACTS}")
         logger.info(f"  Daily loss limit: ${DAILY_LOSS_LIMIT_DOLLARS}")
@@ -265,7 +266,7 @@ class PaperTradingRunner:
                 "direction": result.get("direction"),
                 "entry_price": result.get("entry_price"),
                 "stop": result.get("stop"),
-                "c1_target": result.get("c1_target"),
+                "c1_exit_rule": result.get("c1_exit_rule"),
                 "signal_score": result.get("signal_score"),
                 "regime": result.get("regime"),
                 "htf_bias": result.get("htf_bias"),
@@ -275,13 +276,14 @@ class PaperTradingRunner:
                 f"ENTRY: {result.get('direction', '?').upper()} @ "
                 f"{result.get('entry_price', 0):.2f} | "
                 f"Stop: {result.get('stop', 0):.2f} | "
-                f"C1 Target: {result.get('c1_target', 0):.2f} | "
+                f"C1: {result.get('c1_exit_rule', 'time_10bars')} | "
                 f"Score: {result.get('signal_score', 0):.3f}"
             )
 
-        elif action == "c1_target_hit":
-            self._log_decision("c1_hit", {
+        elif action == "c1_time_exit":
+            self._log_decision("c1_time_exit", {
                 "c1_pnl": result.get("c1_pnl"),
+                "c1_bars": result.get("c1_bars"),
                 "c2_new_stop": result.get("c2_new_stop"),
                 "price": result.get("price"),
             })
