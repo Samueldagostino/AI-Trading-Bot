@@ -1,0 +1,1111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Config D — Out-of-Sample Validation Report</title>
+<style>
+  :root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+    --accent-green: #3fb950;
+    --accent-red: #f85149;
+    --accent-yellow: #d29922;
+    --accent-blue: #58a6ff;
+    --accent-purple: #bc8cff;
+    --accent-cyan: #39d353;
+    --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', Menlo, monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+
+  /* Header */
+  .report-header {
+    text-align: center;
+    padding: 3rem 0 2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+  .report-header h1 {
+    font-size: 2rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.02em;
+  }
+  .report-header .subtitle {
+    color: var(--text-secondary);
+    font-size: 1rem;
+  }
+  .report-header .timestamp {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    margin-top: 0.5rem;
+  }
+
+  /* Verdict Banner */
+  .verdict-banner {
+    padding: 1.5rem 2rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    text-align: center;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+  .verdict-pass {
+    background: rgba(63, 185, 80, 0.15);
+    border: 1px solid var(--accent-green);
+    color: var(--accent-green);
+  }
+  .verdict-conditional {
+    background: rgba(210, 153, 34, 0.15);
+    border: 1px solid var(--accent-yellow);
+    color: var(--accent-yellow);
+  }
+  .verdict-fail {
+    background: rgba(248, 81, 73, 0.15);
+    border: 1px solid var(--accent-red);
+    color: var(--accent-red);
+  }
+  .verdict-banner .detail {
+    font-weight: 400;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+    color: var(--text-secondary);
+  }
+  .verdict-banner .verdict-pending {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* Metric Cards */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .metric-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    text-align: center;
+  }
+  .metric-card .label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+  }
+  .metric-card .value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+  }
+  .metric-card .delta {
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    margin-top: 0.25rem;
+  }
+  .positive { color: var(--accent-green); }
+  .negative { color: var(--accent-red); }
+  .neutral { color: var(--accent-yellow); }
+
+  /* Section */
+  .section {
+    margin-bottom: 2.5rem;
+  }
+  .section h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+  .section h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: var(--text-secondary);
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    font-family: var(--font-mono);
+  }
+  th {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 2px solid var(--border);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  td {
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+  tr:hover td { background: var(--bg-secondary); }
+  .cell-green { background: rgba(63, 185, 80, 0.12); color: var(--accent-green); font-weight: 600; }
+  .cell-yellow { background: rgba(210, 153, 34, 0.12); color: var(--accent-yellow); font-weight: 600; }
+  .cell-red { background: rgba(248, 81, 73, 0.12); color: var(--accent-red); font-weight: 600; }
+
+  /* Charts */
+  .chart-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .chart-title {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 1rem;
+  }
+  canvas {
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Two-col layout */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; }
+  }
+
+  /* Heatmap */
+  .heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 2px;
+  }
+  .heatmap-cell {
+    aspect-ratio: 1;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+  }
+  .heatmap-labels {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 2px;
+    margin-top: 4px;
+  }
+  .heatmap-label {
+    text-align: center;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  /* Drawdown periods */
+  .dd-list {
+    list-style: none;
+    padding: 0;
+  }
+  .dd-list li {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-red);
+    padding: 0.6rem 1rem;
+    margin-bottom: 0.5rem;
+    border-radius: 0 6px 6px 0;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+  }
+  .dd-list .dd-dates {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+
+  /* Config footer */
+  .config-footer {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-top: 2rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .config-footer h3 {
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    font-size: 0.85rem;
+  }
+  .config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 0.3rem 2rem;
+  }
+  .config-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.2rem 0;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+  }
+  .config-key { color: var(--text-muted); }
+  .config-val { color: var(--text-secondary); font-weight: 600; }
+
+  /* Loading state */
+  .loading {
+    text-align: center;
+    padding: 4rem;
+    color: var(--text-muted);
+  }
+  .loading .spinner {
+    display: inline-block;
+    width: 32px; height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 1rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Back to Index -->
+  <div style="padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 0;">
+    <a href="index.html" style="color: var(--accent-blue); text-decoration: none; font-size: 0.875rem; font-family: var(--font-sans);">
+      &larr; Back to Overview
+    </a>
+  </div>
+
+  <!-- Header -->
+  <div class="report-header">
+    <h1>Config D — Out-of-Sample Validation</h1>
+    <div class="subtitle">MNQ 2-Contract Scale-Out | HC Filter + HTF Gate</div>
+    <div class="timestamp" id="report-timestamp">Report generated: —</div>
+  </div>
+
+  <!-- Verdict Banner (populated by JS) -->
+  <div class="verdict-banner" id="verdict-banner">
+    <div class="verdict-pending">Loading validation data...</div>
+  </div>
+
+  <!-- Executive Summary Metrics -->
+  <div class="metrics-grid" id="exec-metrics">
+    <!-- Populated by JS -->
+  </div>
+
+  <!-- Monthly Performance Table -->
+  <div class="section">
+    <h2>Monthly Performance</h2>
+    <table id="monthly-table">
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Trades</th>
+          <th>Win Rate</th>
+          <th>Profit Factor</th>
+          <th>Total PnL</th>
+          <th>Max DD</th>
+          <th>Exp/Trade</th>
+          <th>C1 PnL</th>
+          <th>C2 PnL</th>
+          <th>HTF Blocked</th>
+        </tr>
+      </thead>
+      <tbody id="monthly-body">
+        <!-- Populated by JS -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Equity Curves -->
+  <div class="section">
+    <h2>Monthly Equity Curves</h2>
+    <div class="two-col" id="equity-charts">
+      <!-- Canvas elements populated by JS -->
+    </div>
+  </div>
+
+  <!-- Regime Distribution -->
+  <div class="section">
+    <h2>Regime Distribution by Month</h2>
+    <div class="chart-container">
+      <canvas id="regime-chart" height="200"></canvas>
+    </div>
+  </div>
+
+  <!-- HTF Block Rate -->
+  <div class="section">
+    <h2>HTF Block Rate by Month</h2>
+    <div class="chart-container">
+      <canvas id="htf-chart" height="150"></canvas>
+    </div>
+  </div>
+
+  <!-- Rolling PF and WR -->
+  <div class="section">
+    <h2>Rolling 20-Trade Metrics</h2>
+    <div class="two-col">
+      <div class="chart-container">
+        <div class="chart-title">Rolling 20-Trade Profit Factor</div>
+        <canvas id="rolling-pf-chart" height="200"></canvas>
+      </div>
+      <div class="chart-container">
+        <div class="chart-title">Rolling 20-Trade Win Rate</div>
+        <canvas id="rolling-wr-chart" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Worst Drawdown Periods -->
+  <div class="section">
+    <h2>Worst Drawdown Periods</h2>
+    <ul class="dd-list" id="dd-list">
+      <!-- Populated by JS -->
+    </ul>
+  </div>
+
+  <!-- Time-of-Day Heatmap -->
+  <div class="section">
+    <h2>Time-of-Day Performance Heatmap (UTC)</h2>
+    <div class="chart-container">
+      <div class="chart-title">Average PnL per Trade by Hour</div>
+      <div class="heatmap-grid" id="tod-heatmap"></div>
+      <div class="heatmap-labels" id="tod-labels"></div>
+    </div>
+  </div>
+
+  <!-- Config Footer -->
+  <div class="config-footer">
+    <h3>Config D Parameters (Reproducibility Record)</h3>
+    <div class="config-grid">
+      <div class="config-item"><span class="config-key">HC Min Score</span><span class="config-val">>= 0.75</span></div>
+      <div class="config-item"><span class="config-key">HC Max Stop</span><span class="config-val"><= 30 pts</span></div>
+      <div class="config-item"><span class="config-key">HC TP1 Ratio</span><span class="config-val">1.5x stop</span></div>
+      <div class="config-item"><span class="config-key">HTF Gate</span><span class="config-val">strength >= 0.3</span></div>
+      <div class="config-item"><span class="config-key">HTF Timeframes</span><span class="config-val">5m 15m 30m 1H 4H 1D</span></div>
+      <div class="config-item"><span class="config-key">Execution TF</span><span class="config-val">2m</span></div>
+      <div class="config-item"><span class="config-key">Contracts</span><span class="config-val">2 (C1 + C2)</span></div>
+      <div class="config-item"><span class="config-key">Account Size</span><span class="config-val">$50,000</span></div>
+      <div class="config-item"><span class="config-key">Point Value</span><span class="config-val">$2.00 (MNQ)</span></div>
+      <div class="config-item"><span class="config-key">Commission</span><span class="config-val">$1.29/contract</span></div>
+      <div class="config-item"><span class="config-key">C2 Trail</span><span class="config-val">ATR x 2.0</span></div>
+      <div class="config-item"><span class="config-key">C2 Time Stop</span><span class="config-val">120 min</span></div>
+      <div class="config-item"><span class="config-key">Data Source</span><span class="config-val">FirstRate 1m adj</span></div>
+      <div class="config-item"><span class="config-key">Baseline</span><span class="config-val">Feb 2026: 84t PF 1.29</span></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Chart.js (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// DATA LOADING
+// ═══════════════════════════════════════════════════════════════
+
+const BASELINE = {
+  trades: 84, win_rate: 50.0, profit_factor: 1.29,
+  total_pnl: 1304.36, max_drawdown_pct: 2.8, expectancy: 15.53,
+};
+
+// Attempt to load viz_data_full.json and per-month files
+// Falls back to embedded data if available
+let REPORT_DATA = null;
+let MONTHLY_VIZ = {};
+
+async function loadData() {
+  // Try loading from relative paths (served by dashboard or local)
+  const paths = [
+    './viz_data_full.json',
+    '../data/firstrate/viz_data_full.json',
+    '../backtest_viz_data.json',
+  ];
+
+  for (const path of paths) {
+    try {
+      const resp = await fetch(path);
+      if (resp.ok) {
+        REPORT_DATA = await resp.json();
+        break;
+      }
+    } catch (e) { /* continue */ }
+  }
+
+  // Try loading per-month files
+  if (REPORT_DATA && REPORT_DATA.summary && REPORT_DATA.summary.months_tested) {
+    // We'll try common month patterns
+  }
+
+  // Also check if data is embedded in the page
+  const embedded = document.getElementById('embedded-data');
+  if (embedded && !REPORT_DATA) {
+    try {
+      REPORT_DATA = JSON.parse(embedded.textContent);
+    } catch (e) { /* skip */ }
+  }
+
+  if (REPORT_DATA) {
+    renderReport(REPORT_DATA);
+  } else {
+    renderPlaceholder();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════════
+
+function renderPlaceholder() {
+  document.getElementById('verdict-banner').innerHTML = `
+    <div style="color: var(--text-muted);">
+      <strong>Awaiting Data</strong>
+      <div class="detail">
+        Place <code>viz_data_full.json</code> alongside this file or serve via dashboard.<br>
+        Run: <code>python scripts/run_oos_validation.py</code> to generate data.
+      </div>
+    </div>
+  `;
+
+  document.getElementById('report-timestamp').textContent =
+    'Report template — populate with validation data';
+
+  // Show sample structure
+  renderSampleMetrics();
+  renderSampleTable();
+}
+
+function renderSampleMetrics() {
+  const metrics = [
+    { label: 'Total Trades', value: '—', delta: '' },
+    { label: 'Win Rate', value: '—', delta: '' },
+    { label: 'Profit Factor', value: '—', delta: '' },
+    { label: 'Total PnL', value: '—', delta: '' },
+    { label: 'Max Drawdown', value: '—', delta: '' },
+    { label: 'Expectancy', value: '—', delta: '' },
+  ];
+  renderMetricCards(metrics);
+}
+
+function renderSampleTable() {
+  const tbody = document.getElementById('monthly-body');
+  tbody.innerHTML = `
+    <tr><td colspan="10" style="text-align:center; color: var(--text-muted); padding: 2rem;">
+      Run validation to populate this table
+    </td></tr>`;
+}
+
+function renderReport(data) {
+  const summary = data.summary || {};
+  const trades = data.trades || [];
+  const bars = data.bars || [];
+
+  document.getElementById('report-timestamp').textContent =
+    `Report generated: ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC`;
+
+  // ── Verdict ──
+  renderVerdict(summary);
+
+  // ── Executive Metrics ──
+  renderExecMetrics(summary);
+
+  // ── Monthly Table ──
+  renderMonthlyTable(trades, summary);
+
+  // ── Equity Curves ──
+  renderEquityCurves(data);
+
+  // ── Regime Chart ──
+  renderRegimeChart(trades);
+
+  // ── HTF Block Rate ──
+  renderHTFChart(summary);
+
+  // ── Rolling Metrics ──
+  renderRollingMetrics(trades);
+
+  // ── Drawdown Periods ──
+  renderDrawdownPeriods(trades);
+
+  // ── Time-of-Day Heatmap ──
+  renderTODHeatmap(trades);
+}
+
+function renderVerdict(summary) {
+  const el = document.getElementById('verdict-banner');
+  const pf = summary.profit_factor || 0;
+  const pm = summary.profitable_months || 0;
+  const tm = summary.months_tested || 1;
+  const dd = summary.max_drawdown_pct || 0;
+
+  let cls, title, detail;
+  if (pf >= 1.2 && pm >= tm * 0.67 && dd <= 5.0) {
+    cls = 'verdict-pass';
+    title = 'PASS — Config D Validated Out-of-Sample';
+    detail = `PF ${pf.toFixed(2)}, ${pm}/${tm} profitable months, max DD ${dd.toFixed(1)}%. Approved for paper trading.`;
+  } else if (pf >= 1.0 && pm >= tm * 0.5) {
+    cls = 'verdict-conditional';
+    title = 'CONDITIONAL PASS — Marginal Edge Detected';
+    detail = `PF ${pf.toFixed(2)}, ${pm}/${tm} profitable months. Extended paper testing recommended.`;
+  } else {
+    cls = 'verdict-fail';
+    title = 'FAIL — Config D Does Not Generalize';
+    detail = `PF ${pf.toFixed(2)}, ${pm}/${tm} profitable months, DD ${dd.toFixed(1)}%. Do not proceed.`;
+  }
+
+  el.className = `verdict-banner ${cls}`;
+  el.innerHTML = `<div>${title}</div><div class="detail">${detail}</div>`;
+}
+
+function renderExecMetrics(s) {
+  const totalTrades = s.total_trades || 0;
+  const months = s.months_tested || 1;
+  const pf = s.profit_factor || 0;
+  const wr = s.win_rate || 0;
+  const pnl = s.total_pnl || 0;
+  const dd = s.max_drawdown_pct || 0;
+  const exp = s.expectancy_per_trade || 0;
+
+  const metrics = [
+    {
+      label: 'Total Trades',
+      value: totalTrades.toString(),
+      delta: `${(totalTrades / months).toFixed(0)}/mo`,
+      cls: ''
+    },
+    {
+      label: 'Win Rate',
+      value: `${wr.toFixed(1)}%`,
+      delta: `${(wr - BASELINE.win_rate >= 0 ? '+' : '')}${(wr - BASELINE.win_rate).toFixed(1)}% vs baseline`,
+      cls: wr >= BASELINE.win_rate ? 'positive' : 'negative'
+    },
+    {
+      label: 'Profit Factor',
+      value: pf.toFixed(2),
+      delta: `${(pf - BASELINE.profit_factor >= 0 ? '+' : '')}${(pf - BASELINE.profit_factor).toFixed(2)} vs baseline`,
+      cls: pf >= 1.2 ? 'positive' : pf >= 1.0 ? 'neutral' : 'negative'
+    },
+    {
+      label: 'Total PnL',
+      value: `$${pnl.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0})}`,
+      delta: `$${(pnl / months).toFixed(0)}/mo`,
+      cls: pnl > 0 ? 'positive' : 'negative'
+    },
+    {
+      label: 'Max Drawdown',
+      value: `${dd.toFixed(1)}%`,
+      delta: `${(dd - BASELINE.max_drawdown_pct >= 0 ? '+' : '')}${(dd - BASELINE.max_drawdown_pct).toFixed(1)}% vs baseline`,
+      cls: dd <= BASELINE.max_drawdown_pct ? 'positive' : dd <= 5.0 ? 'neutral' : 'negative'
+    },
+    {
+      label: 'Expectancy',
+      value: `$${exp.toFixed(2)}`,
+      delta: `${(exp - BASELINE.expectancy >= 0 ? '+' : '')}$${(exp - BASELINE.expectancy).toFixed(2)} vs baseline`,
+      cls: exp > 0 ? 'positive' : 'negative'
+    },
+  ];
+  renderMetricCards(metrics);
+}
+
+function renderMetricCards(metrics) {
+  const grid = document.getElementById('exec-metrics');
+  grid.innerHTML = metrics.map(m => `
+    <div class="metric-card">
+      <div class="label">${m.label}</div>
+      <div class="value ${m.cls || ''}">${m.value}</div>
+      <div class="delta ${m.cls || ''}">${m.delta}</div>
+    </div>
+  `).join('');
+}
+
+function renderMonthlyTable(trades, summary) {
+  // Group trades by month
+  const monthlyMap = {};
+  let runningEquity = 50000;
+
+  for (const t of trades) {
+    if (t.action !== 'trade_closed') continue;
+    const ts = t.timestamp || t.close_timestamp || '';
+    const month = ts.slice(0, 7);
+    if (!month) continue;
+    if (!monthlyMap[month]) {
+      monthlyMap[month] = {
+        trades: 0, wins: 0, grossProfit: 0, grossLoss: 0,
+        pnl: 0, c1Pnl: 0, c2Pnl: 0, maxDD: 0, peak: runningEquity,
+        equity: runningEquity, htfBlocked: 0, regimes: {},
+      };
+    }
+    const m = monthlyMap[month];
+    const pnl = t.total_pnl || 0;
+    m.trades++;
+    m.pnl += pnl;
+    m.c1Pnl += (t.c1_pnl || 0);
+    m.c2Pnl += (t.c2_pnl || 0);
+    if (pnl > 0) { m.wins++; m.grossProfit += pnl; }
+    else { m.grossLoss += Math.abs(pnl); }
+
+    m.equity += pnl;
+    if (m.equity > m.peak) m.peak = m.equity;
+    const dd = (m.peak - m.equity) / m.peak * 100;
+    if (dd > m.maxDD) m.maxDD = dd;
+
+    if (t.regime) {
+      m.regimes[t.regime] = (m.regimes[t.regime] || 0) + 1;
+    }
+  }
+
+  const tbody = document.getElementById('monthly-body');
+  const months = Object.keys(monthlyMap).sort();
+
+  if (months.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--text-muted);">
+      No trade data available</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = months.map(month => {
+    const m = monthlyMap[month];
+    const wr = m.trades > 0 ? (m.wins / m.trades * 100) : 0;
+    const pf = m.grossLoss > 0 ? (m.grossProfit / m.grossLoss) : (m.grossProfit > 0 ? 999 : 0);
+    const exp = m.trades > 0 ? m.pnl / m.trades : 0;
+
+    const pfClass = pf >= 1.2 ? 'cell-green' : pf >= 1.0 ? 'cell-yellow' : 'cell-red';
+    const pnlClass = m.pnl > 0 ? 'positive' : 'negative';
+
+    return `<tr>
+      <td>${month}</td>
+      <td>${m.trades}</td>
+      <td>${wr.toFixed(1)}%</td>
+      <td class="${pfClass}">${pf.toFixed(2)}</td>
+      <td class="${pnlClass}">$${m.pnl.toFixed(0)}</td>
+      <td>${m.maxDD.toFixed(1)}%</td>
+      <td>$${exp.toFixed(2)}</td>
+      <td>$${m.c1Pnl.toFixed(0)}</td>
+      <td>$${m.c2Pnl.toFixed(0)}</td>
+      <td>—</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderEquityCurves(data) {
+  const container = document.getElementById('equity-charts');
+  const trades = (data.trades || []).filter(t => t.action === 'trade_closed');
+
+  // Group by month
+  const monthlyTrades = {};
+  for (const t of trades) {
+    const ts = t.timestamp || t.close_timestamp || '';
+    const month = ts.slice(0, 7);
+    if (!month) continue;
+    if (!monthlyTrades[month]) monthlyTrades[month] = [];
+    monthlyTrades[month].push(t);
+  }
+
+  const months = Object.keys(monthlyTrades).sort();
+  container.innerHTML = '';
+
+  for (const month of months) {
+    const div = document.createElement('div');
+    div.className = 'chart-container';
+    div.innerHTML = `
+      <div class="chart-title">${month} Equity Curve</div>
+      <canvas id="equity-${month}" height="160"></canvas>
+    `;
+    container.appendChild(div);
+
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById(`equity-${month}`);
+      if (!canvas) return;
+
+      const mtrades = monthlyTrades[month];
+      let eq = 50000;
+      const points = [eq];
+      const labels = ['Start'];
+
+      for (const t of mtrades) {
+        eq += (t.total_pnl || 0);
+        points.push(eq);
+        labels.push(`T${points.length - 1}`);
+      }
+
+      const isPositive = points[points.length - 1] >= points[0];
+
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            data: points,
+            borderColor: isPositive ? '#3fb950' : '#f85149',
+            backgroundColor: isPositive
+              ? 'rgba(63, 185, 80, 0.1)'
+              : 'rgba(248, 81, 73, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            borderWidth: 2,
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { display: false },
+            y: {
+              grid: { color: 'rgba(48,54,61,0.5)' },
+              ticks: { color: '#8b949e', font: { family: 'monospace', size: 10 },
+                callback: v => '$' + v.toLocaleString() },
+            },
+          },
+        },
+      });
+    });
+  }
+}
+
+function renderRegimeChart(trades) {
+  const canvas = document.getElementById('regime-chart');
+  const closedTrades = trades.filter(t => t.action === 'trade_closed');
+
+  const monthRegimes = {};
+  const allRegimes = new Set();
+
+  for (const t of closedTrades) {
+    const ts = t.timestamp || '';
+    const month = ts.slice(0, 7);
+    const regime = t.regime || 'unknown';
+    if (!month) continue;
+    allRegimes.add(regime);
+    if (!monthRegimes[month]) monthRegimes[month] = {};
+    monthRegimes[month][regime] = (monthRegimes[month][regime] || 0) + 1;
+  }
+
+  const months = Object.keys(monthRegimes).sort();
+  const regimeList = Array.from(allRegimes).sort();
+  const colors = ['#58a6ff', '#3fb950', '#d29922', '#f85149', '#bc8cff', '#39d353', '#f0883e'];
+
+  new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: months,
+      datasets: regimeList.map((regime, i) => ({
+        label: regime,
+        data: months.map(m => (monthRegimes[m] || {})[regime] || 0),
+        backgroundColor: colors[i % colors.length] + '80',
+        borderColor: colors[i % colors.length],
+        borderWidth: 1,
+      })),
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          labels: { color: '#8b949e', font: { size: 11 } },
+          position: 'top',
+        },
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { color: '#8b949e' } },
+        y: {
+          stacked: true,
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          ticks: { color: '#8b949e' },
+          title: { display: true, text: 'Trades', color: '#484f58' },
+        },
+      },
+    },
+  });
+}
+
+function renderHTFChart(summary) {
+  const canvas = document.getElementById('htf-chart');
+  // If we have monthly data from trades, compute per-month block rates
+  // For now, show aggregate
+  new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: ['Aggregate'],
+      datasets: [{
+        label: 'HTF Block Rate (%)',
+        data: [summary.htf_block_rate || 0],
+        backgroundColor: 'rgba(88, 166, 255, 0.5)',
+        borderColor: '#58a6ff',
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true,
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          max: 100,
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          ticks: { color: '#8b949e', callback: v => v + '%' },
+        },
+        y: { grid: { display: false }, ticks: { color: '#8b949e' } },
+      },
+    },
+  });
+}
+
+function renderRollingMetrics(trades) {
+  const closed = trades.filter(t => t.action === 'trade_closed');
+  if (closed.length < 20) {
+    document.getElementById('rolling-pf-chart').parentElement.innerHTML +=
+      '<div style="color:var(--text-muted);text-align:center;padding:1rem;">Need 20+ trades for rolling metrics</div>';
+    return;
+  }
+
+  const windowSize = 20;
+  const rollingPF = [];
+  const rollingWR = [];
+  const labels = [];
+
+  for (let i = windowSize; i <= closed.length; i++) {
+    const window = closed.slice(i - windowSize, i);
+    let gp = 0, gl = 0, wins = 0;
+    for (const t of window) {
+      const pnl = t.total_pnl || 0;
+      if (pnl > 0) { gp += pnl; wins++; }
+      else { gl += Math.abs(pnl); }
+    }
+    rollingPF.push(gl > 0 ? gp / gl : (gp > 0 ? 5 : 0));
+    rollingWR.push(wins / windowSize * 100);
+    labels.push(i);
+  }
+
+  // PF chart
+  new Chart(document.getElementById('rolling-pf-chart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          data: rollingPF,
+          borderColor: '#58a6ff',
+          backgroundColor: 'rgba(88,166,255,0.1)',
+          fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
+        },
+        {
+          data: Array(labels.length).fill(1.0),
+          borderColor: '#f85149',
+          borderDash: [5, 5], pointRadius: 0, borderWidth: 1,
+        },
+        {
+          data: Array(labels.length).fill(BASELINE.profit_factor),
+          borderColor: '#d29922',
+          borderDash: [3, 3], pointRadius: 0, borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: {
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          ticks: { color: '#8b949e', font: { family: 'monospace', size: 10 } },
+        },
+      },
+    },
+  });
+
+  // WR chart
+  new Chart(document.getElementById('rolling-wr-chart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          data: rollingWR,
+          borderColor: '#bc8cff',
+          backgroundColor: 'rgba(188,140,255,0.1)',
+          fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
+        },
+        {
+          data: Array(labels.length).fill(50),
+          borderColor: '#d29922',
+          borderDash: [3, 3], pointRadius: 0, borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: {
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          ticks: { color: '#8b949e', font: { family: 'monospace', size: 10 },
+            callback: v => v + '%' },
+        },
+      },
+    },
+  });
+}
+
+function renderDrawdownPeriods(trades) {
+  const closed = trades.filter(t => t.action === 'trade_closed');
+  const list = document.getElementById('dd-list');
+
+  if (closed.length === 0) {
+    list.innerHTML = '<li style="color:var(--text-muted);">No trade data</li>';
+    return;
+  }
+
+  // Compute equity curve and find drawdown periods
+  let equity = 50000;
+  let peak = equity;
+  let ddStart = null;
+  const drawdowns = [];
+  let currentDD = { start: '', end: '', depth: 0, trades: 0 };
+
+  for (const t of closed) {
+    equity += (t.total_pnl || 0);
+    if (equity > peak) {
+      if (currentDD.depth > 0.5) {
+        currentDD.end = t.timestamp || '';
+        drawdowns.push({ ...currentDD });
+      }
+      peak = equity;
+      currentDD = { start: '', end: '', depth: 0, trades: 0 };
+    } else {
+      const dd = (peak - equity) / peak * 100;
+      if (dd > currentDD.depth) {
+        currentDD.depth = dd;
+        currentDD.end = t.timestamp || '';
+        if (!currentDD.start) currentDD.start = t.timestamp || '';
+      }
+      currentDD.trades++;
+    }
+  }
+  if (currentDD.depth > 0.5) drawdowns.push(currentDD);
+
+  // Sort by depth, show top 5
+  drawdowns.sort((a, b) => b.depth - a.depth);
+  const top = drawdowns.slice(0, 5);
+
+  if (top.length === 0) {
+    list.innerHTML = '<li style="color:var(--text-muted);">No significant drawdown periods</li>';
+    return;
+  }
+
+  list.innerHTML = top.map((dd, i) => `
+    <li>
+      <strong>#${i + 1}: -${dd.depth.toFixed(2)}%</strong> (${dd.trades} trades)
+      <div class="dd-dates">${dd.start.slice(0, 16)} → ${dd.end.slice(0, 16)}</div>
+    </li>
+  `).join('');
+}
+
+function renderTODHeatmap(trades) {
+  const closed = trades.filter(t => t.action === 'trade_closed');
+  const heatmap = document.getElementById('tod-heatmap');
+  const labels = document.getElementById('tod-labels');
+
+  // Aggregate PnL by hour (UTC)
+  const hourPnl = {};
+  const hourCount = {};
+  for (let h = 0; h < 24; h++) { hourPnl[h] = 0; hourCount[h] = 0; }
+
+  for (const t of closed) {
+    const ts = t.timestamp || '';
+    if (!ts) continue;
+    const hour = parseInt(ts.slice(11, 13), 10);
+    if (isNaN(hour)) continue;
+    hourPnl[hour] += (t.total_pnl || 0);
+    hourCount[hour]++;
+  }
+
+  // Compute avg PnL per trade per hour
+  const avgPnl = {};
+  let minPnl = 0, maxPnl = 0;
+  for (let h = 0; h < 24; h++) {
+    avgPnl[h] = hourCount[h] > 0 ? hourPnl[h] / hourCount[h] : 0;
+    if (avgPnl[h] < minPnl) minPnl = avgPnl[h];
+    if (avgPnl[h] > maxPnl) maxPnl = avgPnl[h];
+  }
+
+  const range = Math.max(Math.abs(minPnl), Math.abs(maxPnl), 1);
+
+  let cells = '';
+  let lbls = '';
+  for (let h = 0; h < 24; h++) {
+    const avg = avgPnl[h];
+    const count = hourCount[h];
+    let bg;
+
+    if (count === 0) {
+      bg = 'var(--bg-tertiary)';
+    } else if (avg > 0) {
+      const intensity = Math.min(avg / range, 1);
+      bg = `rgba(63, 185, 80, ${0.15 + intensity * 0.6})`;
+    } else {
+      const intensity = Math.min(Math.abs(avg) / range, 1);
+      bg = `rgba(248, 81, 73, ${0.15 + intensity * 0.6})`;
+    }
+
+    const display = count > 0 ? `$${avg.toFixed(0)}` : '';
+    cells += `<div class="heatmap-cell" style="background:${bg}" title="Hour ${h}: ${count} trades, avg $${avg.toFixed(2)}">${display}</div>`;
+    lbls += `<div class="heatmap-label">${h}</div>`;
+  }
+
+  heatmap.innerHTML = cells;
+  labels.innerHTML = lbls;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', loadData);
+</script>
+
+<!-- Embedded data placeholder: run_oos_validation.py will inject data here -->
+<!-- <script type="application/json" id="embedded-data">null</script> -->
+
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NQ Trading Bot — Config D</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <style>
+    .hero {
+      padding: 48px 0 32px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-family: var(--font-mono);
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--text-white);
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .hero .tagline {
+      color: var(--text-secondary);
+      font-size: 1rem;
+      margin-bottom: 20px;
+    }
+    .hero .badges {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .nav-card .arrow {
+      display: inline-block;
+      margin-left: 4px;
+      transition: transform 0.2s;
+    }
+    .nav-card:hover .arrow {
+      transform: translateX(4px);
+    }
+    .monthly-section {
+      overflow-x: auto;
+    }
+    @media (max-width: 480px) {
+      .hero h1 { font-size: 1.375rem; }
+      .hero .tagline { font-size: 0.875rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Hero -->
+    <div class="hero">
+      <h1>NQ Trading Bot</h1>
+      <div class="tagline">Config D — MNQ 2-Contract Scale-Out with HC Filter + HTF Gate</div>
+      <div class="badges">
+        <span class="badge badge-green">VALIDATED FOR PAPER TRADING</span>
+        <span class="badge badge-blue">6/6 MONTHS PROFITABLE</span>
+      </div>
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="label">Trades</div>
+        <div class="value">948</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Profit Factor</div>
+        <div class="value green">1.59</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Total PnL</div>
+        <div class="value green">$14,544</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Max Drawdown</div>
+        <div class="value">1.7%</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Win Rate</div>
+        <div class="value green">68.1%</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">Expectancy</div>
+        <div class="value green">$15.34</div>
+      </div>
+    </div>
+
+    <!-- Navigation Cards -->
+    <div class="nav-cards">
+      <a href="dashboard.html" class="nav-card">
+        <div class="icon">📊</div>
+        <h2>Forensic Trade Dashboard <span class="arrow">→</span></h2>
+        <p>Interactive canvas-based chart with trade overlays, stop/target levels, regime and HTF subpanes, entry/exit markers, sortable trade table with filters, and per-trade compliance analysis.</p>
+      </a>
+      <a href="report.html" class="nav-card">
+        <div class="icon">📈</div>
+        <h2>OOS Validation Report <span class="arrow">→</span></h2>
+        <p>Institutional-grade 6-month out-of-sample validation with monthly equity curves, rolling PF and win rate, regime distribution, time-of-day heatmap, and drawdown analysis.</p>
+      </a>
+    </div>
+
+    <!-- Monthly Breakdown -->
+    <div class="section monthly-section">
+      <h2>Monthly Performance — Sep 2025 to Feb 2026</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>Trades</th>
+            <th>WR</th>
+            <th>PF</th>
+            <th>PnL</th>
+            <th>Max DD</th>
+            <th>Exp/Trade</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Sep 2025</td>
+            <td>174</td>
+            <td>62.6%</td>
+            <td class="highlight">1.10</td>
+            <td class="positive">+$405</td>
+            <td>1.5%</td>
+            <td class="positive">+$2.33</td>
+          </tr>
+          <tr>
+            <td>Oct 2025</td>
+            <td>172</td>
+            <td>68.6%</td>
+            <td class="positive">1.54</td>
+            <td class="positive">+$2,521</td>
+            <td>1.3%</td>
+            <td class="positive">+$14.66</td>
+          </tr>
+          <tr>
+            <td>Nov 2025</td>
+            <td>112</td>
+            <td>75.9%</td>
+            <td class="positive">2.25</td>
+            <td class="positive">+$3,337</td>
+            <td>0.6%</td>
+            <td class="positive">+$29.79</td>
+          </tr>
+          <tr>
+            <td>Dec 2025</td>
+            <td>198</td>
+            <td>64.6%</td>
+            <td class="positive">1.42</td>
+            <td class="positive">+$2,084</td>
+            <td>1.7%</td>
+            <td class="positive">+$10.52</td>
+          </tr>
+          <tr>
+            <td>Jan 2026</td>
+            <td>161</td>
+            <td>70.2%</td>
+            <td class="positive">1.88</td>
+            <td class="positive">+$3,908</td>
+            <td>0.8%</td>
+            <td class="positive">+$24.27</td>
+          </tr>
+          <tr>
+            <td>Feb 2026</td>
+            <td>131</td>
+            <td>71.0%</td>
+            <td class="positive">1.62</td>
+            <td class="positive">+$2,289</td>
+            <td>1.3%</td>
+            <td class="positive">+$17.47</td>
+          </tr>
+          <tr style="border-top: 2px solid var(--border);">
+            <td style="color: var(--blue);">TOTAL</td>
+            <td style="color: var(--text-white); font-weight: 700;">948</td>
+            <td style="color: var(--green); font-weight: 700;">68.1%</td>
+            <td style="color: var(--green); font-weight: 700;">1.59</td>
+            <td style="color: var(--green); font-weight: 700;">+$14,544</td>
+            <td style="color: var(--text-white); font-weight: 700;">1.7%</td>
+            <td style="color: var(--green); font-weight: 700;">+$15.34</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Config Summary -->
+    <div class="section">
+      <h2>System Configuration</h2>
+      <div class="config-grid">
+        <div class="config-item">
+          <span class="key">HC Min Score</span>
+          <span class="val">&ge; 0.75</span>
+        </div>
+        <div class="config-item">
+          <span class="key">HC Max Stop</span>
+          <span class="val">&le; 30 pts</span>
+        </div>
+        <div class="config-item">
+          <span class="key">HTF Gate</span>
+          <span class="val">strength &ge; 0.3</span>
+        </div>
+        <div class="config-item">
+          <span class="key">C1 Exit</span>
+          <span class="val">Time (10 bars)</span>
+        </div>
+        <div class="config-item">
+          <span class="key">C2 Exit</span>
+          <span class="val">ATR trailing</span>
+        </div>
+        <div class="config-item">
+          <span class="key">Contracts</span>
+          <span class="val">2 MNQ</span>
+        </div>
+        <div class="config-item">
+          <span class="key">Execution TF</span>
+          <span class="val">2m</span>
+        </div>
+        <div class="config-item">
+          <span class="key">HTF Timeframes</span>
+          <span class="val">5m–1D</span>
+        </div>
+        <div class="config-item">
+          <span class="key">Account Size</span>
+          <span class="val">$50,000</span>
+        </div>
+        <div class="config-item">
+          <span class="key">Daily Loss Limit</span>
+          <span class="val">$500</span>
+        </div>
+        <div class="config-item">
+          <span class="key">Data Source</span>
+          <span class="val">FirstRate 1m</span>
+        </div>
+        <div class="config-item">
+          <span class="key">OOS Period</span>
+          <span class="val">Sep 25–Feb 26</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      Built with ruthless scientific discipline. Data integrity obsession. Risk-first engineering.
+    </footer>
+  </div>
+</body>
+</html>
