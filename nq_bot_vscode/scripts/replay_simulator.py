@@ -23,9 +23,12 @@ Session rules enforced:
   - Daily loss limit: $500 → halt for the day
   - Max position: 2 contracts
 
-Fill simulation:
-  - Market orders fill at next bar open + 0.25pt slippage
-  - Stops trigger on bar high/low (whichever is adverse)
+Fill simulation (dynamic slippage):
+  - Normal session (9:30-16:00 ET): 0.75-1.25pts per fill
+  - Extended hours (6:00-9:30, 16:00-20:00 ET): 1.5-2.5pts per fill
+  - Volume spike (>150% of 20-bar avg): +1.0-2.0pts
+  - News window (FOMC/CPI/NFP): +2.0-3.0pts
+  - All fills (entry + exit + stop) get adverse slippage
 
 Usage:
     # Real-time replay at 100x speed, starting from 2025-10-01
@@ -45,9 +48,12 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
+import random
 import sys
 import time
+from collections import deque
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -204,6 +210,202 @@ def should_be_flat(et_time: datetime) -> bool:
 
 
 # ================================================================
+# DYNAMIC SLIPPAGE ENGINE
+# ================================================================
+# News windows: FOMC meetings, CPI, PPI, NFP, GDP, PCE, ISM
+# These are approximate dates for the OOS window (Sep 2025–Feb 2026)
+NEWS_WINDOWS_UTC = [
+    # FOMC decisions (2:00 PM ET = 19:00 UTC, ±2 hours)
+    ("2025-09-17 17:00", "2025-09-17 21:00"),
+    ("2025-11-05 17:00", "2025-11-05 21:00"),
+    ("2025-12-17 17:00", "2025-12-17 21:00"),
+    ("2026-01-28 17:00", "2026-01-28 21:00"),
+    # CPI releases (8:30 AM ET = 13:30 UTC, ±1 hour)
+    ("2025-09-10 12:30", "2025-09-10 14:30"),
+    ("2025-10-10 12:30", "2025-10-10 14:30"),
+    ("2025-11-13 12:30", "2025-11-13 14:30"),
+    ("2025-12-10 12:30", "2025-12-10 14:30"),
+    ("2026-01-15 12:30", "2026-01-15 14:30"),
+    ("2026-02-12 12:30", "2026-02-12 14:30"),
+    # NFP (first Friday, 8:30 AM ET = 13:30 UTC, ±1 hour)
+    ("2025-09-05 12:30", "2025-09-05 14:30"),
+    ("2025-10-03 12:30", "2025-10-03 14:30"),
+    ("2025-11-07 12:30", "2025-11-07 14:30"),
+    ("2025-12-05 12:30", "2025-12-05 14:30"),
+    ("2026-01-10 12:30", "2026-01-10 14:30"),
+    ("2026-02-06 12:30", "2026-02-06 14:30"),
+]
+
+# Pre-parse news windows
+_NEWS_RANGES = []
+for _start, _end in NEWS_WINDOWS_UTC:
+    _NEWS_RANGES.append((
+        datetime.strptime(_start, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc),
+        datetime.strptime(_end, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc),
+    ))
+
+
+class DynamicSlippageEngine:
+    """
+    Realistic slippage model based on:
+    - Time of day (session vs pre/post-market)
+    - Volume spikes (>150% of 20-bar average)
+    - News windows (FOMC, CPI, NFP)
+
+    Slippage tiers (per fill, always adverse):
+      Normal session (9:30-16:00 ET):     0.75–1.25 pts (mean 1.0)
+      Pre/post-market (6:00-9:30, 16:00-20:00 ET): 1.5–2.5 pts (mean 2.0)
+      Volume spike (>150% of 20-bar avg): +1.0–2.0 pts
+      News window:                        +2.0–3.0 pts
+    """
+
+    def __init__(self, seed: int = 42):
+        self.rng = random.Random(seed)
+        self.volume_window: deque = deque(maxlen=20)
+        self.total_slippage_points = 0.0
+        self.fill_count = 0
+        self.entry_slippage_total = 0.0
+        self.exit_slippage_total = 0.0
+        self.news_fills = 0
+        self.vol_spike_fills = 0
+
+    def feed_volume(self, volume: int) -> None:
+        """Feed bar volume to maintain rolling 20-bar average."""
+        self.volume_window.append(volume)
+
+    def _avg_volume(self) -> float:
+        if len(self.volume_window) == 0:
+            return 0.0
+        return sum(self.volume_window) / len(self.volume_window)
+
+    def _is_volume_spike(self, current_volume: int) -> bool:
+        avg = self._avg_volume()
+        if avg <= 0:
+            return False
+        return current_volume > avg * 1.5
+
+    @staticmethod
+    def _is_news_window(bar_time: datetime) -> bool:
+        for start, end in _NEWS_RANGES:
+            if start <= bar_time <= end:
+                return True
+        return False
+
+    @staticmethod
+    def _session_tier(et_time: datetime) -> str:
+        """Determine slippage tier based on ET time of day."""
+        h, m = et_time.hour, et_time.minute
+        t = h + m / 60.0
+        # Normal session: 9:30 – 16:00 ET
+        if 9.5 <= t < 16.0:
+            return "normal"
+        # Pre/post-market: 6:00–9:30, 16:00–20:00 ET
+        if (6.0 <= t < 9.5) or (16.0 <= t < 20.0):
+            return "extended"
+        # Overnight (rare for this system, treat as extended)
+        return "extended"
+
+    def compute_slippage(
+        self,
+        bar_time: datetime,
+        et_time: datetime,
+        current_volume: int,
+        fill_type: str = "entry",  # "entry", "exit", "stop"
+    ) -> float:
+        """
+        Compute dynamic slippage in points for a single fill.
+        Always positive (caller applies adverse direction).
+        """
+        # Base slippage by session tier
+        tier = self._session_tier(et_time)
+        if tier == "normal":
+            base = self.rng.uniform(0.75, 1.25)
+        else:
+            base = self.rng.uniform(1.5, 2.5)
+
+        # Volume spike addon
+        vol_addon = 0.0
+        if self._is_volume_spike(current_volume):
+            vol_addon = self.rng.uniform(1.0, 2.0)
+            self.vol_spike_fills += 1
+
+        # News window addon
+        news_addon = 0.0
+        if self._is_news_window(bar_time):
+            news_addon = self.rng.uniform(2.0, 3.0)
+            self.news_fills += 1
+
+        total = base + vol_addon + news_addon
+
+        # Round to nearest 0.25 (tick size)
+        total = round(total * 4) / 4
+
+        # Track stats
+        self.total_slippage_points += total
+        self.fill_count += 1
+        if fill_type == "entry":
+            self.entry_slippage_total += total
+        else:
+            self.exit_slippage_total += total
+
+        return total
+
+    def apply_adverse_slippage(
+        self,
+        price: float,
+        direction: str,
+        fill_type: str,
+        bar_time: datetime,
+        et_time: datetime,
+        current_volume: int,
+    ) -> Tuple[float, float]:
+        """
+        Apply adverse slippage to a fill price.
+        Returns (adjusted_price, slippage_points).
+
+        Entry long: price + slippage (pay more)
+        Entry short: price - slippage (sell lower)
+        Exit long: price - slippage (get less)
+        Exit short: price + slippage (buy back higher)
+        Stop long: price - slippage (gap through stop)
+        Stop short: price + slippage (gap through stop)
+        """
+        slippage = self.compute_slippage(bar_time, et_time, current_volume, fill_type)
+
+        if fill_type == "entry":
+            # Entry slippage: against your entry direction
+            if direction == "long":
+                adjusted = price + slippage
+            else:
+                adjusted = price - slippage
+        else:
+            # Exit/stop slippage: against your exit (you get worse fill)
+            if direction == "long":
+                adjusted = price - slippage
+            else:
+                adjusted = price + slippage
+
+        return round(adjusted, 2), slippage
+
+    @property
+    def avg_slippage(self) -> float:
+        if self.fill_count == 0:
+            return 0.0
+        return self.total_slippage_points / self.fill_count
+
+    def summary(self) -> Dict:
+        return {
+            "total_fills": self.fill_count,
+            "total_slippage_points": round(self.total_slippage_points, 2),
+            "avg_slippage_per_fill": round(self.avg_slippage, 2),
+            "entry_slippage_total": round(self.entry_slippage_total, 2),
+            "exit_slippage_total": round(self.exit_slippage_total, 2),
+            "news_window_fills": self.news_fills,
+            "volume_spike_fills": self.vol_spike_fills,
+        }
+
+
+# ================================================================
 # REPLAY STATE
 # ================================================================
 class ReplayState:
@@ -258,6 +460,9 @@ class ReplayState:
 
         # Session flattens
         self.session_flattens = 0
+
+        # Slippage tracking
+        self.total_slippage_cost = 0.0  # Dollars lost to slippage
 
     def reset_daily(self, date_str: str) -> None:
         """Reset daily counters for a new trading day."""
@@ -386,6 +591,7 @@ def render_dashboard(state: ReplayState, speed: str, elapsed_secs: float) -> str
     lines.append(f"  Session blocks: {state.session_blocks} | "
                  f"HTF blocks: {state.htf_blocks}")
     lines.append(f"  Flattens: {state.session_flattens}")
+    lines.append(f"  Slippage cost: ${state.total_slippage_cost:,.2f}")
     lines.append("")
     lines.append(f"  {'=' * 60}")
 
@@ -420,6 +626,13 @@ class ReplaySimulator:
 
         self.state = ReplayState()
         self.bot: Optional[TradingOrchestrator] = None
+        self.slippage_engine = DynamicSlippageEngine(seed=42)
+
+        # Per-trade slippage accumulator (reset on each new trade)
+        self._current_trade_slippage = 0.0
+        self._current_bar_volume = 0
+        self._current_bar_time: Optional[datetime] = None
+        self._current_et_time: Optional[datetime] = None
 
         # Speed → delay between exec bars (seconds)
         self._delay = self._parse_speed(speed)
@@ -488,6 +701,9 @@ class ReplaySimulator:
         self.bot = TradingOrchestrator(CONFIG)
         await self.bot.initialize(skip_db=True)
 
+        # ── Patch executor with dynamic slippage ──
+        self._patch_executor_slippage()
+
         print(f"\nStarting replay...\n")
 
         # ── Replay loop ──
@@ -511,6 +727,12 @@ class ReplaySimulator:
             self.state.exec_bars_processed += 1
             self.state.current_price = bar_data.close
             self.state.current_time = bar_data.timestamp.isoformat()
+
+            # Feed volume to slippage engine
+            self.slippage_engine.feed_volume(bar_data.volume)
+            self._current_bar_volume = bar_data.volume
+            self._current_bar_time = bar_data.timestamp
+            self._current_et_time = bar_to_et(bar_data.timestamp)
 
             # Daily reset check
             date_str = bar_data.timestamp.strftime("%Y-%m-%d")
@@ -610,6 +832,238 @@ class ReplaySimulator:
 
         return results
 
+    # ================================================================
+    # DYNAMIC SLIPPAGE PATCHING
+    # ================================================================
+    def _patch_executor_slippage(self) -> None:
+        """
+        Monkey-patch the executor to use the dynamic slippage engine.
+        Replaces:
+          - _paper_enter: dynamic entry slippage instead of fixed 0-0.5pt
+          - _close_c2:    adds exit slippage (was 0)
+          - _close_all:   adds stop slippage (was 0)
+          - C1 time exit: adds exit slippage to C1 close (was 0)
+        """
+        executor = self.bot.executor
+        sim = self  # capture ref for closures
+
+        # Store originals
+        _orig_paper_enter = executor._paper_enter
+        _orig_close_c2 = executor._close_c2
+        _orig_close_all = executor._close_all
+        _orig_manage_phase_1 = executor._manage_phase_1
+
+        async def patched_paper_enter(trade, price):
+            """Entry fill with dynamic slippage."""
+            bar_time = sim._current_bar_time or datetime.now(timezone.utc)
+            et_time = sim._current_et_time or bar_to_et(bar_time)
+            volume = sim._current_bar_volume
+
+            adjusted_price, slippage = sim.slippage_engine.apply_adverse_slippage(
+                price, trade.direction, "entry", bar_time, et_time, volume
+            )
+
+            # Reset per-trade accumulator
+            sim._current_trade_slippage = slippage
+
+            fill_price = round(adjusted_price, 2)
+            now = datetime.now(timezone.utc)
+
+            for leg in [trade.c1, trade.c2]:
+                leg.entry_price = fill_price
+                leg.entry_time = now
+                leg.is_filled = True
+                leg.is_open = True
+                leg.commission = executor.risk_config.commission_per_contract
+
+            trade.entry_price = fill_price
+            trade.entry_time = now
+            trade.c2_best_price = fill_price
+
+            from execution.scale_out_executor import ScaleOutPhase
+            trade._set_phase(ScaleOutPhase.PHASE_1)
+
+        async def patched_close_c2(trade, price, time, reason):
+            """C2 exit with dynamic slippage."""
+            bar_time = sim._current_bar_time or time
+            et_time = sim._current_et_time or bar_to_et(bar_time)
+            volume = sim._current_bar_volume
+
+            fill_type = "stop" if reason in ("trailing", "breakeven", "stop") else "exit"
+            adjusted_price, slippage = sim.slippage_engine.apply_adverse_slippage(
+                price, trade.direction, fill_type, bar_time, et_time, volume
+            )
+            sim._current_trade_slippage += slippage
+
+            trade.c2.exit_price = round(adjusted_price, 2)
+            trade.c2.exit_time = time
+            trade.c2.exit_reason = reason
+            trade.c2.is_open = False
+            trade.c2.gross_pnl = executor._compute_leg_pnl(trade.c2, trade.direction)
+            trade.c2.net_pnl = trade.c2.gross_pnl - trade.c2.commission
+
+            return executor._finalize_trade(trade, time)
+
+        async def patched_close_all(trade, price, time, reason):
+            """Both contracts stopped out with dynamic slippage."""
+            bar_time = sim._current_bar_time or time
+            et_time = sim._current_et_time or bar_to_et(bar_time)
+            volume = sim._current_bar_volume
+
+            for leg in [trade.c1, trade.c2]:
+                if leg.is_open:
+                    adjusted_price, slippage = sim.slippage_engine.apply_adverse_slippage(
+                        price, trade.direction, "stop", bar_time, et_time, volume
+                    )
+                    sim._current_trade_slippage += slippage
+
+                    leg.exit_price = round(adjusted_price, 2)
+                    leg.exit_time = time
+                    leg.exit_reason = reason
+                    leg.is_open = False
+                    leg.gross_pnl = executor._compute_leg_pnl(leg, trade.direction)
+                    leg.net_pnl = leg.gross_pnl - leg.commission
+
+            return executor._finalize_trade(trade, time)
+
+        async def patched_manage_phase_1(trade, price, time):
+            """Phase 1 with C1 exit slippage + stop slippage."""
+            from execution.scale_out_executor import ScaleOutPhase
+            direction = trade.direction
+
+            # --- Check STOP (both contracts) ---
+            stop_hit = False
+            if direction == "long" and price <= trade.initial_stop:
+                stop_hit = True
+            elif direction == "short" and price >= trade.initial_stop:
+                stop_hit = True
+
+            if stop_hit:
+                return await patched_close_all(trade, price, time, "stop")
+
+            # --- Count bars for C1 time exit ---
+            trade.c1_bars_elapsed += 1
+
+            # --- Check C1 TIME EXIT ---
+            c1_exit_bars = executor.scale_config.c1_time_exit_bars
+            if trade.c1_bars_elapsed >= c1_exit_bars:
+                if direction == "long":
+                    c1_in_profit = price > trade.entry_price
+                else:
+                    c1_in_profit = price < trade.entry_price
+
+                if c1_in_profit:
+                    # Apply exit slippage to C1 close
+                    bar_time = sim._current_bar_time or time
+                    et_time = sim._current_et_time or bar_to_et(bar_time)
+                    volume = sim._current_bar_volume
+
+                    adjusted_price, slippage = sim.slippage_engine.apply_adverse_slippage(
+                        price, direction, "exit", bar_time, et_time, volume
+                    )
+                    sim._current_trade_slippage += slippage
+
+                    trade.c1.exit_price = round(adjusted_price, 2)
+                    trade.c1.exit_time = time
+                    trade.c1.exit_reason = f"time_{c1_exit_bars}bars"
+                    trade.c1.is_open = False
+                    trade.c1.gross_pnl = executor._compute_leg_pnl(trade.c1, trade.direction)
+                    trade.c1.net_pnl = trade.c1.gross_pnl - trade.c1.commission
+
+                    # Move C2 stop to breakeven + buffer
+                    if executor.scale_config.c2_move_stop_to_breakeven:
+                        buffer = executor.scale_config.c2_breakeven_buffer_points
+                        if direction == "long":
+                            new_stop = trade.entry_price + buffer
+                        else:
+                            new_stop = trade.entry_price - buffer
+                        trade.c2.stop_price = round(new_stop, 2)
+
+                    trade._set_phase(ScaleOutPhase.C1_HIT)
+                    trade.c2_best_price = price
+                    trade._set_phase(ScaleOutPhase.RUNNING)
+
+                    return {
+                        "action": "c1_time_exit",
+                        "c1_pnl": trade.c1.net_pnl,
+                        "c1_bars": trade.c1_bars_elapsed,
+                        "c2_new_stop": trade.c2.stop_price,
+                        "price": price,
+                    }
+
+            # Update best price
+            if direction == "long":
+                trade.c2_best_price = max(trade.c2_best_price, price)
+            else:
+                trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
+
+            return None
+
+        # We also need to patch _manage_runner for C2 stop exits
+        _orig_manage_runner = executor._manage_runner
+
+        async def patched_manage_runner(trade, price, time):
+            """Manage C2 runner with dynamic slippage on stop exits."""
+            from execution.scale_out_executor import ScaleOutPhase
+            direction = trade.direction
+            cfg = executor.scale_config
+
+            # --- Update best price ---
+            if direction == "long":
+                trade.c2_best_price = max(trade.c2_best_price, price)
+            else:
+                if trade.c2_best_price == 0:
+                    trade.c2_best_price = price
+                trade.c2_best_price = min(trade.c2_best_price, price)
+
+            # --- Update trailing stop ---
+            if cfg.c2_trailing_stop_enabled:
+                new_trail = executor._compute_trailing_stop(trade, price)
+                if direction == "long" and new_trail > trade.c2.stop_price:
+                    trade.c2.stop_price = round(new_trail, 2)
+                    trade.c2_trailing_stop = trade.c2.stop_price
+                elif direction == "short" and (new_trail < trade.c2.stop_price or trade.c2.stop_price == 0):
+                    trade.c2.stop_price = round(new_trail, 2)
+                    trade.c2_trailing_stop = trade.c2.stop_price
+
+            # --- Check C2 STOP ---
+            stop_hit = False
+            if direction == "long" and price <= trade.c2.stop_price:
+                stop_hit = True
+            elif direction == "short" and price >= trade.c2.stop_price:
+                stop_hit = True
+
+            if stop_hit:
+                exit_reason = "trailing" if trade.c2_trailing_stop > 0 else "breakeven"
+                return await patched_close_c2(trade, trade.c2.stop_price, time, exit_reason)
+
+            # --- Check MAX TARGET ---
+            points_from_entry = abs(price - trade.entry_price)
+            if points_from_entry >= cfg.c2_max_target_points:
+                return await patched_close_c2(trade, price, time, "max_target")
+
+            # --- Check TIME STOP ---
+            if trade.entry_time:
+                elapsed_minutes = (time - trade.entry_time).total_seconds() / 60
+                if elapsed_minutes >= cfg.c2_time_stop_minutes:
+                    return await patched_close_c2(trade, price, time, "time_stop")
+
+            return None
+
+        # Apply patches
+        executor._paper_enter = patched_paper_enter
+        executor._close_c2 = patched_close_c2
+        executor._close_all = patched_close_all
+        executor._manage_phase_1 = patched_manage_phase_1
+        executor._manage_runner = patched_manage_runner
+
+        print("  Dynamic slippage engine active:")
+        print("    Normal session (9:30-16:00 ET):  0.75–1.25 pts")
+        print("    Extended hours (6:00-9:30, 16:00-20:00 ET): 1.5–2.5 pts")
+        print("    Volume spike (>150% 20-bar avg): +1.0–2.0 pts")
+        print("    News window (FOMC/CPI/NFP):      +2.0–3.0 pts")
+        print("    Applied to ALL fills (entry + exit + stop)")
+
     def _handle_result(self, result: Dict, timestamp: datetime) -> None:
         """Handle a trade action from process_bar()."""
         action = result.get("action", "")
@@ -650,6 +1104,14 @@ class ReplaySimulator:
         c1_pnl = result.get("c1_pnl", 0)
         c2_pnl = result.get("c2_pnl", 0)
 
+        # Capture slippage for this trade
+        trade_slippage = round(self._current_trade_slippage, 2)
+        # Slippage cost in dollars: points × $2/point × 2 contracts average
+        # (entry slippage affects both contracts, exit slippage varies)
+        slippage_cost = trade_slippage * 2.0  # $2/pt MNQ
+        self.state.total_slippage_cost += slippage_cost
+        self._current_trade_slippage = 0.0
+
         self.state.record_trade(pnl, c1_pnl, c2_pnl)
         self.state.has_position = False
 
@@ -663,6 +1125,7 @@ class ReplaySimulator:
             "c1_reason": result.get("c1_exit_reason"),
             "c2_pnl": c2_pnl,
             "c2_reason": result.get("c2_exit_reason"),
+            "slippage_points": trade_slippage,
             "daily_pnl": self.state.daily_pnl,
         })
 
@@ -702,6 +1165,7 @@ class ReplaySimulator:
     def _build_results(self, elapsed: float) -> Dict:
         """Build results dict for validation comparison."""
         stats = self.bot.executor.get_stats() if self.bot else {}
+        slippage_summary = self.slippage_engine.summary()
         return {
             "total_trades": self.state.total_trades,
             "total_pnl": round(self.state.total_pnl, 2),
@@ -719,6 +1183,8 @@ class ReplaySimulator:
             "bars_per_second": round(
                 self.state.exec_bars_processed / elapsed, 0
             ) if elapsed > 0 else 0,
+            "slippage": slippage_summary,
+            "total_slippage_cost": round(self.state.total_slippage_cost, 2),
         }
 
     # ================================================================
@@ -823,7 +1289,106 @@ class ReplaySimulator:
 
         print(f"\n  Replay speed: {results.get('bars_per_second', 0):.0f} bars/sec")
         print(f"  Total time:   {results.get('elapsed_seconds', 0):.1f}s")
+
+        # ── Slippage Report ──
+        slip = results.get("slippage", {})
+        print(f"\n{'=' * 62}")
+        print(f"  SLIPPAGE REPORT")
+        print(f"{'=' * 62}")
+        print(f"  Total fills:           {slip.get('total_fills', 0)}")
+        print(f"  Avg slippage/fill:     {slip.get('avg_slippage_per_fill', 0):.2f} pts")
+        print(f"  Entry slippage total:  {slip.get('entry_slippage_total', 0):.1f} pts")
+        print(f"  Exit slippage total:   {slip.get('exit_slippage_total', 0):.1f} pts")
+        print(f"  Volume spike fills:    {slip.get('volume_spike_fills', 0)}")
+        print(f"  News window fills:     {slip.get('news_window_fills', 0)}")
+        print(f"  Total slippage cost:   ${results.get('total_slippage_cost', 0):,.2f}")
+        baseline_pnl_val = OOS_BASELINE["pnl_per_month"] * OOS_BASELINE["months"]
+        if baseline_pnl_val > 0:
+            pnl_reduction = (1 - results["total_pnl"] / baseline_pnl_val) * 100
+            print(f"  PnL reduction vs OOS:  {pnl_reduction:.1f}%")
+
+        # ── Live-Readiness Assessment ──
+        print(f"\n{'=' * 62}")
+        print(f"  LIVE-READINESS ASSESSMENT")
+        print(f"{'=' * 62}")
+        pf = results["profit_factor"]
+        if pf >= 1.3:
+            print(f"  PF {pf:.2f} >= 1.3: LIVE-READY")
+            print(f"  System maintains edge with realistic slippage.")
+        elif pf >= 1.2:
+            print(f"  PF {pf:.2f} >= 1.2 but < 1.3: MARGINAL")
+            print(f"  Consider tightening entry criteria or widening stops.")
+        else:
+            print(f"  PF {pf:.2f} < 1.2: NOT READY")
+            print(f"  Need to tighten entry criteria or widen stops.")
+
+        # ── Monthly Breakdown ──
+        self._print_monthly_breakdown()
+
         print(f"{'=' * 62}\n")
+
+    def _print_monthly_breakdown(self) -> None:
+        """Print monthly performance breakdown from trades log."""
+        monthly = {}
+        for t in self.state.trades_log:
+            ts = t.get("timestamp", "")
+            month = ts[:7]
+            if not month:
+                continue
+            if month not in monthly:
+                monthly[month] = {
+                    "trades": 0, "wins": 0, "pnl": 0.0,
+                    "c1_pnl": 0.0, "c2_pnl": 0.0,
+                    "gross_profit": 0.0, "gross_loss": 0.0,
+                    "slippage_pts": 0.0,
+                }
+            m = monthly[month]
+            pnl = t.get("total_pnl", 0)
+            m["trades"] += 1
+            m["pnl"] += pnl
+            m["c1_pnl"] += t.get("c1_pnl", 0)
+            m["c2_pnl"] += t.get("c2_pnl", 0)
+            m["slippage_pts"] += t.get("slippage_points", 0)
+            if pnl > 0:
+                m["wins"] += 1
+                m["gross_profit"] += pnl
+            else:
+                m["gross_loss"] += abs(pnl)
+
+        if not monthly:
+            return
+
+        print(f"\n{'=' * 62}")
+        print(f"  MONTHLY BREAKDOWN (Dynamic Slippage)")
+        print(f"{'=' * 62}")
+        print(f"  {'Month':<10} {'Trades':>6} {'WR':>6} {'PF':>6} "
+              f"{'PnL':>10} {'C1':>9} {'C2':>9} {'Slip':>6}")
+        print(f"  {'─' * 60}")
+
+        total_pnl = 0.0
+        profitable_months = 0
+        for month in sorted(monthly.keys()):
+            m = monthly[month]
+            wr = (m["wins"] / m["trades"] * 100) if m["trades"] > 0 else 0
+            pf = (m["gross_profit"] / m["gross_loss"]) if m["gross_loss"] > 0 else (
+                float('inf') if m["gross_profit"] > 0 else 0)
+            pf_str = f"{pf:.2f}" if pf < 100 else "inf"
+            total_pnl += m["pnl"]
+            if m["pnl"] > 0:
+                profitable_months += 1
+
+            print(f"  {month:<10} {m['trades']:>6} {wr:>5.1f}% {pf_str:>6} "
+                  f"${m['pnl']:>+9,.0f} ${m['c1_pnl']:>+8,.0f} "
+                  f"${m['c2_pnl']:>+8,.0f} {m['slippage_pts']:>5.1f}")
+
+        print(f"  {'─' * 60}")
+        total_months = len(monthly)
+        print(f"  {'TOTAL':<10} {self.state.total_trades:>6} "
+              f"{self.state.win_rate:>5.1f}% "
+              f"{self.state.profit_factor:.2f}  "
+              f"${total_pnl:>+9,.0f} ${self.state.c1_pnl:>+8,.0f} "
+              f"${self.state.c2_pnl:>+8,.0f}")
+        print(f"  Profitable months: {profitable_months}/{total_months}")
 
 
 # ================================================================
