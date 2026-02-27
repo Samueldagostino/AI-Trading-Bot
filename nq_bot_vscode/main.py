@@ -42,20 +42,33 @@ HTF_TIMEFRAMES = {"1D", "4H", "1H", "30m", "15m", "5m"}
 EXECUTION_TIMEFRAMES = {"2m", "3m", "1m"}
 
 # ── HIGH-CONVICTION FILTER ──────────────────────────────────────────
-# Derived from backtest forensics (167 trades -> 62 trades, Jan-Feb 2026).
+# Derived from backtest forensics + C1 exit research (Feb 2026).
 # Only the intersection of tight stops + strong signals showed
-# durable edge (PF 2.35, worst loss $135, max DD 1.03%).
+# durable edge. C1 exits via time (10 bars), not fixed target.
 #
 #   Rule 1 – Min signal score >= 0.75   (eliminates low-conviction noise)
 #   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
-#   Rule 3 – C1 target = stop_dist x 1.5 (R:R enforced, not fixed pts)
 #
-# These are HARD gates. If a setup doesn't meet all three, we skip it
+# C1 target is no longer price-based. C1 exits after 10 bars if
+# profitable (configured in ScaleOutConfig.c1_time_exit_bars).
+#
+# These are HARD gates. If a setup doesn't meet both, we skip it
 # and wait. The bot's job is survival, not activity.
 # ─────────────────────────────────────────────────────────────────────
 HIGH_CONVICTION_MIN_SCORE = 0.75
 HIGH_CONVICTION_MAX_STOP_PTS = 30.0
-HIGH_CONVICTION_TP1_RR_RATIO = 1.5    # TP1 = stop_distance x this
+
+# ── CONFIG D GATE ASSERTION ───────────────────────────────────────────
+# The HTF strength gate MUST be 0.3 (Config D, validated Feb 2026).
+# gate=0.7 silently degrades PF from 1.29 to 0.79.  Fail fast.
+# ──────────────────────────────────────────────────────────────────────
+_EXPECTED_HTF_GATE = 0.3
+assert HTFBiasEngine.STRENGTH_GATE == _EXPECTED_HTF_GATE, (
+    f"HTF gate drift detected! "
+    f"HTFBiasEngine.STRENGTH_GATE={HTFBiasEngine.STRENGTH_GATE}, "
+    f"expected {_EXPECTED_HTF_GATE} (Config D). "
+    f"Do NOT change without full backtest validation."
+)
 
 
 class TradingOrchestrator:
@@ -115,8 +128,7 @@ class TradingOrchestrator:
         logger.info(f"  Broker:       Tradovate ({self.config.tradovate.environment})")
         logger.info(f"  Symbol:       {self.config.tradovate.symbol}")
         logger.info(f"  Strategy:     2-contract scale-out (HC filtered)")
-        logger.info(f"  C1 Target:    {self.config.scale_out.c1_target_min_points}-{self.config.scale_out.c1_target_max_points} pts (config default)")
-        logger.info(f"  HC Override:  TP1 = stop x {HIGH_CONVICTION_TP1_RR_RATIO} R:R")
+        logger.info(f"  C1 Exit:      Time-based ({self.config.scale_out.c1_time_exit_bars} bars, if profitable)")
         logger.info(f"  HC Min Score: {HIGH_CONVICTION_MIN_SCORE}")
         logger.info(f"  HC Max Stop:  {HIGH_CONVICTION_MAX_STOP_PTS} pts")
         logger.info(f"  Account:      ${self.config.risk.account_size:,.2f}")
@@ -124,6 +136,7 @@ class TradingOrchestrator:
         logger.info(f"  Daily Limit:  {self.config.risk.max_daily_loss_pct}%")
         logger.info(f"  Kill Switch:  {self.config.risk.max_total_drawdown_pct}% drawdown")
         logger.info(f"  HTF Engine:   {', '.join(sorted(HTF_TIMEFRAMES))}")
+        logger.info(f"  HTF Gate:     {HTFBiasEngine.STRENGTH_GATE} (Config D)")
         logger.info(f"  Exec TF:      {self._execution_tf}")
         logger.info("=" * 60)
 
@@ -229,7 +242,7 @@ class TradingOrchestrator:
 
                     action_result = result
 
-                elif result.get("action") == "c1_target_hit":
+                elif result.get("action") == "c1_time_exit":
                     action_result = result
 
             return action_result
@@ -277,12 +290,9 @@ class TradingOrchestrator:
                 return None
 
             if risk_assessment.decision in (RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE):
-                # -- HIGH-CONVICTION GATE 3: TP1 = Stop x R:R Ratio --
-                # Override config-based C1 target with R:R-derived target.
-                # TP1 is a function of how tight the entry is, not a fixed value.
-                hc_c1_target_pts = raw_stop * HIGH_CONVICTION_TP1_RR_RATIO
-
                 # === 7. ENTER SCALE-OUT TRADE ===
+                # C1 exits via time-based rule (10 bars if profitable).
+                # No fixed TP1 target — managed by ScaleOutExecutor.
                 trade = await self.executor.enter_trade(
                     direction=direction,
                     entry_price=bar.close,
@@ -290,7 +300,6 @@ class TradingOrchestrator:
                     atr=features.atr_14,
                     signal_score=signal.combined_score,
                     regime=self._current_regime,
-                    c1_target_override=hc_c1_target_pts,
                 )
 
                 if trade:
@@ -303,7 +312,7 @@ class TradingOrchestrator:
                         "contracts": 2,
                         "entry_price": trade.entry_price,
                         "stop": trade.initial_stop,
-                        "c1_target": trade.c1.target_price,
+                        "c1_exit_rule": f"time_{self.config.scale_out.c1_time_exit_bars}bars",
                         "signal_score": signal.combined_score,
                         "regime": self._current_regime,
                         "htf_bias": htf_dir,
@@ -354,7 +363,7 @@ class TradingOrchestrator:
             if timeframe in HTF_TIMEFRAMES:
                 self.process_htf_bar(timeframe, bar_data)
                 htf_bars_count += 1
-            elif timeframe in EXECUTION_TIMEFRAMES or timeframe == execution_tf:
+            elif timeframe == execution_tf:
                 exec_bar = bardata_to_bar(bar_data)
                 result = await self.process_bar(exec_bar)
                 exec_bars_count += 1

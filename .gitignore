@@ -28,3 +28,9 @@ build/
 *.db
 *.sqlite3
 *.log
+
+# Generated backtest outputs
+backtest_viz_data.json
+
+# FirstRate data (large CSV files, not committed)
+nq_bot_vscode/data/firstrate/
