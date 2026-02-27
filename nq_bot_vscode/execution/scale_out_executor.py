@@ -5,23 +5,25 @@ Manages the 2-contract scale-out lifecycle.
 
 THE STRATEGY:
   Entry:  2 MNQ contracts at same price
-  C1:     Time exit — after 10 bars, exit at market if profitable
+  C1:     Trail-from-profit exit (Variant C)
+          Once unrealized profit >= 3.0pts, activate a 2.5pt trailing stop
+          from the high-water mark. Fallback: exit at market after 12 bars
+          if trailing never activates.
   C2:     Runner → stop to breakeven+1 after C1 exits, then trail
 
 LIFECYCLE:
   1. SIGNAL  → Risk approved → Enter 2 MNQ
-  2. PHASE_1 → Both contracts open, initial stop on both, counting bars
-  3. C1_EXIT → After 10 bars + C1 in profit → close C1, move C2 stop to BE+1
+  2. PHASE_1 → Both contracts open, initial stop on both, C1 trailing armed
+  3. C1_EXIT → Trailing stop hit (or 12-bar fallback) → close C1, C2 stop → BE+1
   4. RUNNING → C2 trailing with ATR-based or fixed trail
   5. C2_EXIT → C2 hits trailing stop, time stop, or max target
   6. DONE    → Record PnL, update risk engine
 
 Win-win math ($2/point MNQ):
-  C1 exits 10pts profit after 10 bars = $20
+  C1 trails 5pts profit → $10
   C2 at breakeven+1 = $2
-  Total minimum win: $22
-  C2 runs 80pts = $160
-  Total upside win: $180
+  Total minimum win: $12
+  C1 trails 10pts + C2 runs 80pts = $20 + $160 = $180
 
 Worst case (both stopped):
   Stop 20pts = 2 contracts × 20 × $2 = $80 loss
@@ -108,8 +110,10 @@ class ScaleOutTrade:
     market_regime: str = "unknown"
     atr_at_entry: float = 0.0
     
-    # C1 time-based exit tracking
-    c1_bars_elapsed: int = 0      # Bars since entry (for C1 time exit)
+    # C1 trail-from-profit tracking (Variant C)
+    c1_bars_elapsed: int = 0      # Bars since entry
+    c1_best_price: float = 0.0    # C1 high-water mark for trailing
+    c1_trailing_active: bool = False  # True once profit >= threshold
 
     # Trailing stop state (for C2)
     c2_trailing_stop: float = 0.0
@@ -206,10 +210,10 @@ class ScaleOutExecutor:
             atr_at_entry=atr,
         )
 
-        # C1 setup — no fixed target, exits via time-based rule
+        # C1 setup — trail-from-profit exit (Variant C)
         trade.c1.entry_price = entry_price
         trade.c1.stop_price = round(stop_price, 2)
-        trade.c1.target_price = 0  # No fixed target — time-based exit
+        trade.c1.target_price = 0  # No fixed target — trail from profit
         trade.c1.contracts = self.scale_config.c1_contracts
 
         # C2 setup — no fixed target, will trail
@@ -228,10 +232,11 @@ class ScaleOutExecutor:
 
         self._active_trade = trade
 
-        c1_exit_bars = self.scale_config.c1_time_exit_bars
+        c1_thresh = self.scale_config.c1_profit_threshold_pts
+        c1_trail = self.scale_config.c1_trail_distance_pts
         logger.info(
             f"SCALE-OUT ENTRY: {direction.upper()} 2x MNQ @ {entry_price:.2f} | "
-            f"Stop: {stop_price:.2f} | C1: time exit after {c1_exit_bars} bars | "
+            f"Stop: {stop_price:.2f} | C1: trail from +{c1_thresh}pts (trail {c1_trail}pts) | "
             f"Score: {signal_score:.2f} | Regime: {regime}"
         )
 
@@ -260,6 +265,7 @@ class ScaleOutExecutor:
 
         trade.entry_price = fill_price
         trade.entry_time = now
+        trade.c1_best_price = fill_price
         trade.c2_best_price = fill_price
         trade._set_phase(ScaleOutPhase.PHASE_1)
 
@@ -314,10 +320,18 @@ class ScaleOutExecutor:
 
     async def _manage_phase_1(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
         """
-        Phase 1: Both contracts open.
-        Check for: initial stop hit, C1 time-based exit (10 bars + profitable).
+        Phase 1: Both contracts open (Variant C — trail from profit).
+
+        Logic:
+          1. Check initial stop (both contracts)
+          2. Track C1 high-water mark (HWM)
+          3. Once unrealized profit >= c1_profit_threshold_pts, activate trailing
+          4. Trailing stop = HWM - c1_trail_distance_pts (long) / HWM + dist (short)
+          5. Fallback: if trailing never activates within c1_max_bars_fallback bars
+             and C1 is profitable, exit at market
         """
         direction = trade.direction
+        cfg = self.scale_config
 
         # --- Check STOP (both contracts) ---
         stop_hit = False
@@ -327,73 +341,135 @@ class ScaleOutExecutor:
             stop_hit = True
 
         if stop_hit:
-            # Both contracts stopped out — full loss
             return await self._close_all(trade, price, time, "stop")
 
-        # --- Count bars for C1 time exit ---
+        # --- Count bars ---
         trade.c1_bars_elapsed += 1
 
-        # --- Check C1 TIME EXIT ---
-        c1_exit_bars = self.scale_config.c1_time_exit_bars
-        if trade.c1_bars_elapsed >= c1_exit_bars:
-            # Exit C1 at market if profitable
+        # --- Update C1 HWM ---
+        if direction == "long":
+            trade.c1_best_price = max(trade.c1_best_price, price)
+        else:
+            if trade.c1_best_price == 0:
+                trade.c1_best_price = price
+            trade.c1_best_price = min(trade.c1_best_price, price)
+
+        # --- Compute unrealized C1 profit ---
+        if direction == "long":
+            unrealized = price - trade.entry_price
+        else:
+            unrealized = trade.entry_price - price
+
+        # --- Activate trailing once profit >= threshold ---
+        if unrealized >= cfg.c1_profit_threshold_pts and not trade.c1_trailing_active:
+            trade.c1_trailing_active = True
+
+        # --- Check trailing stop ---
+        if trade.c1_trailing_active:
             if direction == "long":
-                c1_in_profit = price > trade.entry_price
+                trail_stop = trade.c1_best_price - cfg.c1_trail_distance_pts
+                triggered = price <= trail_stop
             else:
-                c1_in_profit = price < trade.entry_price
+                trail_stop = trade.c1_best_price + cfg.c1_trail_distance_pts
+                triggered = price >= trail_stop
 
-            if c1_in_profit:
-                # Close C1 at market
-                trade.c1.exit_price = round(price, 2)
-                trade.c1.exit_time = time
-                trade.c1.exit_reason = f"time_{c1_exit_bars}bars"
-                trade.c1.is_open = False
-                trade.c1.gross_pnl = self._compute_leg_pnl(trade.c1, trade.direction)
-                trade.c1.net_pnl = trade.c1.gross_pnl - trade.c1.commission
-
-                # Move C2 stop to breakeven + buffer
-                if self.scale_config.c2_move_stop_to_breakeven:
-                    buffer = self.scale_config.c2_breakeven_buffer_points
-                    if direction == "long":
-                        new_stop = trade.entry_price + buffer
-                    else:
-                        new_stop = trade.entry_price - buffer
-
-                    trade.c2.stop_price = round(new_stop, 2)
-
-                    # If live, modify the stop order
-                    if not self.config.execution.paper_trading and self.broker:
-                        if trade.c2.stop_order_id:
-                            await self.broker.modify_stop(trade.c2.stop_order_id, new_stop)
-
-                trade._set_phase(ScaleOutPhase.C1_HIT)
-                trade.c2_best_price = price
-
-                c1_pts = abs(price - trade.entry_price)
-                logger.info(
-                    f"C1 TIME EXIT @ bar {trade.c1_bars_elapsed} | "
-                    f"Price: {price:.2f} ({c1_pts:.1f}pts) | "
-                    f"C1 PnL: ${trade.c1.net_pnl:.2f} | "
-                    f"C2 stop moved to BE+1: {trade.c2.stop_price:.2f}"
+            if triggered:
+                return await self._close_c1_to_runner(
+                    trade, round(trail_stop, 2), time, "c1_trail_from_profit"
                 )
 
-                # Transition to running
-                trade._set_phase(ScaleOutPhase.RUNNING)
+        # --- Fallback: max bars without trailing activation ---
+        if trade.c1_bars_elapsed >= cfg.c1_max_bars_fallback and not trade.c1_trailing_active:
+            if unrealized > 0:
+                return await self._close_c1_to_runner(
+                    trade, round(price, 2), time,
+                    f"time_{cfg.c1_max_bars_fallback}bars_fallback"
+                )
 
-                return {
-                    "action": "c1_time_exit",
-                    "c1_pnl": trade.c1.net_pnl,
-                    "c1_bars": trade.c1_bars_elapsed,
-                    "c2_new_stop": trade.c2.stop_price,
-                    "price": price,
-                }
-
-        # Update best price for tracking
+        # Update best price for C2 tracking
         if direction == "long":
             trade.c2_best_price = max(trade.c2_best_price, price)
         else:
             trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
 
+        return None
+
+    async def _close_c1_to_runner(
+        self, trade: ScaleOutTrade, exit_price: float, time: datetime, reason: str
+    ) -> dict:
+        """Close C1 and transition C2 to runner phase with BE stop."""
+        direction = trade.direction
+
+        # Close C1
+        trade.c1.exit_price = exit_price
+        trade.c1.exit_time = time
+        trade.c1.exit_reason = reason
+        trade.c1.is_open = False
+        trade.c1.gross_pnl = self._compute_leg_pnl(trade.c1, trade.direction)
+        trade.c1.net_pnl = trade.c1.gross_pnl - trade.c1.commission
+
+        # Move C2 stop to breakeven + buffer
+        if self.scale_config.c2_move_stop_to_breakeven:
+            buffer = self.scale_config.c2_breakeven_buffer_points
+            if direction == "long":
+                new_stop = trade.entry_price + buffer
+            else:
+                new_stop = trade.entry_price - buffer
+            trade.c2.stop_price = round(new_stop, 2)
+
+            if not self.config.execution.paper_trading and self.broker:
+                if trade.c2.stop_order_id:
+                    await self.broker.modify_stop(trade.c2.stop_order_id, new_stop)
+
+        trade._set_phase(ScaleOutPhase.C1_HIT)
+        trade.c2_best_price = exit_price
+
+        c1_pts = abs(exit_price - trade.entry_price)
+        logger.info(
+            f"C1 EXIT ({reason}) @ bar {trade.c1_bars_elapsed} | "
+            f"Price: {exit_price:.2f} ({c1_pts:.1f}pts) | "
+            f"C1 PnL: ${trade.c1.net_pnl:.2f} | "
+            f"C2 stop moved to BE+1: {trade.c2.stop_price:.2f}"
+        )
+
+        trade._set_phase(ScaleOutPhase.RUNNING)
+
+        return {
+            "action": "c1_time_exit",
+            "c1_pnl": trade.c1.net_pnl,
+            "c1_bars": trade.c1_bars_elapsed,
+            "c2_new_stop": trade.c2.stop_price,
+            "price": exit_price,
+        }
+
+    # Archived: Original Time-10 C1 exit (kept for A/B testing)
+    async def _manage_phase_1_time10(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
+        """
+        ARCHIVED: Original Time-10 bars C1 exit.
+        Use for A/B testing by swapping: executor._manage_phase_1 = executor._manage_phase_1_time10
+        """
+        direction = trade.direction
+        stop_hit = False
+        if direction == "long" and price <= trade.initial_stop:
+            stop_hit = True
+        elif direction == "short" and price >= trade.initial_stop:
+            stop_hit = True
+        if stop_hit:
+            return await self._close_all(trade, price, time, "stop")
+
+        trade.c1_bars_elapsed += 1
+        c1_exit_bars = self.scale_config.c1_time_exit_bars
+        if trade.c1_bars_elapsed >= c1_exit_bars:
+            c1_in_profit = (price > trade.entry_price) if direction == "long" else (price < trade.entry_price)
+            if c1_in_profit:
+                return await self._close_c1_to_runner(
+                    trade, round(price, 2), time, f"time_{c1_exit_bars}bars"
+                )
+
+        if direction == "long":
+            trade.c2_best_price = max(trade.c2_best_price, price)
+        else:
+            trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
         return None
 
     async def _manage_runner(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:

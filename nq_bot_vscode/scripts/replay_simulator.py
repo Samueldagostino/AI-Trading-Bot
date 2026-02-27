@@ -23,12 +23,17 @@ Session rules enforced:
   - Daily loss limit: $500 → halt for the day
   - Max position: 2 contracts
 
-Fill simulation (dynamic slippage):
-  - Normal session (9:30-16:00 ET): 0.75-1.25pts per fill
-  - Extended hours (6:00-9:30, 16:00-20:00 ET): 1.5-2.5pts per fill
-  - Volume spike (>150% of 20-bar avg): +1.0-2.0pts
-  - News window (FOMC/CPI/NFP): +2.0-3.0pts
+Fill simulation (calibrated slippage — permanent model):
+  - RTH (9:30-16:00 ET): 0.50pt base, +0.50 vol spike, cap 1.50pt
+  - ETH (18:01-9:29 ET): 1.00pt base, +0.75 vol spike, cap 2.50pt
+  - News window (FOMC/CPI/NFP): +1.00pt, cap 3.00pt
   - All fills (entry + exit + stop) get adverse slippage
+
+C1 Exit: Variant C (Trail from Profit) is now the DEFAULT.
+  - Trail activates once unrealized profit >= 3.0pts
+  - Trail distance: 2.5pts from HWM
+  - Fallback: market exit at bar 12 if trailing never activates
+  Old variants (baseline/A/B/D) still available via --c1-variant flag.
 
 Usage:
     # Real-time replay at 100x speed, starting from 2025-10-01
@@ -37,8 +42,14 @@ Usage:
     # Max speed with dashboard
     python scripts/replay_simulator.py --speed max --start-date 2025-09-01
 
-    # Validate mode — compare to OOS baseline
+    # Validate mode — compare to OOS baseline (uses Variant C by default)
     python scripts/replay_simulator.py --validate
+
+    # Test old baseline C1 (Time 10) for comparison
+    python scripts/replay_simulator.py --validate --c1-variant baseline
+
+    # Compare all 5 variants (baseline + A/B/C/D)
+    python scripts/replay_simulator.py --validate --compare-all
 
     # Validate specific months
     python scripts/replay_simulator.py --validate --start-date 2025-09-01 --end-date 2026-03-01
@@ -79,18 +90,18 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 TRADES_LOG = LOGS_DIR / "paper_trades.json"
 DECISIONS_LOG = LOGS_DIR / "paper_decisions.json"
 
-# ── OOS Baseline (Config D + C1 Time Exit, Sep 2025 – Feb 2026) ──
+# ── OOS Baseline (Config D + C1 Variant C + Calibrated Slippage, Sep 2025 – Feb 2026) ──
 OOS_BASELINE = {
-    "total_trades": 948,
-    "trades_per_month": 158,
-    "win_rate": 68.1,
-    "profit_factor": 1.59,
-    "total_pnl": 14543.64,
-    "pnl_per_month": 2424.0,
-    "expectancy": 15.34,
-    "max_drawdown_pct": 1.7,
-    "c1_pnl": 3842.58,
-    "c2_pnl": 10701.06,
+    "total_trades": 1161,
+    "trades_per_month": 194,
+    "win_rate": 62.0,
+    "profit_factor": 1.61,
+    "total_pnl": 15894.0,
+    "pnl_per_month": 2649.0,
+    "expectancy": 13.69,
+    "max_drawdown_pct": 1.4,
+    "c1_pnl": 6382.0,
+    "c2_pnl": 9512.0,
     "months": 6,
 }
 
@@ -247,16 +258,15 @@ for _start, _end in NEWS_WINDOWS_UTC:
 
 class DynamicSlippageEngine:
     """
-    Realistic slippage model based on:
-    - Time of day (session vs pre/post-market)
-    - Volume spikes (>150% of 20-bar average)
+    Calibrated slippage model (v2) based on:
+    - Time of day (RTH vs ETH)
+    - Volume spikes (>2.0x of 20-bar average)
     - News windows (FOMC, CPI, NFP)
 
     Slippage tiers (per fill, always adverse):
-      Normal session (9:30-16:00 ET):     0.75–1.25 pts (mean 1.0)
-      Pre/post-market (6:00-9:30, 16:00-20:00 ET): 1.5–2.5 pts (mean 2.0)
-      Volume spike (>150% of 20-bar avg): +1.0–2.0 pts
-      News window:                        +2.0–3.0 pts
+      RTH (9:30-16:00 ET):  0.50pt base, +0.50 vol spike, cap 1.50pt
+      ETH (18:01-9:29 ET):  1.00pt base, +0.75 vol spike, cap 2.50pt
+      News window:          +1.00pt addon, cap 3.00pt
     """
 
     def __init__(self, seed: int = 42):
@@ -282,7 +292,7 @@ class DynamicSlippageEngine:
         avg = self._avg_volume()
         if avg <= 0:
             return False
-        return current_volume > avg * 1.5
+        return current_volume > avg * 2.0  # 2.0x threshold (was 1.5x)
 
     @staticmethod
     def _is_news_window(bar_time: datetime) -> bool:
@@ -296,14 +306,11 @@ class DynamicSlippageEngine:
         """Determine slippage tier based on ET time of day."""
         h, m = et_time.hour, et_time.minute
         t = h + m / 60.0
-        # Normal session: 9:30 – 16:00 ET
+        # RTH: 9:30 – 16:00 ET
         if 9.5 <= t < 16.0:
-            return "normal"
-        # Pre/post-market: 6:00–9:30, 16:00–20:00 ET
-        if (6.0 <= t < 9.5) or (16.0 <= t < 20.0):
-            return "extended"
-        # Overnight (rare for this system, treat as extended)
-        return "extended"
+            return "rth"
+        # ETH: everything else (18:01-9:29 next day)
+        return "eth"
 
     def compute_slippage(
         self,
@@ -313,29 +320,38 @@ class DynamicSlippageEngine:
         fill_type: str = "entry",  # "entry", "exit", "stop"
     ) -> float:
         """
-        Compute dynamic slippage in points for a single fill.
+        Compute calibrated slippage in points for a single fill.
         Always positive (caller applies adverse direction).
         """
-        # Base slippage by session tier
         tier = self._session_tier(et_time)
-        if tier == "normal":
-            base = self.rng.uniform(0.75, 1.25)
-        else:
-            base = self.rng.uniform(1.5, 2.5)
 
-        # Volume spike addon
+        if tier == "rth":
+            base = 0.50
+            vol_addon_range = (0.25, 0.50)
+            cap = 1.50
+        else:  # eth
+            base = 1.00
+            vol_addon_range = (0.50, 0.75)
+            cap = 2.50
+
+        # Volume spike addon (>2.0x 20-bar avg)
         vol_addon = 0.0
         if self._is_volume_spike(current_volume):
-            vol_addon = self.rng.uniform(1.0, 2.0)
+            vol_addon = self.rng.uniform(*vol_addon_range)
             self.vol_spike_fills += 1
 
         # News window addon
         news_addon = 0.0
-        if self._is_news_window(bar_time):
-            news_addon = self.rng.uniform(2.0, 3.0)
+        is_news = self._is_news_window(bar_time)
+        if is_news:
+            news_addon = 1.00
+            cap = 3.00  # raise cap during news
             self.news_fills += 1
 
         total = base + vol_addon + news_addon
+
+        # Apply cap
+        total = min(total, cap)
 
         # Round to nearest 0.25 (tick size)
         total = round(total * 4) / 4
@@ -463,6 +479,7 @@ class ReplayState:
 
         # Slippage tracking
         self.total_slippage_cost = 0.0  # Dollars lost to slippage
+        self.friction_losses = 0  # Trades where C1 profit < slippage cost
 
     def reset_daily(self, date_str: str) -> None:
         """Reset daily counters for a new trading day."""
@@ -532,7 +549,7 @@ def render_dashboard(state: ReplayState, speed: str, elapsed_secs: float) -> str
     lines = []
 
     lines.append("")
-    lines.append(f"  REPLAY SIMULATOR — Config D + C1 Time Exit")
+    lines.append(f"  REPLAY SIMULATOR — Config D + C1 Trail from Profit")
     lines.append(f"  Speed: {speed} | Elapsed: {elapsed_secs:.0f}s | "
                  f"Bar: {state.current_time[:19] if state.current_time else '—'}")
     lines.append(f"  {'=' * 60}")
@@ -604,6 +621,15 @@ def render_dashboard(state: ReplayState, speed: str, elapsed_secs: float) -> str
 class ReplaySimulator:
     """Replays historical data through the production pipeline."""
 
+    # C1 variant descriptions
+    C1_VARIANTS = {
+        "baseline": "Original Time 10 bars (exit if profitable)",
+        "A": "Minimum Profit Gate (>=4pts or convert to trail)",
+        "B": "Fixed TP at entry+6pts (limit=0 slip), fallback 15 bars",
+        "C": "Trail from profit (>=3pts → trail 2.5pt), fallback 12 bars",
+        "D": "RTH-only + Original Time 10 (restrict to 9:30-16:00 ET)",
+    }
+
     def __init__(
         self,
         speed: str = "max",
@@ -611,6 +637,8 @@ class ReplaySimulator:
         end_date: Optional[str] = None,
         validate: bool = False,
         data_dir: Optional[str] = None,
+        c1_variant: str = "C",
+        quiet: bool = False,
     ):
         # Default validate mode to the OOS window
         if validate and not start_date:
@@ -623,6 +651,8 @@ class ReplaySimulator:
         self.end_date = end_date
         self.validate = validate
         self.data_dir = data_dir or str(project_dir / "data" / "firstrate")
+        self.c1_variant = c1_variant
+        self.quiet = quiet  # suppress verbose output in compare-all mode
 
         self.state = ReplayState()
         self.bot: Optional[TradingOrchestrator] = None
@@ -630,6 +660,8 @@ class ReplaySimulator:
 
         # Per-trade slippage accumulator (reset on each new trade)
         self._current_trade_slippage = 0.0
+        self._current_trade_entry_slippage = 0.0
+        self._current_trade_exit_slippage = 0.0
         self._current_bar_volume = 0
         self._current_bar_time: Optional[datetime] = None
         self._current_et_time: Optional[datetime] = None
@@ -657,16 +689,20 @@ class ReplaySimulator:
         t0 = time.time()
 
         # ── Load data ──
-        print(f"\n{'=' * 62}")
-        print(f"  REPLAY SIMULATOR — Config D + C1 Time Exit")
-        print(f"  Speed: {self.speed} | Validate: {self.validate}")
-        if self.start_date:
-            print(f"  Start: {self.start_date}")
-        if self.end_date:
-            print(f"  End:   {self.end_date}")
-        print(f"{'=' * 62}\n")
+        variant_desc = self.C1_VARIANTS.get(self.c1_variant, self.c1_variant)
+        if not self.quiet:
+            print(f"\n{'=' * 62}")
+            print(f"  REPLAY SIMULATOR — Config D")
+            print(f"  C1 variant: {self.c1_variant} — {variant_desc}")
+            print(f"  Speed: {self.speed} | Validate: {self.validate}")
+            if self.start_date:
+                print(f"  Start: {self.start_date}")
+            if self.end_date:
+                print(f"  End:   {self.end_date}")
+            print(f"{'=' * 62}\n")
 
-        print("Loading FirstRate data...")
+        if not self.quiet:
+            print("Loading FirstRate data...")
         tf_bars = load_firstrate_mtf(self.data_dir)
 
         if not tf_bars or EXEC_TF not in tf_bars:
@@ -675,11 +711,12 @@ class ReplaySimulator:
             sys.exit(1)
 
         # Print data summary
-        for tf in sorted(tf_bars.keys()):
-            bars = tf_bars[tf]
-            print(f"  {tf:>4s}: {len(bars):>7,} bars  "
-                  f"({bars[0].timestamp.strftime('%Y-%m-%d')} → "
-                  f"{bars[-1].timestamp.strftime('%Y-%m-%d')})")
+        if not self.quiet:
+            for tf in sorted(tf_bars.keys()):
+                bars = tf_bars[tf]
+                print(f"  {tf:>4s}: {len(bars):>7,} bars  "
+                      f"({bars[0].timestamp.strftime('%Y-%m-%d')} → "
+                      f"{bars[-1].timestamp.strftime('%Y-%m-%d')})")
 
         # Filter by date
         tf_bars = filter_by_date(tf_bars, self.start_date, self.end_date)
@@ -689,12 +726,14 @@ class ReplaySimulator:
             sys.exit(1)
 
         exec_count = len(tf_bars.get(EXEC_TF, []))
-        print(f"\nReplay window: {exec_count:,} exec bars")
+        if not self.quiet:
+            print(f"\nReplay window: {exec_count:,} exec bars")
 
         # ── Build MTF iterator ──
         pipeline = DataPipeline(CONFIG)
         mtf_iterator = pipeline.create_mtf_iterator(tf_bars)
-        print(f"Total bars (all TFs): {len(mtf_iterator):,}")
+        if not self.quiet:
+            print(f"Total bars (all TFs): {len(mtf_iterator):,}")
 
         # ── Initialize orchestrator ──
         CONFIG.execution.paper_trading = True
@@ -704,7 +743,8 @@ class ReplaySimulator:
         # ── Patch executor with dynamic slippage ──
         self._patch_executor_slippage()
 
-        print(f"\nStarting replay...\n")
+        if not self.quiet:
+            print(f"\nStarting replay...\n")
 
         # ── Replay loop ──
         last_date = ""
@@ -768,6 +808,14 @@ class ReplaySimulator:
             if not is_within_session(et_time):
                 self.state.session_blocks += 1
                 continue
+
+            # Variant D: restrict to RTH only (9:30-16:00 ET)
+            if self.c1_variant == "D":
+                h, m = et_time.hour, et_time.minute
+                t = h + m / 60.0
+                if t < 9.5 or t >= 16.0:
+                    self.state.session_blocks += 1
+                    continue
 
             # Daily loss limit
             if self.state.daily_loss_limit_hit:
@@ -837,24 +885,16 @@ class ReplaySimulator:
     # ================================================================
     def _patch_executor_slippage(self) -> None:
         """
-        Monkey-patch the executor to use the dynamic slippage engine.
-        Replaces:
-          - _paper_enter: dynamic entry slippage instead of fixed 0-0.5pt
-          - _close_c2:    adds exit slippage (was 0)
-          - _close_all:   adds stop slippage (was 0)
-          - C1 time exit: adds exit slippage to C1 close (was 0)
+        Monkey-patch the executor to use calibrated slippage + C1 variant.
         """
         executor = self.bot.executor
-        sim = self  # capture ref for closures
+        sim = self
+        variant = self.c1_variant
 
-        # Store originals
-        _orig_paper_enter = executor._paper_enter
-        _orig_close_c2 = executor._close_c2
-        _orig_close_all = executor._close_all
-        _orig_manage_phase_1 = executor._manage_phase_1
+        # ── Shared patched fills ──────────────────────────────────
 
         async def patched_paper_enter(trade, price):
-            """Entry fill with dynamic slippage."""
+            """Entry fill with calibrated slippage."""
             bar_time = sim._current_bar_time or datetime.now(timezone.utc)
             et_time = sim._current_et_time or bar_to_et(bar_time)
             volume = sim._current_bar_volume
@@ -863,8 +903,10 @@ class ReplaySimulator:
                 price, trade.direction, "entry", bar_time, et_time, volume
             )
 
-            # Reset per-trade accumulator
+            # Reset per-trade accumulators
             sim._current_trade_slippage = slippage
+            sim._current_trade_entry_slippage = slippage
+            sim._current_trade_exit_slippage = 0.0
 
             fill_price = round(adjusted_price, 2)
             now = datetime.now(timezone.utc)
@@ -884,7 +926,7 @@ class ReplaySimulator:
             trade._set_phase(ScaleOutPhase.PHASE_1)
 
         async def patched_close_c2(trade, price, time, reason):
-            """C2 exit with dynamic slippage."""
+            """C2 exit with calibrated slippage."""
             bar_time = sim._current_bar_time or time
             et_time = sim._current_et_time or bar_to_et(bar_time)
             volume = sim._current_bar_volume
@@ -894,6 +936,7 @@ class ReplaySimulator:
                 price, trade.direction, fill_type, bar_time, et_time, volume
             )
             sim._current_trade_slippage += slippage
+            sim._current_trade_exit_slippage += slippage
 
             trade.c2.exit_price = round(adjusted_price, 2)
             trade.c2.exit_time = time
@@ -905,7 +948,7 @@ class ReplaySimulator:
             return executor._finalize_trade(trade, time)
 
         async def patched_close_all(trade, price, time, reason):
-            """Both contracts stopped out with dynamic slippage."""
+            """Both contracts stopped out with calibrated slippage."""
             bar_time = sim._current_bar_time or time
             et_time = sim._current_et_time or bar_to_et(bar_time)
             volume = sim._current_bar_volume
@@ -916,6 +959,7 @@ class ReplaySimulator:
                         price, trade.direction, "stop", bar_time, et_time, volume
                     )
                     sim._current_trade_slippage += slippage
+                    sim._current_trade_exit_slippage += slippage
 
                     leg.exit_price = round(adjusted_price, 2)
                     leg.exit_time = time
@@ -926,89 +970,267 @@ class ReplaySimulator:
 
             return executor._finalize_trade(trade, time)
 
-        async def patched_manage_phase_1(trade, price, time):
-            """Phase 1 with C1 exit slippage + stop slippage."""
+        # ── Helper: close C1 with slippage and transition to runner ─
+
+        def _close_c1_and_run(trade, exit_price, time, reason, slippage_pts):
+            """Close C1, move C2 stop to BE, transition to runner."""
             from execution.scale_out_executor import ScaleOutPhase
             direction = trade.direction
 
-            # --- Check STOP (both contracts) ---
-            stop_hit = False
-            if direction == "long" and price <= trade.initial_stop:
-                stop_hit = True
-            elif direction == "short" and price >= trade.initial_stop:
-                stop_hit = True
+            trade.c1.exit_price = round(exit_price, 2)
+            trade.c1.exit_time = time
+            trade.c1.exit_reason = reason
+            trade.c1.is_open = False
+            trade.c1.gross_pnl = executor._compute_leg_pnl(trade.c1, trade.direction)
+            trade.c1.net_pnl = trade.c1.gross_pnl - trade.c1.commission
 
-            if stop_hit:
+            sim._current_trade_slippage += slippage_pts
+            sim._current_trade_exit_slippage += slippage_pts
+
+            # Move C2 stop to breakeven + buffer
+            if executor.scale_config.c2_move_stop_to_breakeven:
+                buffer = executor.scale_config.c2_breakeven_buffer_points
+                if direction == "long":
+                    new_stop = trade.entry_price + buffer
+                else:
+                    new_stop = trade.entry_price - buffer
+                trade.c2.stop_price = round(new_stop, 2)
+
+            trade._set_phase(ScaleOutPhase.C1_HIT)
+            trade.c2_best_price = trade.c2.stop_price if trade.c2.stop_price else exit_price
+            trade._set_phase(ScaleOutPhase.RUNNING)
+
+            return {
+                "action": "c1_time_exit",
+                "c1_pnl": trade.c1.net_pnl,
+                "c1_bars": trade.c1_bars_elapsed,
+                "c2_new_stop": trade.c2.stop_price,
+                "price": exit_price,
+            }
+
+        # ── Helper: get current slippage context ────────────────
+
+        def _slip_ctx(time):
+            bar_time = sim._current_bar_time or time
+            et_time = sim._current_et_time or bar_to_et(bar_time)
+            volume = sim._current_bar_volume
+            return bar_time, et_time, volume
+
+        # ── Phase 1 manager factory (per variant) ──────────────
+
+        async def phase1_baseline(trade, price, time):
+            """BASELINE: Original Time 10 bars, exit if profitable."""
+            from execution.scale_out_executor import ScaleOutPhase
+            direction = trade.direction
+
+            # Check stop
+            if (direction == "long" and price <= trade.initial_stop) or \
+               (direction == "short" and price >= trade.initial_stop):
                 return await patched_close_all(trade, price, time, "stop")
 
-            # --- Count bars for C1 time exit ---
             trade.c1_bars_elapsed += 1
-
-            # --- Check C1 TIME EXIT ---
             c1_exit_bars = executor.scale_config.c1_time_exit_bars
+
             if trade.c1_bars_elapsed >= c1_exit_bars:
-                if direction == "long":
-                    c1_in_profit = price > trade.entry_price
-                else:
-                    c1_in_profit = price < trade.entry_price
-
+                c1_in_profit = (price > trade.entry_price) if direction == "long" else (price < trade.entry_price)
                 if c1_in_profit:
-                    # Apply exit slippage to C1 close
-                    bar_time = sim._current_bar_time or time
-                    et_time = sim._current_et_time or bar_to_et(bar_time)
-                    volume = sim._current_bar_volume
+                    bar_time, et_time, volume = _slip_ctx(time)
+                    adj, slip = sim.slippage_engine.apply_adverse_slippage(
+                        price, direction, "exit", bar_time, et_time, volume)
+                    return _close_c1_and_run(trade, adj, time,
+                                             f"time_{c1_exit_bars}bars", slip)
 
-                    adjusted_price, slippage = sim.slippage_engine.apply_adverse_slippage(
-                        price, direction, "exit", bar_time, et_time, volume
-                    )
-                    sim._current_trade_slippage += slippage
-
-                    trade.c1.exit_price = round(adjusted_price, 2)
-                    trade.c1.exit_time = time
-                    trade.c1.exit_reason = f"time_{c1_exit_bars}bars"
-                    trade.c1.is_open = False
-                    trade.c1.gross_pnl = executor._compute_leg_pnl(trade.c1, trade.direction)
-                    trade.c1.net_pnl = trade.c1.gross_pnl - trade.c1.commission
-
-                    # Move C2 stop to breakeven + buffer
-                    if executor.scale_config.c2_move_stop_to_breakeven:
-                        buffer = executor.scale_config.c2_breakeven_buffer_points
-                        if direction == "long":
-                            new_stop = trade.entry_price + buffer
-                        else:
-                            new_stop = trade.entry_price - buffer
-                        trade.c2.stop_price = round(new_stop, 2)
-
-                    trade._set_phase(ScaleOutPhase.C1_HIT)
-                    trade.c2_best_price = price
-                    trade._set_phase(ScaleOutPhase.RUNNING)
-
-                    return {
-                        "action": "c1_time_exit",
-                        "c1_pnl": trade.c1.net_pnl,
-                        "c1_bars": trade.c1_bars_elapsed,
-                        "c2_new_stop": trade.c2.stop_price,
-                        "price": price,
-                    }
-
-            # Update best price
+            # Update best price for C2 tracking
             if direction == "long":
                 trade.c2_best_price = max(trade.c2_best_price, price)
             else:
                 trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
-
             return None
 
-        # We also need to patch _manage_runner for C2 stop exits
-        _orig_manage_runner = executor._manage_runner
+        async def phase1_variant_a(trade, price, time):
+            """VARIANT A: Minimum Profit Gate — exit only if profit >= 4.0pts."""
+            from execution.scale_out_executor import ScaleOutPhase
+            direction = trade.direction
+
+            if (direction == "long" and price <= trade.initial_stop) or \
+               (direction == "short" and price >= trade.initial_stop):
+                return await patched_close_all(trade, price, time, "stop")
+
+            trade.c1_bars_elapsed += 1
+            c1_exit_bars = executor.scale_config.c1_time_exit_bars
+            unrealized = abs(price - trade.entry_price) if \
+                ((direction == "long" and price > trade.entry_price) or
+                 (direction == "short" and price < trade.entry_price)) else 0.0
+
+            if trade.c1_bars_elapsed >= c1_exit_bars:
+                if unrealized >= 4.0:
+                    # Enough profit to absorb slippage — exit C1
+                    bar_time, et_time, volume = _slip_ctx(time)
+                    adj, slip = sim.slippage_engine.apply_adverse_slippage(
+                        price, direction, "exit", bar_time, et_time, volume)
+                    return _close_c1_and_run(trade, adj, time,
+                                             "min_profit_gate_4pt", slip)
+                elif unrealized > 0:
+                    # Profitable but < 4pts: convert C1 to trailing stop
+                    # Use same C2 trail logic: trail 2.5pts from HWM
+                    if not hasattr(trade, '_c1_trailing'):
+                        trade._c1_trailing = True
+                        trade._c1_hwm = price if direction == "long" else price
+                        trade._c1_trail_distance = 2.5
+                    # Fall through to trailing logic below
+
+            # C1 trailing mode (activated by variant A when profit < 4pts at bar 10)
+            if hasattr(trade, '_c1_trailing') and trade._c1_trailing:
+                if direction == "long":
+                    trade._c1_hwm = max(trade._c1_hwm, price)
+                    c1_trail_stop = trade._c1_hwm - trade._c1_trail_distance
+                    if price <= c1_trail_stop:
+                        bar_time, et_time, volume = _slip_ctx(time)
+                        adj, slip = sim.slippage_engine.apply_adverse_slippage(
+                            c1_trail_stop, direction, "exit", bar_time, et_time, volume)
+                        return _close_c1_and_run(trade, adj, time,
+                                                 "c1_trail_stop", slip)
+                else:
+                    trade._c1_hwm = min(trade._c1_hwm, price)
+                    c1_trail_stop = trade._c1_hwm + trade._c1_trail_distance
+                    if price >= c1_trail_stop:
+                        bar_time, et_time, volume = _slip_ctx(time)
+                        adj, slip = sim.slippage_engine.apply_adverse_slippage(
+                            c1_trail_stop, direction, "exit", bar_time, et_time, volume)
+                        return _close_c1_and_run(trade, adj, time,
+                                                 "c1_trail_stop", slip)
+
+            if direction == "long":
+                trade.c2_best_price = max(trade.c2_best_price, price)
+            else:
+                trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
+            return None
+
+        async def phase1_variant_b(trade, price, time):
+            """VARIANT B: Fixed TP at entry+6pts (limit = 0 slippage)."""
+            from execution.scale_out_executor import ScaleOutPhase
+            direction = trade.direction
+
+            if (direction == "long" and price <= trade.initial_stop) or \
+               (direction == "short" and price >= trade.initial_stop):
+                return await patched_close_all(trade, price, time, "stop")
+
+            trade.c1_bars_elapsed += 1
+            tp_distance = 6.0
+            max_bars = 15
+
+            if direction == "long":
+                tp_price = trade.entry_price + tp_distance
+                tp_hit = price >= tp_price
+            else:
+                tp_price = trade.entry_price - tp_distance
+                tp_hit = price <= tp_price
+
+            if tp_hit:
+                # Limit order fill at TP price — ZERO slippage
+                return _close_c1_and_run(trade, tp_price, time,
+                                         "limit_tp_6pt", 0.0)
+
+            if trade.c1_bars_elapsed >= max_bars:
+                # Fallback: market exit at bar 15 with slippage
+                c1_in_profit = (price > trade.entry_price) if direction == "long" else (price < trade.entry_price)
+                if c1_in_profit:
+                    bar_time, et_time, volume = _slip_ctx(time)
+                    adj, slip = sim.slippage_engine.apply_adverse_slippage(
+                        price, direction, "exit", bar_time, et_time, volume)
+                    return _close_c1_and_run(trade, adj, time,
+                                             "time_15bars_fallback", slip)
+
+            if direction == "long":
+                trade.c2_best_price = max(trade.c2_best_price, price)
+            else:
+                trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
+            return None
+
+        async def phase1_variant_c(trade, price, time):
+            """VARIANT C: Trailing from profit >= 3pts, trail 2.5pts."""
+            from execution.scale_out_executor import ScaleOutPhase
+            direction = trade.direction
+
+            if (direction == "long" and price <= trade.initial_stop) or \
+               (direction == "short" and price >= trade.initial_stop):
+                return await patched_close_all(trade, price, time, "stop")
+
+            trade.c1_bars_elapsed += 1
+            profit_threshold = 3.0
+            trail_distance = 2.5
+            max_bars = 12
+
+            unrealized = (price - trade.entry_price) if direction == "long" else (trade.entry_price - price)
+
+            # Initialize C1 HWM tracking
+            if not hasattr(trade, '_c1_hwm_c'):
+                trade._c1_hwm_c = trade.entry_price
+                trade._c1_trailing_active = False
+
+            # Update HWM
+            if direction == "long":
+                trade._c1_hwm_c = max(trade._c1_hwm_c, price)
+            else:
+                trade._c1_hwm_c = min(trade._c1_hwm_c, price)
+
+            # Activate trailing once profit >= threshold
+            if unrealized >= profit_threshold and not trade._c1_trailing_active:
+                trade._c1_trailing_active = True
+
+            # Check trailing stop
+            if trade._c1_trailing_active:
+                if direction == "long":
+                    trail_stop = trade._c1_hwm_c - trail_distance
+                    if price <= trail_stop:
+                        bar_time, et_time, volume = _slip_ctx(time)
+                        adj, slip = sim.slippage_engine.apply_adverse_slippage(
+                            trail_stop, direction, "exit", bar_time, et_time, volume)
+                        return _close_c1_and_run(trade, adj, time,
+                                                 "c1_trail_from_profit", slip)
+                else:
+                    trail_stop = trade._c1_hwm_c + trail_distance
+                    if price >= trail_stop:
+                        bar_time, et_time, volume = _slip_ctx(time)
+                        adj, slip = sim.slippage_engine.apply_adverse_slippage(
+                            trail_stop, direction, "exit", bar_time, et_time, volume)
+                        return _close_c1_and_run(trade, adj, time,
+                                                 "c1_trail_from_profit", slip)
+
+            # Fallback: market exit at bar 12 if trailing never activated
+            if trade.c1_bars_elapsed >= max_bars and not trade._c1_trailing_active:
+                if unrealized > 0:
+                    bar_time, et_time, volume = _slip_ctx(time)
+                    adj, slip = sim.slippage_engine.apply_adverse_slippage(
+                        price, direction, "exit", bar_time, et_time, volume)
+                    return _close_c1_and_run(trade, adj, time,
+                                             "time_12bars_fallback", slip)
+
+            if direction == "long":
+                trade.c2_best_price = max(trade.c2_best_price, price)
+            else:
+                trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
+            return None
+
+        # Select C1 phase 1 strategy
+        # "C" uses the native executor Variant C (now the production default)
+        # "baseline" and "D" use the old Time 10 logic
+        phase1_map = {
+            "baseline": phase1_baseline,
+            "A": phase1_variant_a,
+            "B": phase1_variant_b,
+            "C": phase1_variant_c,
+            "D": phase1_baseline,  # D uses original Time 10, RTH restriction is in the loop
+        }
+        selected_phase1 = phase1_map.get(variant, phase1_variant_c)
+
+        # ── Patched runner (same for all variants) ────────────
 
         async def patched_manage_runner(trade, price, time):
-            """Manage C2 runner with dynamic slippage on stop exits."""
-            from execution.scale_out_executor import ScaleOutPhase
+            """C2 runner with calibrated slippage."""
             direction = trade.direction
             cfg = executor.scale_config
 
-            # --- Update best price ---
             if direction == "long":
                 trade.c2_best_price = max(trade.c2_best_price, price)
             else:
@@ -1016,7 +1238,6 @@ class ReplaySimulator:
                     trade.c2_best_price = price
                 trade.c2_best_price = min(trade.c2_best_price, price)
 
-            # --- Update trailing stop ---
             if cfg.c2_trailing_stop_enabled:
                 new_trail = executor._compute_trailing_stop(trade, price)
                 if direction == "long" and new_trail > trade.c2.stop_price:
@@ -1026,7 +1247,6 @@ class ReplaySimulator:
                     trade.c2.stop_price = round(new_trail, 2)
                     trade.c2_trailing_stop = trade.c2.stop_price
 
-            # --- Check C2 STOP ---
             stop_hit = False
             if direction == "long" and price <= trade.c2.stop_price:
                 stop_hit = True
@@ -1037,12 +1257,10 @@ class ReplaySimulator:
                 exit_reason = "trailing" if trade.c2_trailing_stop > 0 else "breakeven"
                 return await patched_close_c2(trade, trade.c2.stop_price, time, exit_reason)
 
-            # --- Check MAX TARGET ---
             points_from_entry = abs(price - trade.entry_price)
             if points_from_entry >= cfg.c2_max_target_points:
                 return await patched_close_c2(trade, price, time, "max_target")
 
-            # --- Check TIME STOP ---
             if trade.entry_time:
                 elapsed_minutes = (time - trade.entry_time).total_seconds() / 60
                 if elapsed_minutes >= cfg.c2_time_stop_minutes:
@@ -1054,15 +1272,16 @@ class ReplaySimulator:
         executor._paper_enter = patched_paper_enter
         executor._close_c2 = patched_close_c2
         executor._close_all = patched_close_all
-        executor._manage_phase_1 = patched_manage_phase_1
+        executor._manage_phase_1 = selected_phase1
         executor._manage_runner = patched_manage_runner
 
-        print("  Dynamic slippage engine active:")
-        print("    Normal session (9:30-16:00 ET):  0.75–1.25 pts")
-        print("    Extended hours (6:00-9:30, 16:00-20:00 ET): 1.5–2.5 pts")
-        print("    Volume spike (>150% 20-bar avg): +1.0–2.0 pts")
-        print("    News window (FOMC/CPI/NFP):      +2.0–3.0 pts")
-        print("    Applied to ALL fills (entry + exit + stop)")
+        if not self.quiet:
+            print(f"  Slippage engine v2 (calibrated):")
+            print(f"    RTH (9:30-16:00 ET): 0.50pt base, cap 1.50pt")
+            print(f"    ETH (18:01-9:29 ET): 1.00pt base, cap 2.50pt")
+            print(f"    Volume spike (>2x 20-bar avg): +0.50-0.75pt")
+            print(f"    News window: +1.00pt, cap 3.00pt")
+            print(f"  C1 variant: {variant} — {self.C1_VARIANTS.get(variant, variant)}")
 
     def _handle_result(self, result: Dict, timestamp: datetime) -> None:
         """Handle a trade action from process_bar()."""
@@ -1105,12 +1324,18 @@ class ReplaySimulator:
         c2_pnl = result.get("c2_pnl", 0)
 
         # Capture slippage for this trade
-        trade_slippage = round(self._current_trade_slippage, 2)
-        # Slippage cost in dollars: points × $2/point × 2 contracts average
-        # (entry slippage affects both contracts, exit slippage varies)
-        slippage_cost = trade_slippage * 2.0  # $2/pt MNQ
+        total_slip = round(self._current_trade_slippage, 2)
+        entry_slip = round(self._current_trade_entry_slippage, 2)
+        exit_slip = round(self._current_trade_exit_slippage, 2)
+        slippage_cost = total_slip * 2.0  # $2/pt MNQ
         self.state.total_slippage_cost += slippage_cost
         self._current_trade_slippage = 0.0
+        self._current_trade_entry_slippage = 0.0
+        self._current_trade_exit_slippage = 0.0
+
+        # Friction loss: C1 profit < total slippage cost for this trade
+        if c1_pnl < slippage_cost and c1_pnl >= 0:
+            self.state.friction_losses += 1
 
         self.state.record_trade(pnl, c1_pnl, c2_pnl)
         self.state.has_position = False
@@ -1125,7 +1350,9 @@ class ReplaySimulator:
             "c1_reason": result.get("c1_exit_reason"),
             "c2_pnl": c2_pnl,
             "c2_reason": result.get("c2_exit_reason"),
-            "slippage_points": trade_slippage,
+            "entry_slippage_pts": entry_slip,
+            "exit_slippage_pts": exit_slip,
+            "total_slippage_pts": total_slip,
             "daily_pnl": self.state.daily_pnl,
         })
 
@@ -1185,6 +1412,8 @@ class ReplaySimulator:
             ) if elapsed > 0 else 0,
             "slippage": slippage_summary,
             "total_slippage_cost": round(self.state.total_slippage_cost, 2),
+            "friction_losses": self.state.friction_losses,
+            "c1_variant": self.c1_variant,
         }
 
     # ================================================================
@@ -1293,7 +1522,7 @@ class ReplaySimulator:
         # ── Slippage Report ──
         slip = results.get("slippage", {})
         print(f"\n{'=' * 62}")
-        print(f"  SLIPPAGE REPORT")
+        print(f"  SLIPPAGE REPORT  (C1 variant: {results.get('c1_variant', '?')})")
         print(f"{'=' * 62}")
         print(f"  Total fills:           {slip.get('total_fills', 0)}")
         print(f"  Avg slippage/fill:     {slip.get('avg_slippage_per_fill', 0):.2f} pts")
@@ -1302,6 +1531,8 @@ class ReplaySimulator:
         print(f"  Volume spike fills:    {slip.get('volume_spike_fills', 0)}")
         print(f"  News window fills:     {slip.get('news_window_fills', 0)}")
         print(f"  Total slippage cost:   ${results.get('total_slippage_cost', 0):,.2f}")
+        print(f"  Friction losses:       {results.get('friction_losses', 0)} "
+              f"(C1 profit < slippage cost)")
         baseline_pnl_val = OOS_BASELINE["pnl_per_month"] * OOS_BASELINE["months"]
         if baseline_pnl_val > 0:
             pnl_reduction = (1 - results["total_pnl"] / baseline_pnl_val) * 100
@@ -1392,6 +1623,128 @@ class ReplaySimulator:
 
 
 # ================================================================
+# COMPARE-ALL: Run all 5 variants and print comparison
+# ================================================================
+async def run_compare_all(args):
+    """Run baseline + all 4 C1 variants, print comparison table."""
+    variants = ["baseline", "A", "B", "C", "D"]
+    all_results = {}
+
+    for v in variants:
+        desc = ReplaySimulator.C1_VARIANTS.get(v, v)
+        print(f"\n{'#' * 62}")
+        print(f"  RUNNING VARIANT: {v} — {desc}")
+        print(f"{'#' * 62}")
+
+        sim = ReplaySimulator(
+            speed="max",
+            start_date=args.start_date,
+            end_date=args.end_date,
+            validate=True,
+            data_dir=args.data_dir,
+            c1_variant=v,
+            quiet=True,
+        )
+        results = await sim.run()
+        # Attach monthly breakdown
+        monthly = {}
+        for t in sim.state.trades_log:
+            ts = t.get("timestamp", "")
+            month = ts[:7]
+            if not month:
+                continue
+            if month not in monthly:
+                monthly[month] = {"trades": 0, "wins": 0, "pnl": 0.0,
+                                  "c1_pnl": 0.0, "c2_pnl": 0.0,
+                                  "gross_profit": 0.0, "gross_loss": 0.0}
+            m = monthly[month]
+            pnl = t.get("total_pnl", 0)
+            m["trades"] += 1
+            m["pnl"] += pnl
+            m["c1_pnl"] += t.get("c1_pnl", 0)
+            m["c2_pnl"] += t.get("c2_pnl", 0)
+            if pnl > 0:
+                m["wins"] += 1
+                m["gross_profit"] += pnl
+            else:
+                m["gross_loss"] += abs(pnl)
+        results["monthly"] = monthly
+        all_results[v] = results
+
+        print(f"  → {v}: PF {results['profit_factor']:.2f} | "
+              f"PnL ${results['total_pnl']:+,.0f} | "
+              f"WR {results['win_rate']:.1f}% | "
+              f"DD {results['max_drawdown_pct']:.1f}% | "
+              f"Trades {results['total_trades']}")
+
+    # ── Comparison Table ──
+    print(f"\n\n{'=' * 80}")
+    print(f"  C1 VARIANT COMPARISON — Calibrated Slippage v2")
+    print(f"{'=' * 80}")
+    print(f"  {'Variant':<12} {'Trades':>6} {'WR':>6} {'PF':>6} "
+          f"{'PnL':>10} {'C1 PnL':>9} {'C2 PnL':>9} "
+          f"{'MaxDD':>6} {'Slip/Fill':>9} {'Frict':>5}")
+    print(f"  {'─' * 76}")
+
+    for v in variants:
+        r = all_results[v]
+        slip = r.get("slippage", {})
+        desc = ReplaySimulator.C1_VARIANTS.get(v, v)[:40]
+        pf_str = f"{r['profit_factor']:.2f}" if r['profit_factor'] < 100 else "inf"
+        print(f"  {v:<12} {r['total_trades']:>6} {r['win_rate']:>5.1f}% {pf_str:>6} "
+              f"${r['total_pnl']:>+9,.0f} ${r['c1_pnl']:>+8,.0f} ${r['c2_pnl']:>+8,.0f} "
+              f"{r['max_drawdown_pct']:>5.1f}% "
+              f"{slip.get('avg_slippage_per_fill', 0):>8.2f}pt "
+              f"{r.get('friction_losses', 0):>5}")
+
+    # ── Rank by PF, then PnL, then DD ──
+    ranked = sorted(variants,
+                    key=lambda v: (all_results[v]['profit_factor'],
+                                   all_results[v]['total_pnl'],
+                                   -all_results[v]['max_drawdown_pct']),
+                    reverse=True)
+
+    print(f"\n  RANKING (by PF → PnL → DD):")
+    for i, v in enumerate(ranked, 1):
+        r = all_results[v]
+        desc = ReplaySimulator.C1_VARIANTS.get(v, v)
+        status = "LIVE-READY" if r['profit_factor'] >= 1.3 else \
+                 "MARGINAL" if r['profit_factor'] >= 1.2 else "NOT READY"
+        print(f"  #{i}: {v:<10} PF {r['profit_factor']:.2f} | "
+              f"${r['total_pnl']:>+9,.0f} | DD {r['max_drawdown_pct']:.1f}% | "
+              f"{status}")
+        print(f"        {desc}")
+
+    # ── Monthly breakdown for top variant ──
+    best = ranked[0]
+    r_best = all_results[best]
+    print(f"\n{'=' * 80}")
+    print(f"  MONTHLY BREAKDOWN — Best: {best} "
+          f"({ReplaySimulator.C1_VARIANTS.get(best, best)})")
+    print(f"{'=' * 80}")
+    print(f"  {'Month':<10} {'Trades':>6} {'WR':>6} {'PF':>6} "
+          f"{'PnL':>10} {'C1':>9} {'C2':>9}")
+    print(f"  {'─' * 56}")
+
+    monthly = r_best.get("monthly", {})
+    prof_months = 0
+    for month in sorted(monthly.keys()):
+        m = monthly[month]
+        wr = (m["wins"] / m["trades"] * 100) if m["trades"] > 0 else 0
+        pf = (m["gross_profit"] / m["gross_loss"]) if m["gross_loss"] > 0 else (
+            float('inf') if m["gross_profit"] > 0 else 0)
+        pf_str = f"{pf:.2f}" if pf < 100 else "inf"
+        if m["pnl"] > 0:
+            prof_months += 1
+        print(f"  {month:<10} {m['trades']:>6} {wr:>5.1f}% {pf_str:>6} "
+              f"${m['pnl']:>+9,.0f} ${m['c1_pnl']:>+8,.0f} ${m['c2_pnl']:>+8,.0f}")
+
+    print(f"  {'─' * 56}")
+    print(f"  Profitable months: {prof_months}/{len(monthly)}")
+    print(f"{'=' * 80}\n")
+
+
+# ================================================================
 # ENTRYPOINT
 # ================================================================
 async def async_main():
@@ -1418,13 +1771,26 @@ async def async_main():
         "--data-dir", type=str, default=None,
         help="Data directory (default: data/firstrate/)"
     )
+    parser.add_argument(
+        "--c1-variant", type=str, default="C",
+        choices=["baseline", "A", "B", "C", "D"],
+        help="C1 exit strategy variant (default: C — trail from profit)"
+    )
+    parser.add_argument(
+        "--compare-all", action="store_true",
+        help="Run all 5 C1 variants and print comparison table"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
-        level=logging.WARNING if not args.validate else logging.WARNING,
+        level=logging.WARNING,
         format="%(asctime)s | %(levelname)-8s | %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    if args.compare_all:
+        await run_compare_all(args)
+        return
 
     speed = "max" if args.validate else args.speed
 
@@ -1434,6 +1800,7 @@ async def async_main():
         end_date=args.end_date,
         validate=args.validate,
         data_dir=args.data_dir,
+        c1_variant=args.c1_variant,
     )
 
     await sim.run()

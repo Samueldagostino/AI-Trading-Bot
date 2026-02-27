@@ -124,20 +124,28 @@ class ScaleOutConfig:
     """
     2-Contract Scale-Out — THE BREAD AND BUTTER.
 
-    Contract 1: Time-based exit — after N bars, exit at market if profitable
+    Contract 1: Trail-from-profit exit (Variant C)
+      Once unrealized profit >= c1_profit_threshold_pts, activate a trailing
+      stop c1_trail_distance_pts behind the high-water mark. If profit never
+      reaches threshold within c1_max_bars_fallback bars, exit at market.
     Contract 2: Runner, stop to breakeven+1 after C1 exits, then trail
 
     Win-win architecture:
-      Best:  C1 time exit + C2 runs big  → $20 + $200 = $220
-      Good:  C1 time exit + C2 at BE     → $20 + $2   = $22
-      Worst: Both at initial stop        → Controlled loss (~$60-80)
+      Best:  C1 trails a big move + C2 runs big  → $40+ + $200 = $240+
+      Good:  C1 trails small move + C2 at BE     → $10  + $2   = $12
+      Worst: Both at initial stop                → Controlled loss (~$60-80)
     """
     total_contracts: int = 2
 
-    # Contract 1 — Time-based exit
+    # Contract 1 — Trail-from-profit (Variant C, validated Feb 2026)
     c1_contracts: int = 1
-    c1_time_exit_bars: int = 10             # Exit C1 after N bars if profitable
-    
+    c1_profit_threshold_pts: float = 3.0    # Activate trailing once profit >= this
+    c1_trail_distance_pts: float = 2.5      # Trail distance from HWM
+    c1_max_bars_fallback: int = 12          # Fallback market exit if trail never activates
+
+    # Legacy: Time-based exit (archived, use for A/B testing only)
+    c1_time_exit_bars: int = 10             # Old: exit C1 after N bars if profitable
+
     # Contract 2 — Runner
     c2_contracts: int = 1
     c2_move_stop_to_breakeven: bool = True

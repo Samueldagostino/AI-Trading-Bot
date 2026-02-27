@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Config D — Out-of-Sample Validation Report</title>
+<title>Config D + Variant C — Out-of-Sample Validation Report</title>
 <style>
   :root {
     --bg-primary: #0d1117;
@@ -319,8 +319,8 @@
 
   <!-- Header -->
   <div class="report-header">
-    <h1>Config D — Out-of-Sample Validation</h1>
-    <div class="subtitle">MNQ 2-Contract Scale-Out | HC Filter + HTF Gate</div>
+    <h1>Config D + Variant C — Out-of-Sample Validation</h1>
+    <div class="subtitle">MNQ 2-Contract Scale-Out | HC Filter + HTF Gate | Calibrated Slippage</div>
     <div class="timestamp" id="report-timestamp">Report generated: —</div>
   </div>
 
@@ -417,7 +417,7 @@
 
   <!-- Config Footer -->
   <div class="config-footer">
-    <h3>Config D Parameters (Reproducibility Record)</h3>
+    <h3>Config D + Variant C Parameters (Reproducibility Record)</h3>
     <div class="config-grid">
       <div class="config-item"><span class="config-key">HC Min Score</span><span class="config-val">>= 0.75</span></div>
       <div class="config-item"><span class="config-key">HC Max Stop</span><span class="config-val"><= 30 pts</span></div>
@@ -429,10 +429,12 @@
       <div class="config-item"><span class="config-key">Account Size</span><span class="config-val">$50,000</span></div>
       <div class="config-item"><span class="config-key">Point Value</span><span class="config-val">$2.00 (MNQ)</span></div>
       <div class="config-item"><span class="config-key">Commission</span><span class="config-val">$1.29/contract</span></div>
+      <div class="config-item"><span class="config-key">C1 Exit</span><span class="config-val">Trail from +3pts (2.5pt trail, 12bar fallback)</span></div>
       <div class="config-item"><span class="config-key">C2 Trail</span><span class="config-val">ATR x 2.0</span></div>
       <div class="config-item"><span class="config-key">C2 Time Stop</span><span class="config-val">120 min</span></div>
+      <div class="config-item"><span class="config-key">Slippage</span><span class="config-val">Calibrated (0.96pt/fill avg)</span></div>
       <div class="config-item"><span class="config-key">Data Source</span><span class="config-val">FirstRate 1m adj</span></div>
-      <div class="config-item"><span class="config-key">Baseline</span><span class="config-val">Feb 2026: 84t PF 1.29</span></div>
+      <div class="config-item"><span class="config-key">Baseline</span><span class="config-val">Variant C: 1161t PF 1.61</span></div>
     </div>
   </div>
 
@@ -447,8 +449,8 @@
 // ═══════════════════════════════════════════════════════════════
 
 const BASELINE = {
-  trades: 84, win_rate: 50.0, profit_factor: 1.29,
-  total_pnl: 1304.36, max_drawdown_pct: 2.8, expectancy: 15.53,
+  trades: 1161, win_rate: 62.0, profit_factor: 1.61,
+  total_pnl: 15894.0, max_drawdown_pct: 1.4, expectancy: 13.69,
 };
 
 // Attempt to load viz_data_full.json and per-month files
@@ -583,7 +585,7 @@ function renderVerdict(summary) {
   let cls, title, detail;
   if (pf >= 1.2 && pm >= tm * 0.67 && dd <= 5.0) {
     cls = 'verdict-pass';
-    title = 'PASS — Config D Validated Out-of-Sample';
+    title = 'PASS — Config D + Variant C Validated Out-of-Sample';
     detail = `PF ${pf.toFixed(2)}, ${pm}/${tm} profitable months, max DD ${dd.toFixed(1)}%. Approved for paper trading.`;
   } else if (pf >= 1.0 && pm >= tm * 0.5) {
     cls = 'verdict-conditional';
@@ -591,7 +593,7 @@ function renderVerdict(summary) {
     detail = `PF ${pf.toFixed(2)}, ${pm}/${tm} profitable months. Extended paper testing recommended.`;
   } else {
     cls = 'verdict-fail';
-    title = 'FAIL — Config D Does Not Generalize';
+    title = 'FAIL — Config D + Variant C Does Not Generalize';
     detail = `PF ${pf.toFixed(2)}, ${pm}/${tm} profitable months, DD ${dd.toFixed(1)}%. Do not proceed.`;
   }
 
