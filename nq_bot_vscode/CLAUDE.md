@@ -17,7 +17,11 @@ HTF Bars (1D/4H/1H/30m/15m/5m)
   HTF Bias Engine ──► Directional Gate (long/short allowed?)
         │
 Exec Bars (2m) ──► Feature Engine ──► Signal Aggregator
-        │                                     │
+        │                │                    │
+        │                ▼                    │
+        │        Sweep Detector ──────────────┤
+        │     (PDH/PDL, VWAP, rounds)         │
+        │     (additive — 3 entry modes)      │
         │                          ┌──────────┴──────────┐
         │                          │  HIGH-CONVICTION     │
         │                          │  FILTER (2 gates)    │
@@ -38,8 +42,9 @@ Exec Bars (2m) ──► Feature Engine ──► Signal Aggregator
 1. HTF bars route to `HTFBiasEngine` → updates directional consensus
 2. Execution-TF bar routes to `NQFeatureEngine` → computes OB, FVG, sweeps, VWAP, delta
 3. `RegimeDetector` classifies market state
+3b. `LiquiditySweepDetector` runs on every bar (additive, never replaces existing signals)
 4. If position open → `ScaleOutExecutor.update()` manages stops/targets/trails
-5. If flat → `SignalAggregator` produces signal → **HC Filter gates** → `RiskEngine` evaluates → `ScaleOutExecutor.enter_trade()`
+5. If flat → `SignalAggregator` produces signal + sweep detector output → **HC Filter gates** → `RiskEngine` evaluates → `ScaleOutExecutor.enter_trade()`
 
 ---
 
@@ -59,15 +64,65 @@ C1 exits via **trail-from-profit** (Variant C): once unrealized profit >= 3.0pts
 ### Constants Location
 
 ```python
-# main.py — module-level constants (lines ~45-58)
+# main.py — module-level constants (lines ~60-70)
 HIGH_CONVICTION_MIN_SCORE = 0.75
 HIGH_CONVICTION_MAX_STOP_PTS = 30.0
+SWEEP_MIN_SCORE = 0.70           # Sweep must score >= 0.70 to be eligible
+SWEEP_CONFLUENCE_BONUS = 0.05    # Boost when signal + sweep fire together
 
 # config/settings.py — ScaleOutConfig
 c1_profit_threshold_pts = 3.0   # Activate trailing once profit >= this
 c1_trail_distance_pts = 2.5     # Trail distance from HWM
 c1_max_bars_fallback = 12       # Fallback market exit if trail never activates
 ```
+
+---
+
+## Liquidity Sweep Detector (Additive Signal Module)
+
+`signals/liquidity_sweep.py` — `LiquiditySweepDetector`
+
+Detects institutional stop hunts at key structural levels. Runs on every execution bar alongside the existing signal pipeline. **Never replaces** existing signals — only adds new entry opportunities or confirms existing ones.
+
+### Key Levels Tracked
+- **PDH/PDL** — Prior day high/low
+- **Session H/L** — Current session high/low
+- **PWH/PWL** — Prior week high/low
+- **VWAP** — Session VWAP
+- **Round numbers** — Every 50 points (e.g. 21,000, 21,050)
+
+### Sweep Detection Logic
+1. Price **breaches** a key level by >= 2pts (wick through)
+2. Price **closes back inside** on the same bar → creates a `SweepCandidate`
+3. **Reclaim confirmation** within 1-3 bars (close back on the other side)
+4. **Volume confirmation**: bar volume >= 1.5x 20-bar average
+
+### Sweep Score (0.0 — 1.0)
+- Base: 0.50
+- Volume bonus: up to +0.15 (proportional to vol spike)
+- Depth bonus: up to +0.10 (deeper breach = stronger sweep)
+- Confluence bonus: +0.05 (multiple key levels swept)
+- HTF alignment bonus: +0.10 (sweep direction matches HTF bias)
+- RTH open bonus: +0.10 (first 30min of RTH)
+
+### Three Entry Modes (in `main.py` process_bar)
+
+| Mode | Condition | Behavior |
+|------|-----------|----------|
+| **Signal-only** | Existing signal fires, no sweep | Standard pipeline (unchanged) |
+| **Sweep-only** | Sweep score >= 0.70, no existing signal | Sweep acts as standalone signal source (must pass HC >= 0.75) |
+| **Confluence** | Both fire, same direction | HC score boosted by +0.05 (existing_score + 0.05) |
+
+If sweep and existing signal fire in **conflicting directions**, the existing signal takes priority.
+
+### Key Methods
+- `update_bar(bar, vwap, htf_bias, is_rth)` → `Optional[SweepSignal]`
+- `_update_session_tracking()` — manages PDH/PDL, session H/L, weekly H/L across day/week boundaries
+- `_rebuild_key_levels()` — refreshes the active key levels list
+- `_detect_new_sweeps()` — checks all key levels for breach+close-back on current bar
+- `_check_reclaims()` — monitors pending candidates for 1-3 bar reclaim confirmation
+- `_score_and_emit()` — computes multi-factor 0.0-1.0 score
+- `get_stats()` — returns sweep detection statistics
 
 ---
 
@@ -83,7 +138,8 @@ nq-trading-bot/                    # Root — CLAUDE.md goes here
 │   ├── engine.py                  # NQFeatureEngine — OB, FVG, sweeps, VWAP, delta
 │   └── htf_engine.py             # HTFBiasEngine — multi-TF directional consensus
 ├── signals/
-│   └── aggregator.py             # SignalAggregator — confluence scoring
+│   ├── aggregator.py             # SignalAggregator — confluence scoring
+│   └── liquidity_sweep.py        # LiquiditySweepDetector — additive key-level sweep signals
 ├── risk/
 │   ├── engine.py                 # RiskEngine — position sizing, stop computation
 │   └── regime_detector.py        # RegimeDetector — market state classification
@@ -102,7 +158,8 @@ nq-trading-bot/                    # Root — CLAUDE.md goes here
 ├── scripts/
 │   ├── run_backtest.py           # Backtest runner (--tv for TradingView CSVs)
 │   ├── aggregate_1m.py           # 1m → 2m/3m/5m/15m/30m/1H/4H/1D aggregator
-│   └── run_oos_validation.py     # Monthly-segmented OOS validation runner
+│   ├── run_oos_validation.py     # Monthly-segmented OOS validation runner
+│   └── replay_simulator.py       # Replay simulator with --sweep-compare A/B testing
 ├── docs/
 │   ├── validation_report.html    # Institutional-grade OOS report (dark-themed)
 │   └── out_of_sample_validation.md  # Generated OOS results markdown
@@ -163,6 +220,10 @@ Computes execution-TF features: order blocks, fair value gaps, liquidity sweeps,
 ### `signals/aggregator.py` — SignalAggregator
 
 Combines technical structure signals with optional ML confirmation. Produces `combined_score` (0-1) and `should_trade` boolean. HTF gating is a hard filter here (not weighted).
+
+### `signals/liquidity_sweep.py` — LiquiditySweepDetector
+
+Additive signal module that detects institutional sweeps at key structural levels (PDH/PDL, session H/L, PWH/PWL, VWAP, round numbers). Runs alongside existing signals — never replaces them. Three entry modes: signal-only (unchanged), sweep-only (score >= 0.75), confluence (both fire same direction → +0.05 HC boost). See "Liquidity Sweep Detector" section above for full details.
 
 ### `risk/engine.py` — RiskEngine
 
@@ -296,18 +357,20 @@ When using Claude Code Agent Teams, these roles map to the project:
 
 ### System Status: LIVE-READY
 
-Config D + Variant C (Trail from Profit) + Calibrated Slippage complete. 6-month OOS validated on FirstRate 1-minute absolute-adjusted NQ data (Sep 2025 – Feb 2026) with realistic slippage model (avg 0.96pt/fill). PF 1.61 with slippage — system survives real-world friction.
+Config D + Variant C (Trail from Profit) + Sweep Detector + Calibrated Slippage complete. 6-month OOS validated on FirstRate 1-minute absolute-adjusted NQ data (Sep 2025 – Feb 2026) with realistic slippage model (avg 0.96pt/fill). PF 1.73 with slippage — system survives real-world friction.
 
 **Current Config:**
 - HC filter: score >= 0.75, stop <= 30pts
 - HTF gate: strength >= 0.3 (Config D)
 - C1 exit: Trail from +3pts (2.5pt trail, 12-bar fallback) — Variant C
 - C2: ATR-based trailing runner
+- Sweep detector: additive (PDH/PDL, session H/L, PWH/PWL, VWAP, round numbers)
 - Slippage: Calibrated (RTH 0.50pt, ETH 1.00pt, caps 1.50/2.50/3.00pt)
 
 ### Working
 - HC filter (2 gates: score >= 0.75, stop <= 30pts) fully operational
-- C1 trail-from-profit (Variant C) — PF 1.61 with realistic slippage, 6/6 months profitable
+- C1 trail-from-profit (Variant C) — PF 1.73 with sweep detector + realistic slippage, 6/6 months profitable
+- Liquidity sweep detector — additive module, 338 sweep-only trades (WR 61.8%), 161 confluence trades (WR 67.7%)
 - HTF Bias Engine validated — Config D (gate=0.3) adopted as production config
 - 2-contract scale-out lifecycle complete
 - Multi-timeframe backtest pipeline functional (MTF iterator routes only execution_tf to process_bar)
@@ -327,62 +390,80 @@ Config D + Variant C (Trail from Profit) + Calibrated Slippage complete. 6-month
 - **High volatility**: PF 2.26, 83% WR — small sample (23 trades) but strong
 
 ### Watch Items
-- **Sep 2025** is weakest month (PF 1.23, +$828 with calibrated slippage) but still profitable
-- **C1 is net-positive** with trail-from-profit (+$6,382). Major upgrade from Time 10 (+$776 with slippage).
-- Calibrated slippage costs ~$6,494 over 6 months ($1,082/month) — realistic friction
-- 184 friction losses (C1 profit < slippage cost) — expected for small C1 winners
+- **Oct 2025** is weakest month (PF 1.36, +$2,798 with sweep detector + calibrated slippage) but still profitable
+- **C1 is net-positive** with trail-from-profit (+$10,008). Major upgrade from Time 10 (+$776 with slippage).
+- Sweep detector adds +$9,687 PnL with zero drawdown increase (338 sweep-only + 161 confluence trades)
+- Sweep-only trades maintain 61.8% WR — consistent with existing signal pipeline
+- Confluence trades have highest WR at 67.7% — sweep + signal agreement is the strongest setup
+- Calibrated slippage costs are realistic — system survives real-world friction
 - Slippage model can push stop distances to ~30.3pts (just past 30pt cap). Acceptable — fill slippage, not filter leak.
 
 ---
 
-## Baseline Metrics (6-Month OOS + Calibrated Slippage)
+## Baseline Metrics (6-Month OOS + Sweep Detector + Calibrated Slippage)
 
-**Config D + Variant C + Calibrated Slippage — HTF gate=0.3 | Data: Sep 2025 – Feb 2026 (FirstRate 1m absolute-adjusted) | 2m exec, all HTFs**
+**Config D + Variant C + Sweep Detector + Calibrated Slippage — HTF gate=0.3 | Data: Sep 2025 – Feb 2026 (FirstRate 1m absolute-adjusted) | 2m exec, all HTFs**
 
-These are the numbers any change must be compared against. They include realistic calibrated slippage (avg 0.96pt/fill):
+These are the numbers any change must be compared against. They include the liquidity sweep detector (additive module) and realistic calibrated slippage (avg 0.96pt/fill):
 
 ```
 C1 Exit:             Trail from profit (>=3pts → 2.5pt trail, 12-bar fallback)
 HC Filter:           score >= 0.75, stop <= 30pts
 HTF Gate:            strength >= 0.3
+Sweep Detector:      ENABLED (additive — PDH/PDL, session H/L, PWH/PWL, VWAP, round numbers)
 Slippage:            Calibrated v2 (RTH 0.50pt, ETH 1.00pt, news +1pt)
 
-Total Trades:        1,161 (194/month avg)
-Win Rate:            62.0%
-Profit Factor:       1.61
-Total PnL:           $15,894.00 ($2,649/month avg)
-Expectancy/Trade:    $13.69
+Total Trades:        1,524 (254/month avg)
+Win Rate:            61.9%
+Profit Factor:       1.73
+Total PnL:           $25,581.00 ($4,264/month avg)
+Expectancy/Trade:    $16.79
 Max Drawdown:        1.4%
-C1 PnL:              $6,382.00 (net positive — Variant C lets C1 capture more)
-C2 PnL:              $9,512.00
-Avg Slippage:        0.96pt/fill ($6,494 total slippage cost)
-HTF Blocked:         12,337 signals
+C1 PnL:              $10,008.00
+C2 PnL:              $15,573.00
+Avg Slippage:        0.96pt/fill
+HTF Blocked:         12,405 signals
 Profitable Months:   6 of 6 (100%)
+
+Sweep-only trades:   338 (WR 61.8%, PnL +$9,896)
+Confluence trades:   161 (WR 67.7%, PnL +$3,059)
+Signal-only trades:  1,025 (PnL +$12,626)
 ```
 
-### Monthly Performance Breakdown (with calibrated slippage)
+### Monthly Performance Breakdown (with sweep detector + calibrated slippage)
 
-| Month | Trades | WR | PF | Total PnL | C1 PnL | C2 PnL |
-|-------|--------|------|------|-----------|--------|--------|
-| **2025-09** | 178 | 52.8% | **1.23** | +$828 | +$299 | +$529 |
-| **2025-10** | 214 | 59.3% | **1.32** | +$1,769 | +$592 | +$1,177 |
-| **2025-11** | 118 | 70.3% | **2.63** | +$4,165 | +$1,566 | +$2,598 |
-| **2025-12** | 239 | 61.5% | **1.59** | +$2,665 | +$876 | +$1,790 |
-| **2026-01** | 231 | 60.2% | **1.51** | +$2,814 | +$1,092 | +$1,722 |
-| **2026-02** | 181 | 71.8% | **1.88** | +$3,653 | +$1,958 | +$1,696 |
+| Month | Trades | WR | PF | Total PnL | Sweep Trades | Sweep PnL |
+|-------|--------|------|------|-----------|-------------|-----------|
+| **2025-09** | 240 | 56.7% | **1.79** | +$3,608 | 63 | +$2,920 |
+| **2025-10** | 292 | 57.5% | **1.36** | +$2,798 | 81 | +$332 |
+| **2025-11** | 172 | 70.9% | **2.78** | +$6,496 | 49 | +$2,520 |
+| **2025-12** | 305 | 61.0% | **1.76** | +$4,385 | 59 | +$1,311 |
+| **2026-01** | 288 | 60.8% | **1.67** | +$4,702 | 48 | +$2,405 |
+| **2026-02** | 227 | 68.7% | **1.58** | +$3,592 | 38 | +$408 |
 
-> **All 6 months profitable with realistic slippage.** Weakest month (Sep) PF 1.23 — comfortably above 1.0.
+> **All 6 months profitable with sweep detector + realistic slippage.** Weakest month (Oct) PF 1.36 — comfortably above 1.0.
+
+### Sweep Detector Impact (A/B comparison)
+
+| Config | Trades | WR | PF | PnL | Max DD |
+|--------|--------|------|------|---------|--------|
+| **With sweep detector** | **1,524** | **61.9%** | **1.73** | **+$25,581** | **1.4%** |
+| Without sweep detector | 1,161 | 62.0% | 1.61 | +$15,894 | 1.4% |
+| **Delta** | **+363** | **-0.1%** | **+0.12** | **+$9,687** | **+0.0%** |
+
+> Sweep detector adds +$9,687 PnL with zero drawdown increase. 499 total sweep-related trades (338 sweep-only + 161 confluence).
 
 ### Previous Baselines (archived)
 
 | Config | Trades | WR | PF | PnL | C1 PnL | Max DD | Slippage |
 |--------|--------|------|------|---------|--------|--------|----------|
-| **Variant C + calibrated** | **1,161** | **62.0%** | **1.61** | **+$15,894** | **+$6,382** | **1.4%** | **0.96pt/fill** |
+| **Variant C + sweep + calibrated** | **1,524** | **61.9%** | **1.73** | **+$25,581** | **+$10,008** | **1.4%** | **0.96pt/fill** |
+| Variant C + calibrated (no sweep) | 1,161 | 62.0% | 1.61 | +$15,894 | +$6,382 | 1.4% | 0.96pt/fill |
 | Time 10 + calibrated | 1,000 | 54.8% | 1.29 | +$9,140 | +$776 | 2.4% | 0.96pt/fill |
 | Time 10 (no slippage) | 948 | 68.1% | 1.59 | +$14,544 | +$3,843 | 1.7% | none |
 | 1.5x target (original) | 748 | 46.7% | 1.15 | +$5,778 | -$904 | 3.6% | none |
 
-### C1 Exit Variant Comparison (with calibrated slippage)
+### C1 Exit Variant Comparison (with calibrated slippage, no sweep detector)
 
 | Variant | PF | PnL | C1 PnL | Max DD | Status |
 |---------|------|---------|--------|--------|--------|
@@ -402,6 +483,15 @@ python scripts/aggregate_1m.py --input data/firstrate/NQ_1m_absolute.csv --outpu
 
 # Run 6-month OOS validation
 python scripts/run_oos_validation.py --data-dir data/firstrate/
+
+# Run replay simulator validation (with sweep detector)
+python scripts/replay_simulator.py --validate
+
+# A/B test: baseline (no sweeps) vs test (with sweeps)
+python scripts/replay_simulator.py --sweep-compare
+
+# Run replay without sweep detector
+python scripts/replay_simulator.py --validate --no-sweep
 
 # View HTML report
 open docs/validation_report.html

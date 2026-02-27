@@ -24,6 +24,7 @@ from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
 from signals.aggregator import SignalAggregator, SignalDirection
+from signals.liquidity_sweep import LiquiditySweepDetector, SweepSignal
 from risk.engine import RiskEngine, RiskDecision
 from risk.regime_detector import RegimeDetector
 from execution.scale_out_executor import ScaleOutExecutor
@@ -59,6 +60,15 @@ EXECUTION_TIMEFRAMES = {"2m", "3m", "1m"}
 # ─────────────────────────────────────────────────────────────────────
 HIGH_CONVICTION_MIN_SCORE = 0.75
 HIGH_CONVICTION_MAX_STOP_PTS = 30.0
+
+# ── LIQUIDITY SWEEP DETECTOR ───────────────────────────────────
+# Additive signal source: detects institutional sweeps of key levels
+# (PDH/PDL, session H/L, PWH/PWL, VWAP, round numbers).
+# Does NOT replace existing signals. Runs alongside them.
+#   - Sweep score >= 0.7: eligible for HC filter independently
+#   - If sweep + existing signal fire together: HC score boosted +0.05
+SWEEP_MIN_SCORE = 0.70
+SWEEP_CONFLUENCE_BONUS = 0.05
 
 # ── CONFIG D GATE ASSERTION ───────────────────────────────────────────
 # The HTF strength gate MUST be 0.3 (Config D, validated Feb 2026).
@@ -106,6 +116,10 @@ class TradingOrchestrator:
         )
         self._htf_bias: Optional[HTFBiasResult] = None
 
+        # Liquidity Sweep Detector — additive signal source
+        self.sweep_detector = LiquiditySweepDetector()
+        self._sweep_enabled = True  # Can be toggled for A/B testing
+
         # Execution - scale-out is the primary executor
         self.executor = ScaleOutExecutor(config)
 
@@ -142,6 +156,8 @@ class TradingOrchestrator:
         logger.info(f"  HTF Engine:   {', '.join(sorted(HTF_TIMEFRAMES))}")
         logger.info(f"  HTF Gate:     {HTFBiasEngine.STRENGTH_GATE} (Config D)")
         logger.info(f"  Exec TF:      {self._execution_tf}")
+        logger.info(f"  Sweep Det:    {'ENABLED' if self._sweep_enabled else 'DISABLED'} "
+                     f"(min score {SWEEP_MIN_SCORE}, confluence +{SWEEP_CONFLUENCE_BONUS})")
         logger.info("=" * 60)
 
         if not skip_db:
@@ -230,6 +246,23 @@ class TradingOrchestrator:
 
         regime_adj = self.regime_detector.get_regime_adjustments(self._current_regime)
 
+        # === 3b. LIQUIDITY SWEEP DETECTOR (additive, always runs) ===
+        sweep_signal = None
+        if self._sweep_enabled:
+            # Determine if we're in RTH
+            et_offset = timezone(timedelta(hours=-5))
+            et_time = bar.timestamp.astimezone(et_offset)
+            h, m = et_time.hour, et_time.minute
+            t = h + m / 60.0
+            is_rth = 9.5 <= t < 16.0
+
+            sweep_signal = self.sweep_detector.update_bar(
+                bar=bar,
+                vwap=features.session_vwap,
+                htf_bias=htf_bias,
+                is_rth=is_rth,
+            )
+
         # === 4. MANAGE ACTIVE POSITION ===
         if self.executor.has_active_trade:
             result = await self.executor.update(bar.close, bar.timestamp)
@@ -259,28 +292,83 @@ class TradingOrchestrator:
             current_time=bar.timestamp,
         )
 
-        if signal and signal.should_trade:
-            direction = "long" if signal.direction == SignalDirection.LONG else "short"
+        # Determine effective signal source: existing, sweep, or both
+        has_signal = signal and signal.should_trade
+        has_sweep = (sweep_signal is not None and
+                     sweep_signal.score >= SWEEP_MIN_SCORE)
 
+        # Build entry parameters from whichever signal source(s) fired
+        entry_direction = None
+        entry_score = 0.0
+        entry_source = None  # "signal", "sweep", "confluence"
+        sweep_stop_override = None  # sweep may provide tighter stop
+
+        if has_signal and has_sweep:
+            # Both fire: use existing signal direction, boost score
+            direction_str = "long" if signal.direction == SignalDirection.LONG else "short"
+            sweep_dir = "long" if sweep_signal.direction == "LONG" else "short"
+
+            if direction_str == sweep_dir:
+                # Same direction → confluence bonus
+                entry_direction = direction_str
+                entry_score = signal.combined_score + SWEEP_CONFLUENCE_BONUS
+                entry_source = "confluence"
+                logger.info(
+                    f"SWEEP CONFLUENCE: {direction_str} | "
+                    f"signal={signal.combined_score:.3f} + "
+                    f"sweep={sweep_signal.score:.2f} → "
+                    f"boosted={entry_score:.3f}"
+                )
+            else:
+                # Conflicting directions → use existing signal only
+                entry_direction = direction_str
+                entry_score = signal.combined_score
+                entry_source = "signal"
+
+        elif has_signal:
+            # Existing signal only
+            entry_direction = "long" if signal.direction == SignalDirection.LONG else "short"
+            entry_score = signal.combined_score
+            entry_source = "signal"
+
+        elif has_sweep:
+            # Sweep-only entry
+            entry_direction = "long" if sweep_signal.direction == "LONG" else "short"
+            entry_score = sweep_signal.score
+            entry_source = "sweep"
+            # Use sweep's stop price for tighter risk
+            sweep_stop_override = abs(bar.close - sweep_signal.stop_price)
+            logger.info(
+                f"SWEEP SIGNAL: {entry_direction} | "
+                f"Score: {sweep_signal.score:.2f} | "
+                f"Levels: {', '.join(sweep_signal.swept_levels)} | "
+                f"Stop: {sweep_stop_override:.1f}pts"
+            )
+
+        if entry_direction is not None:
             # -- HIGH-CONVICTION GATE 1: Signal Score --
-            if signal.combined_score < HIGH_CONVICTION_MIN_SCORE:
+            if entry_score < HIGH_CONVICTION_MIN_SCORE:
                 logger.debug(
-                    f"HC REJECT: score {signal.combined_score:.3f} "
+                    f"HC REJECT: score {entry_score:.3f} "
                     f"< {HIGH_CONVICTION_MIN_SCORE} (need higher conviction)"
                 )
                 return None
 
             # === 6. RISK CHECK ===
             risk_assessment = self.risk_engine.evaluate_trade(
-                direction=direction,
+                direction=entry_direction,
                 entry_price=bar.close,
                 atr=features.atr_14,
                 vix=features.vix_level or 0,
                 current_time=bar.timestamp,
             )
 
-            # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
+            # For sweep-only entries, use sweep's tighter stop if available
             raw_stop = risk_assessment.suggested_stop_distance
+            if sweep_stop_override is not None and sweep_stop_override < raw_stop:
+                raw_stop = sweep_stop_override
+
+            # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
             if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
                 logger.debug(
                     f"HC REJECT: stop {raw_stop:.1f} pts "
@@ -298,11 +386,11 @@ class TradingOrchestrator:
                 # C1 exits via trail-from-profit (Variant C).
                 # No fixed TP1 target — managed by ScaleOutExecutor.
                 trade = await self.executor.enter_trade(
-                    direction=direction,
+                    direction=entry_direction,
                     entry_price=bar.close,
                     stop_distance=raw_stop,
                     atr=features.atr_14,
-                    signal_score=signal.combined_score,
+                    signal_score=entry_score,
                     regime=self._current_regime,
                 )
 
@@ -312,16 +400,22 @@ class TradingOrchestrator:
                     action_result = {
                         "action": "entry",
                         "timestamp": bar.timestamp.isoformat(),
-                        "direction": direction,
+                        "direction": entry_direction,
                         "contracts": 2,
                         "entry_price": trade.entry_price,
                         "stop": trade.initial_stop,
                         "c1_exit_rule": f"trail_from_+{self.config.scale_out.c1_profit_threshold_pts}pts",
-                        "signal_score": signal.combined_score,
+                        "signal_score": entry_score,
+                        "signal_source": entry_source,
                         "regime": self._current_regime,
                         "htf_bias": htf_dir,
                         "htf_strength": round(htf_str, 3),
                     }
+                    # Attach sweep metadata if applicable
+                    if entry_source in ("sweep", "confluence") and sweep_signal:
+                        action_result["sweep_levels"] = sweep_signal.swept_levels
+                        action_result["sweep_score"] = sweep_signal.score
+                        action_result["sweep_depth_pts"] = sweep_signal.sweep_depth_pts
             else:
                 logger.debug(f"Risk rejected: {risk_assessment.reason}")
 
@@ -578,6 +672,7 @@ class TradingOrchestrator:
                 "c2_trailing_stop": trade.c2_trailing_stop if trade else 0,
             } if trade else None,
             "broker_connected": self.broker_client.is_connected if self.broker_client else False,
+            "sweep_detector": self.sweep_detector.get_stats() if self._sweep_enabled else None,
         }
 
 
