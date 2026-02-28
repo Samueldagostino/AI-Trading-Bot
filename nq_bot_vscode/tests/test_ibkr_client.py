@@ -8,9 +8,13 @@ Tests:
 - Historical bar fetching
 - Price parsing edge cases
 - Connection health status
+- Candle aggregation from tick/snapshot data
+- Session type detection (RTH vs ETH)
+- Data quality checks (zero volume, high < low, gap detection)
 """
 
 import asyncio
+import math
 import time
 import pytest
 from datetime import datetime, timezone, timedelta
@@ -19,8 +23,13 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 from Broker.ibkr_client import (
     IBKRClient,
     IBKRConfig,
+    CandleAggregator,
     ContractInfo,
     MarketSnapshot,
+    SessionType,
+    get_session_type,
+    CANDLE_INTERVAL_SECONDS,
+    CONSECUTIVE_GAP_ALERT_THRESHOLD,
     SNAPSHOT_FIELDS,
 )
 
@@ -493,3 +502,394 @@ class TestDisconnect:
         assert client._session_valid is False
         assert client._session is None
         mock_session.close.assert_called_once()
+
+
+# ================================================================
+# SESSION TYPE DETECTION TESTS
+# ================================================================
+
+class TestSessionType:
+    """Test RTH vs ETH detection — must match main.py process_bar() logic."""
+
+    def _utc(self, hour: int, minute: int = 0) -> datetime:
+        """Helper: create a UTC datetime for 2026-02-28 at given H:M."""
+        return datetime(2026, 2, 28, hour, minute, tzinfo=timezone.utc)
+
+    def test_rth_open(self):
+        """9:30 ET = 14:30 UTC → RTH."""
+        assert get_session_type(self._utc(14, 30)) == SessionType.RTH
+
+    def test_rth_mid_morning(self):
+        """11:00 ET = 16:00 UTC → RTH."""
+        assert get_session_type(self._utc(16, 0)) == SessionType.RTH
+
+    def test_rth_close_boundary(self):
+        """16:00 ET = 21:00 UTC → ETH (RTH is exclusive of 16:00)."""
+        assert get_session_type(self._utc(21, 0)) == SessionType.ETH
+
+    def test_rth_just_before_close(self):
+        """15:59 ET = 20:59 UTC → RTH."""
+        assert get_session_type(self._utc(20, 59)) == SessionType.RTH
+
+    def test_eth_premarket(self):
+        """8:00 ET = 13:00 UTC → ETH."""
+        assert get_session_type(self._utc(13, 0)) == SessionType.ETH
+
+    def test_eth_overnight(self):
+        """2:00 ET = 07:00 UTC → ETH."""
+        assert get_session_type(self._utc(7, 0)) == SessionType.ETH
+
+    def test_eth_evening(self):
+        """20:00 ET = 01:00 UTC next day → ETH."""
+        ts = datetime(2026, 3, 1, 1, 0, tzinfo=timezone.utc)
+        assert get_session_type(ts) == SessionType.ETH
+
+    def test_rth_929_is_eth(self):
+        """9:29 ET = 14:29 UTC → ETH (one minute before RTH open)."""
+        assert get_session_type(self._utc(14, 29)) == SessionType.ETH
+
+    def test_client_get_session_type(self, client):
+        """IBKRClient.get_session_type() returns a SessionType."""
+        result = client.get_session_type()
+        assert isinstance(result, SessionType)
+
+
+# ================================================================
+# CANDLE AGGREGATOR FIXTURES
+# ================================================================
+
+@pytest.fixture
+def aggregator():
+    return CandleAggregator()
+
+
+def _ts(minute: int, second: int = 0) -> datetime:
+    """Helper: create UTC datetime at 2026-02-28 14:MM:SS (RTH)."""
+    return datetime(2026, 2, 28, 14, minute, second, tzinfo=timezone.utc)
+
+
+def _ts_eth(minute: int, second: int = 0) -> datetime:
+    """Helper: create UTC datetime at 2026-02-28 07:MM:SS (ETH: 2:00 ET)."""
+    return datetime(2026, 2, 28, 7, minute, second, tzinfo=timezone.utc)
+
+
+# ================================================================
+# CANDLE AGGREGATION TESTS
+# ================================================================
+
+class TestCandleAggregation:
+    """Test building 2-minute OHLCV candles from tick data."""
+
+    def test_first_tick_starts_window(self, aggregator):
+        """First tick should start a window but not emit a candle."""
+        result = aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        assert result is None
+        assert aggregator._current_open == 21000.0
+
+    def test_ticks_in_same_window(self, aggregator):
+        """Multiple ticks in same 2-min window update OHLCV."""
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21010.0, 1, _ts(0, 30))
+        aggregator.process_tick(20990.0, 1, _ts(0, 45))
+        aggregator.process_tick(21005.0, 1, _ts(1, 30))
+
+        # Still in [14:00, 14:02) window — no candle yet
+        assert aggregator._current_open == 21000.0
+        assert aggregator._current_high == 21010.0
+        assert aggregator._current_low == 20990.0
+        assert aggregator._current_close == 21005.0
+        assert aggregator._current_volume == 4
+        assert aggregator._current_tick_count == 4
+
+    def test_window_boundary_emits_candle(self, aggregator):
+        """Tick in a new 2-min window should close the previous candle."""
+        # Window 1: [14:00, 14:02)
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21010.0, 2, _ts(0, 30))
+        aggregator.process_tick(20990.0, 1, _ts(1, 0))
+        aggregator.process_tick(21005.0, 1, _ts(1, 59))
+
+        # Window 2 starts: first tick at 14:02 closes window 1
+        candle = aggregator.process_tick(21008.0, 1, _ts(2, 0))
+
+        assert candle is not None
+        assert candle["timestamp"] == _ts(0, 0)
+        assert candle["open"] == 21000.0
+        assert candle["high"] == 21010.0
+        assert candle["low"] == 20990.0
+        assert candle["close"] == 21005.0
+        assert candle["volume"] == 5   # 1+2+1+1
+        assert candle["tick_count"] == 4  # 4 ticks fed
+
+    def test_candle_prices_rounded_to_2dp(self, aggregator):
+        """All prices in emitted candles must be rounded to 2 decimal places."""
+        aggregator.process_tick(21000.126, 1, _ts(0, 0))
+        aggregator.process_tick(21010.999, 1, _ts(0, 30))
+        aggregator.process_tick(20989.501, 1, _ts(1, 0))
+        aggregator.process_tick(21005.557, 1, _ts(1, 30))
+
+        candle = aggregator.process_tick(21008.0, 1, _ts(2, 0))
+
+        assert candle["open"] == 21000.13   # rounded
+        assert candle["high"] == 21011.0    # rounded
+        assert candle["low"] == 20989.5     # rounded
+        assert candle["close"] == 21005.56  # rounded
+
+    def test_candle_has_session_type_rth(self, aggregator):
+        """Candles during RTH should be tagged RTH."""
+        # 14:30 UTC = 9:30 ET = RTH
+        aggregator.process_tick(21000.0, 1, _ts(30, 0))
+        candle = aggregator.process_tick(21005.0, 1, _ts(32, 0))
+
+        assert candle is not None
+        assert candle["session_type"] == SessionType.RTH
+
+    def test_candle_has_session_type_eth(self, aggregator):
+        """Candles during ETH should be tagged ETH."""
+        # 07:00 UTC = 2:00 ET = ETH
+        aggregator.process_tick(21000.0, 1, _ts_eth(0, 0))
+        candle = aggregator.process_tick(21005.0, 1, _ts_eth(2, 0))
+
+        assert candle is not None
+        assert candle["session_type"] == SessionType.ETH
+
+    def test_multiple_candles(self, aggregator):
+        """Should emit multiple sequential candles."""
+        # Window 1: [14:00, 14:02)
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21010.0, 1, _ts(1, 0))
+
+        # Window 2: [14:02, 14:04) — emits candle 1
+        c1 = aggregator.process_tick(21020.0, 1, _ts(2, 0))
+        aggregator.process_tick(21015.0, 1, _ts(3, 0))
+
+        # Window 3: [14:04, 14:06) — emits candle 2
+        c2 = aggregator.process_tick(21030.0, 1, _ts(4, 0))
+
+        assert c1 is not None
+        assert c1["timestamp"] == _ts(0, 0)
+        assert c1["open"] == 21000.0
+        assert c1["close"] == 21010.0
+
+        assert c2 is not None
+        assert c2["timestamp"] == _ts(2, 0)
+        assert c2["open"] == 21020.0
+        assert c2["close"] == 21015.0
+
+    def test_window_alignment_odd_minute(self, aggregator):
+        """Tick at odd minute should floor to even minute boundary."""
+        aggregator.process_tick(21000.0, 1, _ts(3, 15))
+        # Window starts at 14:02 (3 floors to 2)
+        assert aggregator._current_window_start == _ts(2, 0)
+
+    def test_flush_emits_partial_candle(self, aggregator):
+        """flush() should emit partial candle with whatever ticks exist."""
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21010.0, 1, _ts(0, 30))
+
+        candle = aggregator.flush()
+
+        assert candle is not None
+        assert candle["open"] == 21000.0
+        assert candle["high"] == 21010.0
+        assert candle["volume"] == 2
+
+    def test_flush_empty_returns_none(self, aggregator):
+        """flush() with no data returns None."""
+        assert aggregator.flush() is None
+
+    def test_callback_fires(self):
+        """on_candle callback should be called when candle is emitted."""
+        received = []
+        agg = CandleAggregator(on_candle=lambda c: received.append(c))
+
+        agg.process_tick(21000.0, 1, _ts(0, 0))
+        agg.process_tick(21010.0, 1, _ts(2, 0))
+
+        assert len(received) == 1
+        assert received[0]["open"] == 21000.0
+
+    def test_callback_via_setter(self):
+        """Callback registered via on_candle() method should work."""
+        received = []
+        agg = CandleAggregator()
+        agg.on_candle(lambda c: received.append(c))
+
+        agg.process_tick(21000.0, 1, _ts(0, 0))
+        agg.process_tick(21010.0, 1, _ts(2, 0))
+
+        assert len(received) == 1
+
+    def test_zero_price_ignored(self, aggregator):
+        """Ticks with price <= 0 should be silently ignored."""
+        result = aggregator.process_tick(0.0, 1, _ts(0, 0))
+        assert result is None
+        assert aggregator._current_window_start is None
+
+        result = aggregator.process_tick(-5.0, 1, _ts(0, 0))
+        assert result is None
+
+    def test_reset_clears_state(self, aggregator):
+        """reset() should clear all in-progress candle state."""
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21010.0, 1, _ts(0, 30))
+
+        aggregator.reset()
+
+        assert aggregator._current_window_start is None
+        assert aggregator._current_volume == 0
+        assert aggregator._current_high == -math.inf
+        assert aggregator._current_low == math.inf
+
+    def test_get_stats(self, aggregator):
+        """get_stats() should reflect aggregator activity."""
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21010.0, 1, _ts(2, 0))
+
+        stats = aggregator.get_stats()
+        assert stats["candles_emitted"] == 1
+        assert stats["ticks_processed"] == 2
+        assert stats["candles_rejected"] == 0
+
+
+# ================================================================
+# DATA QUALITY CHECK TESTS
+# ================================================================
+
+class TestDataQualityChecks:
+    """Test candle rejection and gap detection logic."""
+
+    def test_reject_zero_volume(self):
+        """Candles with zero volume should be rejected."""
+        agg = CandleAggregator()
+
+        # Manually set up a candle with 0 volume to test validation
+        agg._current_window_start = _ts(0, 0)
+        agg._current_open = 21000.0
+        agg._current_high = 21010.0
+        agg._current_low = 20990.0
+        agg._current_close = 21005.0
+        agg._current_volume = 0
+        agg._current_tick_count = 0
+
+        candle = agg._close_current_candle()
+        assert candle is None
+        assert agg._candles_rejected == 1
+
+    def test_reject_high_lt_low(self):
+        """Candles where high < low should be rejected (safety net)."""
+        agg = CandleAggregator()
+
+        agg._current_window_start = _ts(0, 0)
+        agg._current_open = 21000.0
+        agg._current_high = 20980.0  # impossibly lower than low
+        agg._current_low = 21010.0
+        agg._current_close = 21000.0
+        agg._current_volume = 5
+        agg._current_tick_count = 5
+
+        candle = agg._close_current_candle()
+        assert candle is None
+        assert agg._candles_rejected == 1
+
+    def test_valid_candle_not_rejected(self, aggregator):
+        """Normal candle with valid data should pass quality checks."""
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21010.0, 1, _ts(0, 30))
+        aggregator.process_tick(20995.0, 1, _ts(1, 0))
+
+        candle = aggregator.process_tick(21020.0, 1, _ts(2, 0))
+        assert candle is not None
+        assert aggregator._candles_rejected == 0
+
+    def test_gap_detection_warns(self, aggregator):
+        """Gap > 2 minutes between candles should increment consecutive_gaps."""
+        # Candle 1 at :00
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21005.0, 1, _ts(2, 0))  # emits candle :00, starts :02
+
+        # Candle 2 at :02 — skip ahead so gap shows on candle 3
+        aggregator.process_tick(21010.0, 1, _ts(8, 0))  # emits candle :02, starts :08
+
+        # Candle 3 at :08 — gap detected: last=:02, expected=:04, current=:08
+        # gap = (08-04) = 240s, missed = 240/120 = 2
+        aggregator.process_tick(21015.0, 1, _ts(10, 0))  # emits candle :08
+
+        assert aggregator._consecutive_gaps == 2
+
+    def test_consecutive_gap_alert_threshold(self, aggregator):
+        """3+ consecutive gaps should trigger alert (logged)."""
+        # Candle 1 at :00
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21005.0, 1, _ts(2, 0))  # emits candle :00, starts :02
+
+        # Candle 2 at :02 — skip far ahead
+        aggregator.process_tick(21010.0, 1, _ts(12, 0))  # emits candle :02, starts :12
+
+        # Candle 3 at :12 — gap: last=:02, expected=:04, current=:12
+        # gap = (12-04) = 480s, missed = 480/120 = 4
+        aggregator.process_tick(21015.0, 1, _ts(14, 0))  # emits candle :12
+
+        assert aggregator._consecutive_gaps >= CONSECUTIVE_GAP_ALERT_THRESHOLD
+
+    def test_no_gap_resets_counter(self, aggregator):
+        """Consecutive candles without gaps should reset gap counter."""
+        # Candle 1
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21005.0, 1, _ts(2, 0))
+
+        # Candle 2 — no gap
+        aggregator.process_tick(21010.0, 1, _ts(4, 0))
+
+        assert aggregator._consecutive_gaps == 0
+
+    def test_candle_format_matches_bar_constructor(self, aggregator):
+        """
+        Emitted candle must have all fields needed by features.engine.Bar:
+        timestamp, open, high, low, close, volume.
+        tick_count and session_type are extras.
+        """
+        aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        aggregator.process_tick(21010.0, 2, _ts(0, 30))
+        aggregator.process_tick(20995.0, 1, _ts(1, 0))
+        aggregator.process_tick(21005.0, 1, _ts(1, 30))
+
+        candle = aggregator.process_tick(21015.0, 1, _ts(2, 0))
+
+        # Required fields for Bar()
+        assert "timestamp" in candle
+        assert "open" in candle
+        assert "high" in candle
+        assert "low" in candle
+        assert "close" in candle
+        assert "volume" in candle
+
+        # Verify types
+        assert isinstance(candle["timestamp"], datetime)
+        assert isinstance(candle["open"], float)
+        assert isinstance(candle["high"], float)
+        assert isinstance(candle["low"], float)
+        assert isinstance(candle["close"], float)
+        assert isinstance(candle["volume"], int)
+
+        # Extra fields
+        assert "tick_count" in candle
+        assert "session_type" in candle
+        assert isinstance(candle["session_type"], SessionType)
+
+    def test_validate_candle_static_method(self):
+        """Direct test of _validate_candle static method."""
+        # Valid candle
+        assert CandleAggregator._validate_candle({
+            "volume": 10, "high": 100.0, "low": 90.0,
+        }) is None
+
+        # Zero volume
+        assert CandleAggregator._validate_candle({
+            "volume": 0, "high": 100.0, "low": 90.0,
+        }) == "zero_volume"
+
+        # high < low
+        assert CandleAggregator._validate_candle({
+            "volume": 10, "high": 80.0, "low": 90.0,
+        }) == "high_lt_low"

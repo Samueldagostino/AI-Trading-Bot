@@ -22,11 +22,13 @@ SECURITY: This module NEVER logs tokens, credentials, or session cookies.
 
 import asyncio
 import logging
+import math
 import os
 import ssl
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from enum import Enum
 from typing import Optional, Dict, List, Callable, Any
 
 logger = logging.getLogger(__name__)
@@ -100,6 +102,258 @@ class ContractInfo:
     exchange: str = ""
     expiry: str = ""       # YYYYMMDD
     description: str = ""
+
+
+# ================================================================
+# SESSION TYPE
+# ================================================================
+
+# US Eastern timezone offset (standard: UTC-5, daylight: UTC-4).
+# Using fixed UTC-5 matches main.py process_bar() logic.
+ET_OFFSET = timezone(timedelta(hours=-5))
+
+
+class SessionType(Enum):
+    RTH = "RTH"    # Regular Trading Hours: 9:30–16:00 ET
+    ETH = "ETH"    # Extended Trading Hours: 18:00–9:29 ET
+
+
+def get_session_type(ts: datetime) -> SessionType:
+    """
+    Determine RTH vs ETH for a given timestamp.
+    RTH = 9:30–16:00 ET (same logic as main.py process_bar).
+    Everything else is ETH.
+    """
+    et_time = ts.astimezone(ET_OFFSET)
+    t = et_time.hour + et_time.minute / 60.0
+    if 9.5 <= t < 16.0:
+        return SessionType.RTH
+    return SessionType.ETH
+
+
+# ================================================================
+# CANDLE AGGREGATOR
+# ================================================================
+
+# Data quality alert threshold: if this many consecutive 2-minute
+# windows are missed, an alert is logged.
+CONSECUTIVE_GAP_ALERT_THRESHOLD = 3
+
+# Candle interval in seconds (2 minutes).
+CANDLE_INTERVAL_SECONDS = 120
+
+
+class CandleAggregator:
+    """
+    Aggregates raw tick/snapshot data into 2-minute OHLCV candles.
+
+    Output candles are dicts matching the features.engine.Bar constructor:
+        {
+            "timestamp": datetime (UTC, bar open time),
+            "open":   float (first tick price, 2dp),
+            "high":   float (max tick price, 2dp),
+            "low":    float (min tick price, 2dp),
+            "close":  float (last tick price, 2dp),
+            "volume": int   (tick count in window),
+            "tick_count": int,
+            "session_type": SessionType.RTH | SessionType.ETH,
+        }
+
+    Data quality checks:
+    - Rejects candles with zero volume (no ticks received)
+    - Rejects candles where high < low (should be impossible, safety net)
+    - Logs warnings for gaps > 2 minutes between candles
+    - Triggers alert if 3+ consecutive candle windows are missed
+    """
+
+    def __init__(self, on_candle: Optional[Callable] = None):
+        self._on_candle = on_candle
+
+        # Current candle being built
+        self._current_open: float = 0.0
+        self._current_high: float = -math.inf
+        self._current_low: float = math.inf
+        self._current_close: float = 0.0
+        self._current_volume: int = 0
+        self._current_tick_count: int = 0
+        self._current_window_start: Optional[datetime] = None
+
+        # Tracking
+        self._last_candle_time: Optional[datetime] = None
+        self._consecutive_gaps: int = 0
+        self._candles_emitted: int = 0
+        self._candles_rejected: int = 0
+        self._ticks_processed: int = 0
+
+    def on_candle(self, callback: Callable) -> None:
+        """Register callback for completed candles."""
+        self._on_candle = callback
+
+    def process_tick(self, price: float, volume: int, timestamp: datetime) -> Optional[dict]:
+        """
+        Feed a single tick/snapshot into the aggregator.
+
+        Args:
+            price: Last trade price (already rounded to 2dp by caller).
+            volume: Volume for this tick (1 for a single snapshot).
+            timestamp: UTC timestamp of the tick.
+
+        Returns:
+            Completed candle dict if a 2-minute boundary was crossed, else None.
+        """
+        if price <= 0:
+            return None
+
+        self._ticks_processed += 1
+        window_start = self._get_window_start(timestamp)
+
+        # First tick ever — start the first window
+        if self._current_window_start is None:
+            self._start_new_window(price, volume, window_start)
+            return None
+
+        # Same window — update running OHLCV
+        if window_start == self._current_window_start:
+            self._update_current(price, volume)
+            return None
+
+        # New window — close the current candle and start a new one
+        completed = self._close_current_candle()
+        self._start_new_window(price, volume, window_start)
+        return completed
+
+    def flush(self) -> Optional[dict]:
+        """
+        Force-emit the current partial candle (e.g. at session close).
+        Returns the candle if valid, None otherwise.
+        """
+        if self._current_window_start is None or self._current_volume == 0:
+            return None
+        return self._close_current_candle()
+
+    def reset(self) -> None:
+        """Reset aggregator state (e.g. on reconnect)."""
+        self._current_open = 0.0
+        self._current_high = -math.inf
+        self._current_low = math.inf
+        self._current_close = 0.0
+        self._current_volume = 0
+        self._current_tick_count = 0
+        self._current_window_start = None
+        self._consecutive_gaps = 0
+
+    def get_stats(self) -> dict:
+        return {
+            "candles_emitted": self._candles_emitted,
+            "candles_rejected": self._candles_rejected,
+            "ticks_processed": self._ticks_processed,
+            "consecutive_gaps": self._consecutive_gaps,
+        }
+
+    # ----------------------------------------------------------------
+    # INTERNAL
+    # ----------------------------------------------------------------
+
+    @staticmethod
+    def _get_window_start(ts: datetime) -> datetime:
+        """
+        Compute the 2-minute window start for a given timestamp.
+        E.g. 10:03:47 → 10:02:00, 10:04:01 → 10:04:00.
+        """
+        floored_minute = ts.minute - (ts.minute % 2)
+        return ts.replace(minute=floored_minute, second=0, microsecond=0)
+
+    def _start_new_window(self, price: float, volume: int, window_start: datetime) -> None:
+        self._current_window_start = window_start
+        self._current_open = price
+        self._current_high = price
+        self._current_low = price
+        self._current_close = price
+        self._current_volume = volume
+        self._current_tick_count = 1
+
+    def _update_current(self, price: float, volume: int) -> None:
+        if price > self._current_high:
+            self._current_high = price
+        if price < self._current_low:
+            self._current_low = price
+        self._current_close = price
+        self._current_volume += volume
+        self._current_tick_count += 1
+
+    def _close_current_candle(self) -> Optional[dict]:
+        """Build candle dict, run quality checks, emit if valid."""
+        candle = {
+            "timestamp": self._current_window_start,
+            "open": round(self._current_open, 2),
+            "high": round(self._current_high, 2),
+            "low": round(self._current_low, 2),
+            "close": round(self._current_close, 2),
+            "volume": self._current_volume,
+            "tick_count": self._current_tick_count,
+            "session_type": get_session_type(self._current_window_start),
+        }
+
+        # --- Data quality checks ---
+        rejection_reason = self._validate_candle(candle)
+        if rejection_reason:
+            logger.warning("Candle REJECTED (%s): %s %s",
+                           rejection_reason,
+                           candle["timestamp"].isoformat(),
+                           candle)
+            self._candles_rejected += 1
+            return None
+
+        # --- Gap detection ---
+        self._check_gap(candle["timestamp"])
+
+        self._last_candle_time = candle["timestamp"]
+        self._candles_emitted += 1
+
+        if self._on_candle:
+            self._on_candle(candle)
+
+        return candle
+
+    @staticmethod
+    def _validate_candle(candle: dict) -> Optional[str]:
+        """
+        Return rejection reason string if candle fails quality checks,
+        or None if candle is valid.
+        """
+        if candle["volume"] <= 0:
+            return "zero_volume"
+        if candle["high"] < candle["low"]:
+            return "high_lt_low"
+        return None
+
+    def _check_gap(self, current_time: datetime) -> None:
+        """Log warnings for gaps between candles."""
+        if self._last_candle_time is None:
+            self._consecutive_gaps = 0
+            return
+
+        expected_next = self._last_candle_time + timedelta(seconds=CANDLE_INTERVAL_SECONDS)
+        gap = (current_time - expected_next).total_seconds()
+
+        if gap >= CANDLE_INTERVAL_SECONDS:
+            missed = int(gap / CANDLE_INTERVAL_SECONDS)
+            self._consecutive_gaps += missed
+            logger.warning(
+                "Candle gap: %d missed windows (%s → %s, %.0fs gap)",
+                missed,
+                self._last_candle_time.isoformat(),
+                current_time.isoformat(),
+                gap + CANDLE_INTERVAL_SECONDS,
+            )
+            if self._consecutive_gaps >= CONSECUTIVE_GAP_ALERT_THRESHOLD:
+                logger.error(
+                    "ALERT: %d consecutive candle windows missed — "
+                    "possible data feed issue",
+                    self._consecutive_gaps,
+                )
+        else:
+            self._consecutive_gaps = 0
 
 
 # ================================================================
@@ -615,6 +869,10 @@ class IBKRClient:
     def on_snapshot(self, callback: Callable) -> None:
         """Register callback for market data snapshot updates."""
         self._on_snapshot = callback
+
+    def get_session_type(self) -> SessionType:
+        """Return current session type (RTH or ETH)."""
+        return get_session_type(datetime.now(timezone.utc))
 
     # ================================================================
     # STATUS & HEALTH
