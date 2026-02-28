@@ -101,7 +101,7 @@ class TradingOrchestrator:
         self.config = config
 
         # Core layers
-        self.db = DatabaseManager(config.db.dsn)
+        self.db = DatabaseManager(config.db.connection_params)
         self.feature_engine = NQFeatureEngine(config)
         self.signal_aggregator = SignalAggregator(config)
         self.risk_engine = RiskEngine(config)

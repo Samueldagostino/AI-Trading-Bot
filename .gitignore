@@ -36,3 +36,12 @@ backtest_viz_data.json
 nq_bot_vscode/data/firstrate/
 data/firstrate/raw/
 data/firstrate/historical/
+
+# Large archives
+*.zip
+
+# Large data files
+docs/viz_data_full.json
+
+# Log directories
+logs/

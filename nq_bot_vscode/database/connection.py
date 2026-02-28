@@ -23,8 +23,8 @@ class DatabaseManager:
     All database operations go through this manager.
     """
 
-    def __init__(self, dsn: str, min_connections: int = 2, max_connections: int = 10):
-        self.dsn = dsn
+    def __init__(self, connection_params: dict, min_connections: int = 2, max_connections: int = 10):
+        self._conn_params = connection_params
         self.min_connections = min_connections
         self.max_connections = max_connections
         self._pool: Optional[Any] = None
@@ -33,10 +33,10 @@ class DatabaseManager:
         """Create connection pool. Call once at startup."""
         if asyncpg is None:
             raise ImportError("asyncpg is required. Install with: pip install asyncpg")
-        
+
         try:
             self._pool = await asyncpg.create_pool(
-                dsn=self.dsn,
+                **self._conn_params,
                 min_size=self.min_connections,
                 max_size=self.max_connections,
                 command_timeout=30,

@@ -46,10 +46,27 @@ class DatabaseConfig:
     database: str = os.getenv("PG_DATABASE", "nq_trading")
     user: str = os.getenv("PG_USER", "nq_bot")
     password: str = os.getenv("PG_PASSWORD", "")
-    
+
+    @property
+    def connection_params(self) -> dict:
+        """Return individual connection parameters for asyncpg.
+
+        Use with: asyncpg.create_pool(**config.db.connection_params)
+        This avoids assembling the password into a URI string that
+        could be logged or displayed.
+        """
+        return {
+            "host": self.host,
+            "port": self.port,
+            "database": self.database,
+            "user": self.user,
+            "password": self.password,
+        }
+
     @property
     def dsn(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        """Return a masked DSN safe for logging (password redacted)."""
+        return f"postgresql://{self.user}:***@{self.host}:{self.port}/{self.database}"
 
 
 @dataclass
