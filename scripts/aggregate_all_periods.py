@@ -60,6 +60,11 @@ PERIODS = [
         "source": "NQ_1m_2024-03_to_2024-08.csv",
         "label": "Period 5: Mar 2024 - Aug 2024",
     },
+    {
+        "name": "period_5b_2024-09_to_2025-08",
+        "source": "NQ_1m_2024-09_to_2025-08.csv",
+        "label": "Period 5b: Sep 2024 - Aug 2025",
+    },
 ]
 
 

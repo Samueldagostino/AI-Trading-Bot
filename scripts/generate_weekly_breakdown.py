@@ -56,6 +56,11 @@ PERIODS = OrderedDict([
         "data_dir": str(REPO_ROOT / "data" / "firstrate" / "historical" / "aggregated" / "period_5_2024-03_to_2024-08"),
         "start": "2024-03-01", "end": "2024-09-01",
     }),
+    ("period_5b", {
+        "label": "Sep 2024 - Aug 2025",
+        "data_dir": str(REPO_ROOT / "data" / "firstrate" / "historical" / "aggregated" / "period_5b_2024-09_to_2025-08"),
+        "start": "2024-09-01", "end": "2025-09-01",
+    }),
     ("period_6", {
         "label": "Sep 2025 - Feb 2026",
         "data_dir": str(PROJECT_DIR / "data" / "firstrate"),
