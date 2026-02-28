@@ -1,5 +1,5 @@
 {
-  "generated": "2026-02-27T20:47:01.199408+00:00",
+  "generated": "2026-02-28T02:29:38.890947+00:00",
   "periods": [
     {
       "period_id": "period_1",
@@ -92,6 +92,24 @@
       "confluence_pnl": 1371.96
     },
     {
+      "period_id": "period_5b",
+      "label": "Sep 2024 - Aug 2025",
+      "regime": "transition",
+      "total_trades": 3222,
+      "win_rate": 61.6,
+      "profit_factor": 1.55,
+      "total_pnl": 40262.66,
+      "c1_pnl": 17257.12,
+      "c2_pnl": 23005.54,
+      "max_drawdown_pct": 2.8,
+      "expectancy": 12.5,
+      "avg_slippage": 0.95,
+      "sweep_trades": 612,
+      "sweep_pnl": 11871.38,
+      "confluence_trades": 348,
+      "confluence_pnl": 4303.68
+    },
+    {
       "period_id": "period_6",
       "label": "Sep 2025 - Feb 2026",
       "regime": "current",
@@ -111,22 +129,22 @@
     }
   ],
   "aggregate": {
-    "total_periods": 6,
-    "total_trades": 11626,
-    "win_rate": 59.1,
-    "profit_factor": 1.52,
-    "total_pnl": 126734.64,
-    "c1_pnl": 46174.96,
-    "c2_pnl": 80559.68,
-    "max_drawdown_pct": 2.1,
-    "expectancy_per_trade": 10.9,
+    "total_periods": 7,
+    "total_trades": 14848,
+    "win_rate": 59.6,
+    "profit_factor": 1.53,
+    "total_pnl": 166997.3,
+    "c1_pnl": 63432.08,
+    "c2_pnl": 103565.22,
+    "max_drawdown_pct": 2.8,
+    "expectancy_per_trade": 11.25,
     "avg_slippage_per_fill": 0.96,
-    "total_sweep_trades": 2123,
-    "total_sweep_pnl": 45998.58,
-    "total_confluence_trades": 967,
-    "total_confluence_pnl": 12388.74,
-    "total_signal_only_trades": 8536,
-    "total_signal_only_pnl": 68347.32
+    "total_sweep_trades": 2735,
+    "total_sweep_pnl": 57869.96,
+    "total_confluence_trades": 1315,
+    "total_confluence_pnl": 16692.42,
+    "total_signal_only_trades": 10798,
+    "total_signal_only_pnl": 92434.92
   },
   "best_period": {
     "id": "period_6",
@@ -141,20 +159,20 @@
   "flags": [],
   "monte_carlo": {
     "n_simulations": 1000,
-    "n_trades": 11626,
-    "pf_5th_percentile": 1.52,
-    "pf_median": 1.52,
-    "pf_95th_percentile": 1.52,
-    "max_dd_5th_percentile": 1.7,
-    "max_dd_median": 2.3,
-    "max_dd_95th_percentile": 3.5,
+    "n_trades": 14848,
+    "pf_5th_percentile": 1.55,
+    "pf_median": 1.55,
+    "pf_95th_percentile": 1.55,
+    "max_dd_5th_percentile": 1.9,
+    "max_dd_median": 2.6,
+    "max_dd_95th_percentile": 4.0,
     "probability_of_ruin": 0.0,
-    "monthly_pnl_mean": 3017.49,
-    "monthly_pnl_std": 1622.44,
-    "monthly_pnl_95ci_low": -162.49,
-    "monthly_pnl_95ci_high": 6197.47,
-    "final_equity_5th": 176734.64,
-    "final_equity_median": 176734.64,
-    "final_equity_95th": 176734.64
+    "monthly_pnl_mean": 3355.22,
+    "monthly_pnl_std": 2186.71,
+    "monthly_pnl_95ci_low": -930.74,
+    "monthly_pnl_95ci_high": 7641.18,
+    "final_equity_5th": 90262.66,
+    "final_equity_median": 90262.66,
+    "final_equity_95th": 90262.66
   }
 }
