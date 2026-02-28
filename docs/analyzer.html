@@ -111,6 +111,7 @@ function NQForensicVisualizer() {
   const [loading, setLoading] = useState(true);
   const [dataSource, setDataSource] = useState("");
   const [loadError, setLoadError] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
   const [viewStart, setViewStart] = useState(0);
   const [viewEnd, setViewEnd] = useState(200);
@@ -136,11 +137,12 @@ function NQForensicVisualizer() {
 
   const applyData = useCallback((jsonData, source) => {
     const { candles: c, trades: t } = loadVizData(jsonData);
-    if (c.length === 0) { setLoadError("No candle data found in file"); return; }
+    if (c.length === 0) { setLoadError("No candle data found in file"); setLoading(false); return false; }
     setCandles(c); setTrades(t);
     setViewStart(Math.max(0, c.length - 250));
     setViewEnd(c.length);
     setDataSource(source); setLoadError(null); setLoading(false); setSelectedTrade(null);
+    return true;
   }, []);
 
   const handleFileUpload = useCallback((file) => {
@@ -160,18 +162,26 @@ function NQForensicVisualizer() {
     reader.readAsText(file);
   }, [applyData]);
 
+  const trySample = useCallback(() => {
+    fetch("sample_viz_data.json")
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(data => {
+        if (!applyData(data, "sample:Feb 23-27 2026")) throw new Error("no candles");
+      })
+      .catch(() => { setLoading(false); setLoadError(null); });
+  }, [applyData]);
+
   useEffect(() => {
     fetch("viz_data.json")
       .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then(data => applyData(data, "fetch:viz_data.json"))
-      .catch(() => {
-        // Fallback: try sample data
-        fetch("sample_viz_data.json")
-          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-          .then(data => applyData(data, "sample:Feb 23-27 2026"))
-          .catch(() => { setLoading(false); setLoadError(null); });
-      });
-  }, [applyData]);
+      .then(data => {
+        // viz_data.json fetched OK — but does it have candles?
+        const { candles: c } = loadVizData(data);
+        if (c.length === 0) throw new Error("viz_data.json has 0 candles");
+        applyData(data, "fetch:viz_data.json");
+      })
+      .catch(() => trySample());
+  }, [applyData, trySample]);
 
   useEffect(() => {
     const onDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
@@ -472,7 +482,6 @@ function NQForensicVisualizer() {
 
   // No data — professional upload prompt with drop zone
   if (candles.length === 0) {
-    const [dragOver, setDragOver] = React.useState(false);
     return (
       <div style={{ background: T.bg, color: T.text, height: "calc(100vh - 48px)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace" }}>
         <div style={{ textAlign: "center", maxWidth: 520, padding: "0 24px" }}>
