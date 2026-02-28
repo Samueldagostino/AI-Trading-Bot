@@ -184,8 +184,7 @@ class TradovateClient:
         try:
             async with self._session.post(url, json=payload) as resp:
                 if resp.status != 200:
-                    body = await resp.text()
-                    logger.error(f"Auth failed [{resp.status}]: {body}")
+                    logger.error("Auth failed [%d]", resp.status)
                     return False
 
                 data = await resp.json()
@@ -193,7 +192,7 @@ class TradovateClient:
                 expiry = data.get("expirationTime", "")
                 
                 if not self._access_token:
-                    logger.error(f"No access token in response: {data}")
+                    logger.error("No access token in auth response (keys: %s)", list(data.keys()))
                     return False
 
                 # Parse expiry

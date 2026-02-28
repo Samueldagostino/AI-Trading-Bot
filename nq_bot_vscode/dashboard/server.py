@@ -14,11 +14,13 @@ Run with:
 import asyncio
 import json
 import logging
+import os
+import secrets
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,10 +35,32 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+# ================================================================
+# Kill-switch auth — requires DASHBOARD_API_TOKEN env var
+# ================================================================
+_DASHBOARD_TOKEN = os.environ.get("DASHBOARD_API_TOKEN", "")
+if not _DASHBOARD_TOKEN:
+    _DASHBOARD_TOKEN = secrets.token_hex(32)
+    logger.warning(
+        "DASHBOARD_API_TOKEN not set — generated ephemeral token: %s",
+        _DASHBOARD_TOKEN,
+    )
+
+
+async def _require_token(authorization: str = Header(...)) -> None:
+    """Validate Bearer token for privileged endpoints."""
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    if not secrets.compare_digest(authorization[7:], _DASHBOARD_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid token")
 
 # ================================================================
 # Simulated state (replace with real orchestrator in production)
@@ -162,17 +186,17 @@ async def get_health():
     return JSONResponse(DEMO_STATE["health"])
 
 
-@app.post("/api/kill-switch")
+@app.post("/api/kill-switch", dependencies=[Depends(_require_token)])
 async def toggle_kill_switch():
-    """Manually activate kill switch."""
+    """Manually activate kill switch (requires Bearer token)."""
     DEMO_STATE["risk_state"]["kill_switch_active"] = True
     await broadcast({"type": "kill_switch", "active": True})
     return JSONResponse({"status": "kill_switch_activated"})
 
 
-@app.post("/api/kill-switch/reset")
+@app.post("/api/kill-switch/reset", dependencies=[Depends(_require_token)])
 async def reset_kill_switch():
-    """Reset kill switch."""
+    """Reset kill switch (requires Bearer token)."""
     DEMO_STATE["risk_state"]["kill_switch_active"] = False
     await broadcast({"type": "kill_switch", "active": False})
     return JSONResponse({"status": "kill_switch_reset"})
