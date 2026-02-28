@@ -1,252 +1,280 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NQ Trading Bot — Config D + Variant C + Sweep Detector</title>
-  <link rel="stylesheet" href="assets/style.css">
-  <style>
-    .hero {
-      padding: 48px 0 32px;
-      text-align: center;
-    }
-    .hero h1 {
-      font-family: var(--font-mono);
-      font-size: 2rem;
-      font-weight: 700;
-      color: var(--text-white);
-      letter-spacing: 1px;
-      margin-bottom: 12px;
-    }
-    .hero .tagline {
-      color: var(--text-secondary);
-      font-size: 1rem;
-      margin-bottom: 20px;
-    }
-    .hero .badges {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .nav-card .arrow {
-      display: inline-block;
-      margin-left: 4px;
-      transition: transform 0.2s;
-    }
-    .nav-card:hover .arrow {
-      transform: translateX(4px);
-    }
-    .monthly-section {
-      overflow-x: auto;
-    }
-    @media (max-width: 480px) {
-      .hero h1 { font-size: 1.375rem; }
-      .hero .tagline { font-size: 0.875rem; }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NQ Trading System</title>
+<style>
+  :root {
+    --bg: #0a0e17; --surface: #111827; --surface2: #1a2332;
+    --border: #1e293b; --text: #94a3b8; --text2: #64748b;
+    --white: #e2e8f0; --green: #1A7A4C; --green-bright: #22c55e;
+    --red: #ef4444; --blue: #3b82f6; --amber: #f59e0b;
+    --mono: 'SF Mono','Cascadia Code','JetBrains Mono','Fira Code','Consolas',monospace;
+    --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5;min-height:100vh}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ── NAV BAR ─────────────────────────────────────── */
+  .nav{position:fixed;top:0;left:0;right:0;height:48px;background:#111317;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:100}
+  .nav-logo{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--white);letter-spacing:1.5px}
+  .nav-links{display:flex;gap:0}
+  .nav-link{font-family:var(--mono);font-size:12px;color:var(--text2);padding:14px 16px;text-decoration:none;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+  .nav-link:hover{color:var(--white);text-decoration:none}
+  .nav-link.active{color:var(--white);border-bottom-color:var(--green)}
+
+  /* ── LAYOUT ──────────────────────────────────────── */
+  .container{max-width:1100px;margin:0 auto;padding:72px 24px 48px}
+
+  /* ── HERO ────────────────────────────────────────── */
+  .hero{text-align:center;padding:48px 0 40px}
+  .hero h1{font-family:var(--mono);font-size:28px;font-weight:700;color:var(--white);letter-spacing:2px;margin-bottom:8px}
+  .hero .sub{color:var(--text2);font-size:13px;margin-bottom:20px}
+  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;font-family:var(--mono);letter-spacing:.5px}
+  .badge-green{background:rgba(34,197,94,.12);color:var(--green-bright);border:1px solid rgba(34,197,94,.25)}
+  .badge-blue{background:rgba(59,130,246,.12);color:var(--blue);border:1px solid rgba(59,130,246,.25)}
+
+  /* ── KPI GRID ────────────────────────────────────── */
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:32px 0}
+  .kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;text-align:center}
+  .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);font-family:var(--mono);margin-bottom:4px}
+  .kpi-value{font-size:24px;font-weight:700;font-family:var(--mono);color:var(--white);font-variant-numeric:tabular-nums}
+  .kpi-value.green{color:var(--green-bright)}
+  .kpi-value.blue{color:var(--blue)}
+
+  /* ── NAV CARDS ───────────────────────────────────── */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin:40px 0}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px;text-decoration:none;color:inherit;transition:border-color .2s,transform .15s}
+  .card:hover{border-color:var(--green);transform:translateY(-2px);text-decoration:none}
+  .card h2{font-size:15px;font-weight:600;color:var(--white);margin-bottom:6px}
+  .card .arrow{display:inline-block;margin-left:4px;transition:transform .2s}
+  .card:hover .arrow{transform:translateX(4px)}
+  .card p{color:var(--text);font-size:12px;line-height:1.6}
+  .card .tag{font-family:var(--mono);font-size:10px;color:var(--green-bright);margin-bottom:8px;letter-spacing:1px}
+
+  /* ── PERIOD TABLE ────────────────────────────────── */
+  .section{margin:40px 0}
+  .section h2{font-size:14px;font-weight:600;color:var(--white);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+  th{text-align:right;padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text2);font-size:10px;text-transform:uppercase;letter-spacing:.5px;background:var(--surface)}
+  th:first-child{text-align:left}
+  td{text-align:right;padding:7px 10px;border-bottom:1px solid rgba(30,41,59,.5);color:var(--text)}
+  td:first-child{text-align:left;color:var(--white);font-weight:600}
+  tr:hover td{background:var(--surface)}
+  .pos{color:var(--green-bright)}.neg{color:var(--red)}
+
+  /* ── FOOTER ──────────────────────────────────────── */
+  .footer{padding:32px 0;margin-top:48px;border-top:1px solid var(--border);color:var(--text2);font-size:11px;text-align:center;font-style:italic}
+
+  /* ── RESPONSIVE ──────────────────────────────────── */
+  @media(max-width:768px){
+    .kpi-grid{grid-template-columns:repeat(3,1fr)}
+    .cards{grid-template-columns:1fr}
+    .hero h1{font-size:20px}
+    .nav-logo{font-size:11px}
+    .nav-link{font-size:11px;padding:14px 10px}
+  }
+  @media(max-width:480px){
+    .kpi-grid{grid-template-columns:repeat(2,1fr)}
+    .container{padding:64px 16px 32px}
+  }
+</style>
 </head>
 <body>
-  <div class="container">
-    <!-- Hero -->
-    <div class="hero">
-      <h1>NQ Trading Bot</h1>
-      <div class="tagline">Config D + Variant C + Sweep Detector — MNQ 2-Contract Scale-Out with HC Filter + HTF Gate + Calibrated Slippage</div>
-      <div class="badges">
-        <span class="badge badge-green">LIVE-READY (PF 1.73 with realistic slippage)</span>
-        <span class="badge badge-blue">6/6 MONTHS PROFITABLE</span>
-        <span class="badge badge-blue">INCLUDES LIQUIDITY SWEEP DETECTOR (additive module)</span>
-      </div>
-    </div>
 
-    <!-- Key Metrics -->
-    <div class="metrics-grid">
-      <div class="metric-card">
-        <div class="label">Trades</div>
-        <div class="value">1,524</div>
-      </div>
-      <div class="metric-card">
-        <div class="label">Profit Factor</div>
-        <div class="value green">1.73</div>
-      </div>
-      <div class="metric-card">
-        <div class="label">Total PnL</div>
-        <div class="value green">+$25,581</div>
-      </div>
-      <div class="metric-card">
-        <div class="label">Max Drawdown</div>
-        <div class="value">1.4%</div>
-      </div>
-      <div class="metric-card">
-        <div class="label">Win Rate</div>
-        <div class="value green">61.9%</div>
-      </div>
-      <div class="metric-card">
-        <div class="label">Avg Slippage</div>
-        <div class="value">0.96pt/fill</div>
-      </div>
-    </div>
-
-    <!-- Navigation Cards -->
-    <div class="nav-cards">
-      <a href="dashboard.html" class="nav-card">
-        <div class="icon">📊</div>
-        <h2>Forensic Trade Dashboard <span class="arrow">→</span></h2>
-        <p>Interactive canvas-based chart with trade overlays, stop/target levels, regime and HTF subpanes, entry/exit markers, sortable trade table with filters, and per-trade compliance analysis.</p>
-      </a>
-      <a href="report.html" class="nav-card">
-        <div class="icon">📈</div>
-        <h2>OOS Validation Report <span class="arrow">→</span></h2>
-        <p>Institutional-grade 6-month out-of-sample validation with monthly equity curves, rolling PF and win rate, regime distribution, time-of-day heatmap, and drawdown analysis.</p>
-      </a>
-    </div>
-
-    <!-- Monthly Breakdown -->
-    <div class="section monthly-section">
-      <h2>Monthly Performance — Sep 2025 to Feb 2026</h2>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Month</th>
-            <th>Trades</th>
-            <th>WR</th>
-            <th>PF</th>
-            <th>PnL</th>
-            <th>Max DD</th>
-            <th>Exp/Trade</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Sep 2025</td>
-            <td>240</td>
-            <td>56.7%</td>
-            <td class="positive">1.79</td>
-            <td class="positive">+$3,608</td>
-            <td>1.4%</td>
-            <td class="positive">+$15.03</td>
-          </tr>
-          <tr>
-            <td>Oct 2025</td>
-            <td>292</td>
-            <td>57.5%</td>
-            <td class="positive">1.36</td>
-            <td class="positive">+$2,798</td>
-            <td>1.2%</td>
-            <td class="positive">+$9.58</td>
-          </tr>
-          <tr>
-            <td>Nov 2025</td>
-            <td>172</td>
-            <td>70.9%</td>
-            <td class="positive">2.78</td>
-            <td class="positive">+$6,496</td>
-            <td>0.5%</td>
-            <td class="positive">+$37.77</td>
-          </tr>
-          <tr>
-            <td>Dec 2025</td>
-            <td>305</td>
-            <td>61.0%</td>
-            <td class="positive">1.76</td>
-            <td class="positive">+$4,385</td>
-            <td>1.2%</td>
-            <td class="positive">+$14.38</td>
-          </tr>
-          <tr>
-            <td>Jan 2026</td>
-            <td>288</td>
-            <td>60.8%</td>
-            <td class="positive">1.67</td>
-            <td class="positive">+$4,702</td>
-            <td>1.1%</td>
-            <td class="positive">+$16.33</td>
-          </tr>
-          <tr>
-            <td>Feb 2026</td>
-            <td>227</td>
-            <td>68.7%</td>
-            <td class="positive">1.58</td>
-            <td class="positive">+$3,592</td>
-            <td>0.8%</td>
-            <td class="positive">+$15.82</td>
-          </tr>
-          <tr style="border-top: 2px solid var(--border);">
-            <td style="color: var(--blue);">TOTAL</td>
-            <td style="color: var(--text-white); font-weight: 700;">1,524</td>
-            <td style="color: var(--green); font-weight: 700;">61.9%</td>
-            <td style="color: var(--green); font-weight: 700;">1.73</td>
-            <td style="color: var(--green); font-weight: 700;">+$25,581</td>
-            <td style="color: var(--text-white); font-weight: 700;">1.4%</td>
-            <td style="color: var(--green); font-weight: 700;">+$16.79</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Config Summary -->
-    <div class="section">
-      <h2>System Configuration</h2>
-      <div class="config-grid">
-        <div class="config-item">
-          <span class="key">HC Min Score</span>
-          <span class="val">&ge; 0.75</span>
-        </div>
-        <div class="config-item">
-          <span class="key">HC Max Stop</span>
-          <span class="val">&le; 30 pts</span>
-        </div>
-        <div class="config-item">
-          <span class="key">HTF Gate</span>
-          <span class="val">strength &ge; 0.3</span>
-        </div>
-        <div class="config-item">
-          <span class="key">C1 Exit</span>
-          <span class="val">Trail from +3pts (2.5pt trail)</span>
-        </div>
-        <div class="config-item">
-          <span class="key">C2 Exit</span>
-          <span class="val">ATR trailing</span>
-        </div>
-        <div class="config-item">
-          <span class="key">Sweep Detector</span>
-          <span class="val">Additive (PDH/PDL, VWAP, rounds)</span>
-        </div>
-        <div class="config-item">
-          <span class="key">Contracts</span>
-          <span class="val">2 MNQ</span>
-        </div>
-        <div class="config-item">
-          <span class="key">Execution TF</span>
-          <span class="val">2m</span>
-        </div>
-        <div class="config-item">
-          <span class="key">HTF Timeframes</span>
-          <span class="val">5m–1D</span>
-        </div>
-        <div class="config-item">
-          <span class="key">Account Size</span>
-          <span class="val">$50,000</span>
-        </div>
-        <div class="config-item">
-          <span class="key">Daily Loss Limit</span>
-          <span class="val">$500</span>
-        </div>
-        <div class="config-item">
-          <span class="key">Data Source</span>
-          <span class="val">FirstRate 1m</span>
-        </div>
-        <div class="config-item">
-          <span class="key">OOS Period</span>
-          <span class="val">Sep 25–Feb 26</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <footer class="site-footer">
-      Built with ruthless scientific discipline. Data integrity obsession. Risk-first engineering.
-    </footer>
+<!-- ── NAV BAR ──────────────────────────────────────── -->
+<nav class="nav">
+  <span class="nav-logo">NQ TRADING SYSTEM</span>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link active">Overview</a>
+    <a href="weekly-dashboard.html" class="nav-link">Weekly</a>
+    <a href="analyzer.html" class="nav-link">Analyzer</a>
   </div>
+</nav>
+
+<div class="container">
+  <!-- ── HERO ──────────────────────────────────────── -->
+  <div class="hero">
+    <h1>NQ TRADING SYSTEM</h1>
+    <div class="sub">Config D + Variant C + Sweep Detector — MNQ 2-Contract Scale-Out | HC Filter + HTF Gate + Calibrated Slippage</div>
+    <div class="badges">
+      <span class="badge badge-green">VALIDATED: 7 PERIODS, 240 WEEKS</span>
+      <span class="badge badge-blue">54/54 MONTHS PROFITABLE</span>
+      <span class="badge badge-blue">SEP 2021 — FEB 2026</span>
+    </div>
+  </div>
+
+  <!-- ── KPI ROW ───────────────────────────────────── -->
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Trades</div>
+      <div class="kpi-value">14,848</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Profit Factor</div>
+      <div class="kpi-value green">1.53</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Total PnL</div>
+      <div class="kpi-value green">+$166,997</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Profitable Months</div>
+      <div class="kpi-value green">54 / 54</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Weeks</div>
+      <div class="kpi-value blue">240</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Validation Span</div>
+      <div class="kpi-value">4.5 yrs</div>
+    </div>
+  </div>
+
+  <!-- ── NAVIGATION CARDS ──────────────────────────── -->
+  <div class="cards">
+    <a href="weekly-dashboard.html" class="card">
+      <div class="tag">DASHBOARD</div>
+      <h2>Weekly Breakdown <span class="arrow">&rarr;</span></h2>
+      <p>240-week interactive dashboard with equity curves, monthly heatmaps, streak analysis, period comparisons, and sortable trade tables. Full 7-period validation view.</p>
+    </a>
+    <a href="analyzer.html" class="card">
+      <div class="tag">FORENSICS</div>
+      <h2>NQ Analyzer <span class="arrow">&rarr;</span></h2>
+      <p>Canvas-based OHLCV chart with trade overlays, stop/target levels, entry/exit markers, regime filtering, and per-trade compliance analysis. Drag-drop JSON upload.</p>
+    </a>
+  </div>
+
+  <!-- ── PERIOD COMPARISON TABLE ───────────────────── -->
+  <div class="section">
+    <h2>Validation Period Summary</h2>
+    <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Dates</th>
+          <th>Weeks</th>
+          <th>Trades</th>
+          <th>WR</th>
+          <th>PF</th>
+          <th>PnL</th>
+          <th>$/Trade</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Period 1</td>
+          <td style="color:var(--text)">Sep 2021 — Feb 2022</td>
+          <td style="color:var(--text)">26</td>
+          <td style="color:var(--text)">1,661</td>
+          <td class="pos">59.2%</td>
+          <td class="pos">1.58</td>
+          <td class="pos">+$18,803</td>
+          <td class="pos">+$11.32</td>
+        </tr>
+        <tr>
+          <td>Period 2</td>
+          <td style="color:var(--text)">Mar 2022 — Aug 2022</td>
+          <td style="color:var(--text)">26</td>
+          <td style="color:var(--text)">1,928</td>
+          <td class="pos">55.1%</td>
+          <td class="pos">1.38</td>
+          <td class="pos">+$17,414</td>
+          <td class="pos">+$9.03</td>
+        </tr>
+        <tr>
+          <td>Period 3</td>
+          <td style="color:var(--text)">Sep 2022 — Feb 2023</td>
+          <td style="color:var(--text)">26</td>
+          <td style="color:var(--text)">2,108</td>
+          <td class="pos">59.1%</td>
+          <td class="pos">1.65</td>
+          <td class="pos">+$27,453</td>
+          <td class="pos">+$13.02</td>
+        </tr>
+        <tr>
+          <td>Period 4</td>
+          <td style="color:var(--text)">Mar 2023 — Aug 2023</td>
+          <td style="color:var(--text)">27</td>
+          <td style="color:var(--text)">2,284</td>
+          <td class="pos">58.8%</td>
+          <td class="pos">1.50</td>
+          <td class="pos">+$22,866</td>
+          <td class="pos">+$10.01</td>
+        </tr>
+        <tr>
+          <td>Period 5</td>
+          <td style="color:var(--text)">Sep 2023 — Feb 2024</td>
+          <td style="color:var(--text)">27</td>
+          <td style="color:var(--text)">2,284</td>
+          <td class="pos">59.6%</td>
+          <td class="pos">1.57</td>
+          <td class="pos">+$25,523</td>
+          <td class="pos">+$11.18</td>
+        </tr>
+        <tr>
+          <td>Period 6</td>
+          <td style="color:var(--text)">Mar 2024 — Aug 2024</td>
+          <td style="color:var(--text)">27</td>
+          <td style="color:var(--text)">2,340</td>
+          <td class="pos">57.8%</td>
+          <td class="pos">1.50</td>
+          <td class="pos">+$28,064</td>
+          <td class="pos">+$11.99</td>
+        </tr>
+        <tr>
+          <td>Period 7</td>
+          <td style="color:var(--text)">Sep 2024 — Feb 2025</td>
+          <td style="color:var(--text)">27</td>
+          <td style="color:var(--text)">2,493</td>
+          <td class="pos">58.5%</td>
+          <td class="pos">1.44</td>
+          <td class="pos">+$26,375</td>
+          <td class="pos">+$10.58</td>
+        </tr>
+        <tr style="border-top:2px solid var(--border)">
+          <td style="color:var(--blue)">TOTAL</td>
+          <td style="color:var(--text2)">Sep 2021 — Feb 2026</td>
+          <td style="color:var(--white);font-weight:700">240</td>
+          <td style="color:var(--white);font-weight:700">14,848</td>
+          <td class="pos" style="font-weight:700">58.3%</td>
+          <td class="pos" style="font-weight:700">1.53</td>
+          <td class="pos" style="font-weight:700">+$166,997</td>
+          <td class="pos" style="font-weight:700">+$11.25</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- ── SYSTEM CONFIG ─────────────────────────────── -->
+  <div class="section">
+    <h2>System Configuration</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;font-family:var(--mono);font-size:12px">
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">HC Min Score</span><span style="color:var(--white);font-weight:600">&ge; 0.75</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">HC Max Stop</span><span style="color:var(--white);font-weight:600">&le; 30 pts</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">HTF Gate</span><span style="color:var(--white);font-weight:600">strength &ge; 0.3</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">C1 Exit</span><span style="color:var(--white);font-weight:600">Trail +3pts (2.5pt)</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">C2 Exit</span><span style="color:var(--white);font-weight:600">ATR trailing</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">Sweep</span><span style="color:var(--white);font-weight:600">PDH/PDL, VWAP, rounds</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">Contracts</span><span style="color:var(--white);font-weight:600">2 MNQ</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">Exec TF</span><span style="color:var(--white);font-weight:600">2m</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">Account</span><span style="color:var(--white);font-weight:600">$50,000</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">Slippage</span><span style="color:var(--white);font-weight:600">Calibrated v2</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">Data</span><span style="color:var(--white);font-weight:600">FirstRate 1m</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface);border-radius:6px"><span style="color:var(--text2)">Daily Loss Limit</span><span style="color:var(--white);font-weight:600">$500</span></div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    v1.0-validated &middot; Built with ruthless scientific discipline. Data integrity obsession. Risk-first engineering.
+  </footer>
+</div>
 </body>
 </html>
