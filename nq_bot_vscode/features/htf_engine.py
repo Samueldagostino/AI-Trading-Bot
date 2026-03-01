@@ -31,8 +31,8 @@ class HTFBiasResult:
     """Consensus bias from all HTF timeframes."""
     consensus_direction: str = "neutral"   # "bullish", "bearish", "neutral"
     consensus_strength: float = 0.0        # 0.0 - 1.0
-    htf_allows_long: bool = True
-    htf_allows_short: bool = True
+    htf_allows_long: bool = False          # FAIL-SAFE: default blocks trades
+    htf_allows_short: bool = False         # FAIL-SAFE: default blocks trades
     timestamp: Optional[datetime] = None
     tf_biases: Dict[str, str] = field(default_factory=dict)
 

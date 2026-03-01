@@ -21,6 +21,7 @@ and rejection reason if blocked.
 
 import asyncio
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -312,6 +313,15 @@ class IBKROrderExecutor:
         Called by the higher-level scale-out executor when a
         leg closes.
         """
+        # NaN guard — if PnL is NaN, the kill switch comparison will
+        # silently return False, allowing unlimited losses.
+        if not math.isfinite(pnl):
+            logger.critical("NaN/Inf PnL received — activating kill switch")
+            self._state.is_halted = True
+            self._state.halt_reason = "KILL SWITCH: NaN/Inf PnL — data integrity failure"
+            self._schedule_cancel_all()
+            return
+
         self._state.daily_pnl += pnl
 
         # ── KILL SWITCH ──
@@ -322,8 +332,7 @@ class IBKROrderExecutor:
                 f"hit -${KILL_SWITCH_THRESHOLD_DOLLARS:.2f} threshold"
             )
             logger.critical(self._state.halt_reason)
-            # Synchronous flag set; cancel_all called by the event loop
-            # that owns us (cannot await in a non-async method).
+            self._schedule_cancel_all()
 
     def close_position(self, broker_order_id: str) -> None:
         """Remove a position from the open-position ledger."""
@@ -392,6 +401,16 @@ class IBKROrderExecutor:
         HARD BLOCKS — these cannot be bypassed, overridden, or
         disabled.  Every order passes through this single gate.
         """
+        # 0. NaN/Inf guard — NaN comparisons return False, bypassing gates
+        if not math.isfinite(self._state.daily_pnl):
+            self._state.is_halted = True
+            self._state.halt_reason = "KILL SWITCH: daily P&L is NaN/Inf — data integrity failure"
+            logger.critical(self._state.halt_reason)
+            return f"KILL_SWITCH: daily P&L is NaN/Inf"
+
+        if not isinstance(request.contracts, int) or request.contracts < 0:
+            return f"INVALID_CONTRACTS: {request.contracts!r} (must be non-negative int)"
+
         # 1. Kill switch / halt
         if self._state.is_halted:
             return f"HALTED: {self._state.halt_reason}"
@@ -500,6 +519,22 @@ class IBKROrderExecutor:
     # ──────────────────────────────────────────────────────────
     # HELPERS
     # ──────────────────────────────────────────────────────────
+
+    def _schedule_cancel_all(self) -> None:
+        """Schedule cancel_all_open_orders on the event loop.
+
+        Called from synchronous methods (record_trade_pnl) that cannot
+        await.  This ensures the kill switch immediately cancels orders
+        rather than waiting for the next place_order call to notice
+        is_halted.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.cancel_all_open_orders())
+        except RuntimeError:
+            # No running event loop — the is_halted flag will block
+            # the next place_order call.
+            pass
 
     def _get_last_price(self) -> float:
         """Best-effort current price from the IBKR data feed."""

@@ -359,10 +359,23 @@ class TradovatePaperConnector:
         self.state.halt_reason = f"emergency: {reason}"
         self._log_event("emergency_flatten", {"reason": reason})
 
-        try:
-            await self._client.flatten_position()
-        except Exception as e:
-            logger.error(f"Emergency flatten failed: {e}")
+        # Retry flatten up to 3 times — positions MUST be closed
+        for attempt in range(1, 4):
+            try:
+                await self._client.flatten_position()
+                logger.info("Emergency flatten succeeded on attempt %d", attempt)
+                return
+            except Exception as e:
+                logger.error(
+                    "Emergency flatten attempt %d/3 failed: %s", attempt, e
+                )
+                if attempt < 3:
+                    await asyncio.sleep(2.0)
+
+        logger.critical(
+            "EMERGENCY FLATTEN FAILED after 3 attempts — "
+            "MANUAL INTERVENTION REQUIRED. Positions may still be open."
+        )
 
     # ================================================================
     # DAILY PnL TRACKING
