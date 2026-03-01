@@ -13,15 +13,22 @@ Features:
   - Z-score significance testing (WR chi-squared, PF bootstrap)
   - Three-tier alerts: GREEN / YELLOW / RED
   - Rolling 20-trade PF for early degradation warning
+  - Weekly report generation (C1/C2 breakdown, Z-scores, 4-week trend)
+  - Auto-trigger on Friday RTH close or on-demand via --weekly-report
 
 Usage:
-    python scripts/ibkr_monitor.py              # Live tail mode
-    python scripts/ibkr_monitor.py --snapshot    # One-time snapshot
+    python scripts/ibkr_monitor.py                # Live tail mode
+    python scripts/ibkr_monitor.py --snapshot      # One-time snapshot
+    python scripts/ibkr_monitor.py --weekly-report # Generate weekly report
 
 Reads from:
     logs/ibkr_trades.json
     logs/ibkr_decisions.json
     config/backtest_baseline.json
+
+Writes to:
+    logs/weekly_report_{date}.json
+    docs/viz_data.json
 """
 
 import argparse
@@ -42,12 +49,18 @@ project_dir = script_dir.parent
 sys.path.insert(0, str(project_dir))
 
 LOGS_DIR = project_dir / "logs"
+DOCS_DIR = project_dir / "docs"
 TRADES_LOG = LOGS_DIR / "ibkr_trades.json"
 DECISIONS_LOG = LOGS_DIR / "ibkr_decisions.json"
 BASELINE_PATH = project_dir / "config" / "backtest_baseline.json"
+VIZ_DATA_PATH = DOCS_DIR / "viz_data.json"
 
 # MNQ point value — matches Broker/order_executor.py
 MNQ_POINT_VALUE = 2.0
+
+# RTH close hour in ET (16:00)
+RTH_CLOSE_HOUR = 16
+RTH_CLOSE_MINUTE = 0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -486,6 +499,406 @@ class AlertEngine:
 
 
 # ═══════════════════════════════════════════════════════════════
+# WEEKLY REPORT
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass
+class WeeklyReport:
+    """Summary of one trading week."""
+    week_start: str  # ISO date (Monday)
+    week_end: str    # ISO date (Friday)
+    trade_count: int = 0
+    net_pnl: float = 0.0
+    profit_factor: float = 0.0
+    win_rate_pct: float = 0.0
+    max_drawdown_pct: float = 0.0
+    c1_pnl: float = 0.0
+    c2_pnl: float = 0.0
+    c1_pnl_pts: float = 0.0
+    c2_pnl_pts: float = 0.0
+    wins: int = 0
+    losses: int = 0
+    avg_winner_pts: float = 0.0
+    avg_loser_pts: float = 0.0
+    max_consecutive_losses: int = 0
+
+    # Backtest comparison
+    wr_z_score: float = 0.0
+    pf_z_score: float = 0.0
+    wr_significant: bool = False
+    pf_significant: bool = False
+
+    def to_dict(self) -> Dict:
+        """Serialize to JSON-safe dict."""
+        return {
+            "week_start": self.week_start,
+            "week_end": self.week_end,
+            "trade_count": self.trade_count,
+            "net_pnl": round(self.net_pnl, 2),
+            "profit_factor": round(self.profit_factor, 2) if self.profit_factor < 100 else None,
+            "win_rate_pct": round(self.win_rate_pct, 1),
+            "max_drawdown_pct": round(self.max_drawdown_pct, 2),
+            "c1_pnl": round(self.c1_pnl, 2),
+            "c2_pnl": round(self.c2_pnl, 2),
+            "c1_pnl_pts": round(self.c1_pnl_pts, 1),
+            "c2_pnl_pts": round(self.c2_pnl_pts, 1),
+            "wins": self.wins,
+            "losses": self.losses,
+            "avg_winner_pts": round(self.avg_winner_pts, 1),
+            "avg_loser_pts": round(self.avg_loser_pts, 1),
+            "max_consecutive_losses": self.max_consecutive_losses,
+            "wr_z_score": round(self.wr_z_score, 3),
+            "pf_z_score": round(self.pf_z_score, 3),
+            "wr_significant": self.wr_significant,
+            "pf_significant": self.pf_significant,
+        }
+
+
+def _week_boundaries(date_str: str) -> Tuple[str, str]:
+    """Return (monday, friday) ISO date strings for the week containing date_str."""
+    dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
+    monday = dt - timedelta(days=dt.weekday())
+    friday = monday + timedelta(days=4)
+    return monday.strftime("%Y-%m-%d"), friday.strftime("%Y-%m-%d")
+
+
+def _trades_in_range(
+    trades: List[TradeRecord], start: str, end: str
+) -> List[TradeRecord]:
+    """Filter trades whose timestamp falls within [start, end] inclusive."""
+    return [
+        t for t in trades
+        if start <= t.timestamp[:10] <= end
+    ]
+
+
+def generate_weekly_report(
+    trades: List[TradeRecord],
+    baseline: BacktestBaseline,
+    week_date: Optional[str] = None,
+) -> WeeklyReport:
+    """
+    Generate a weekly report for the week containing week_date.
+
+    If week_date is None, uses the current date.
+    """
+    if week_date is None:
+        week_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    week_start, week_end = _week_boundaries(week_date)
+
+    week_trades = _trades_in_range(trades, week_start, week_end)
+
+    # Build a StatsEngine for just this week's trades
+    stats = StatsEngine(baseline)
+    stats.trades = week_trades
+
+    report = WeeklyReport(
+        week_start=week_start,
+        week_end=week_end,
+        trade_count=stats.total_trades,
+        net_pnl=stats.cumulative_pnl,
+        profit_factor=stats.profit_factor,
+        win_rate_pct=stats.win_rate,
+        max_drawdown_pct=stats.max_drawdown_pct(baseline.account_size),
+        c1_pnl=stats.c1_pnl,
+        c2_pnl=stats.c2_pnl,
+        c1_pnl_pts=stats.c1_pnl / MNQ_POINT_VALUE if MNQ_POINT_VALUE else 0,
+        c2_pnl_pts=stats.c2_pnl / MNQ_POINT_VALUE if MNQ_POINT_VALUE else 0,
+        wins=stats.wins,
+        losses=stats.losses,
+        avg_winner_pts=stats.avg_winner_pts,
+        avg_loser_pts=stats.avg_loser_pts,
+        max_consecutive_losses=stats.max_consecutive_losses,
+        wr_z_score=stats.wr_z_score(),
+        pf_z_score=stats.pf_z_score(),
+        wr_significant=stats.is_wr_significant(),
+        pf_significant=stats.is_pf_significant(),
+    )
+    return report
+
+
+def compute_weekly_reports(
+    trades: List[TradeRecord],
+    baseline: BacktestBaseline,
+) -> List[WeeklyReport]:
+    """Generate reports for every week that has trades."""
+    if not trades:
+        return []
+
+    # Find all unique weeks
+    weeks_seen: Dict[str, str] = {}  # monday → friday
+    for t in trades:
+        if not t.timestamp:
+            continue
+        monday, friday = _week_boundaries(t.timestamp)
+        weeks_seen[monday] = friday
+
+    # Sort by week start
+    sorted_weeks = sorted(weeks_seen.items())
+
+    reports = []
+    for monday, friday in sorted_weeks:
+        report = generate_weekly_report(trades, baseline, monday)
+        reports.append(report)
+    return reports
+
+
+# ── Trend computation ──
+
+TREND_IMPROVING = "improving"
+TREND_DEGRADING = "degrading"
+TREND_STABLE = "stable"
+
+
+def compute_4_week_trend(reports: List[WeeklyReport]) -> Dict:
+    """
+    Compute rolling 4-week trend from weekly reports.
+
+    Compares most recent 2 weeks vs prior 2 weeks.
+    Returns trend direction for PF, WR, and PnL.
+    """
+    if len(reports) < 4:
+        return {
+            "status": "insufficient_data",
+            "weeks_available": len(reports),
+            "pf_trend": TREND_STABLE,
+            "wr_trend": TREND_STABLE,
+            "pnl_trend": TREND_STABLE,
+        }
+
+    recent = reports[-4:]
+    prior_2 = recent[:2]
+    latest_2 = recent[2:]
+
+    def _avg(values: List[float]) -> float:
+        return sum(values) / len(values) if values else 0.0
+
+    prior_pf = _avg([r.profit_factor for r in prior_2 if r.profit_factor < 100])
+    latest_pf = _avg([r.profit_factor for r in latest_2 if r.profit_factor < 100])
+    prior_wr = _avg([r.win_rate_pct for r in prior_2])
+    latest_wr = _avg([r.win_rate_pct for r in latest_2])
+    prior_pnl = sum(r.net_pnl for r in prior_2)
+    latest_pnl = sum(r.net_pnl for r in latest_2)
+
+    def _trend(latest_val: float, prior_val: float, threshold: float) -> str:
+        if prior_val == 0:
+            return TREND_STABLE
+        pct_change = (latest_val - prior_val) / abs(prior_val) if prior_val != 0 else 0
+        if pct_change > threshold:
+            return TREND_IMPROVING
+        elif pct_change < -threshold:
+            return TREND_DEGRADING
+        return TREND_STABLE
+
+    # 10% change threshold for PF/WR, 20% for PnL
+    pf_trend = _trend(latest_pf, prior_pf, 0.10)
+    wr_trend = _trend(latest_wr, prior_wr, 0.10)
+    pnl_trend = _trend(latest_pnl, prior_pnl, 0.20)
+
+    return {
+        "status": "computed",
+        "weeks_available": len(reports),
+        "prior_2_weeks": {
+            "avg_pf": round(prior_pf, 2),
+            "avg_wr": round(prior_wr, 1),
+            "total_pnl": round(prior_pnl, 2),
+        },
+        "latest_2_weeks": {
+            "avg_pf": round(latest_pf, 2),
+            "avg_wr": round(latest_wr, 1),
+            "total_pnl": round(latest_pnl, 2),
+        },
+        "pf_trend": pf_trend,
+        "wr_trend": wr_trend,
+        "pnl_trend": pnl_trend,
+    }
+
+
+# ── Export functions ──
+
+def export_weekly_report(report: WeeklyReport, output_dir: Path = LOGS_DIR) -> Path:
+    """Export a weekly report to logs/weekly_report_{date}.json."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"weekly_report_{report.week_end}.json"
+    path = output_dir / filename
+    with open(path, "w") as f:
+        json.dump(report.to_dict(), f, indent=2)
+    return path
+
+
+def update_viz_data(
+    reports: List[WeeklyReport],
+    trend: Dict,
+    viz_path: Path = VIZ_DATA_PATH,
+) -> Path:
+    """
+    Update docs/viz_data.json for GitHub Pages dashboard.
+
+    Merges weekly reports into existing viz_data if present.
+    """
+    viz_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load existing data
+    existing: Dict = {}
+    if viz_path.exists():
+        try:
+            with open(viz_path) as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            existing = {}
+
+    # Build weekly_reports array
+    weekly_data = [r.to_dict() for r in reports]
+
+    existing["weekly_reports"] = weekly_data
+    existing["trend"] = trend
+    existing["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+    with open(viz_path, "w") as f:
+        json.dump(existing, f, indent=2)
+    return viz_path
+
+
+def is_friday_rth_close() -> bool:
+    """Check if current time is Friday at/after RTH close (16:00 ET)."""
+    # ET is UTC-5 (ignoring DST for simplicity — matches Broker/ibkr_client.py)
+    et_offset = timedelta(hours=-5)
+    et_now = datetime.now(timezone(et_offset))
+    return (
+        et_now.weekday() == 4  # Friday
+        and et_now.hour >= RTH_CLOSE_HOUR
+    )
+
+
+def run_weekly_report(
+    trades_path: Path = TRADES_LOG,
+    baseline_path: Path = BASELINE_PATH,
+) -> Optional[WeeklyReport]:
+    """Generate, export, and print the weekly report."""
+    baseline = BacktestBaseline.from_json(baseline_path)
+    raw_trades = load_json(trades_path)
+    trades = parse_trades(raw_trades)
+
+    if not trades:
+        print("No trades found — cannot generate weekly report.")
+        return None
+
+    # Generate report for the current week
+    report = generate_weekly_report(trades, baseline)
+
+    # Export to JSON
+    export_path = export_weekly_report(report)
+
+    # Compute all weekly reports for trend analysis
+    all_reports = compute_weekly_reports(trades, baseline)
+    trend = compute_4_week_trend(all_reports)
+
+    # Update viz_data.json
+    viz_path = update_viz_data(all_reports, trend)
+
+    # Print summary
+    print(_render_weekly_report(report, trend, baseline))
+    print(f"\n  Exported to: {export_path}")
+    print(f"  Viz data:    {viz_path}")
+
+    return report
+
+
+def _render_weekly_report(
+    report: WeeklyReport,
+    trend: Dict,
+    baseline: BacktestBaseline,
+) -> str:
+    """Render the weekly report as a terminal string."""
+    lines: List[str] = []
+    W = 62
+    bar = "=" * W
+
+    lines.append("")
+    lines.append(bar)
+    lines.append(
+        f"  WEEKLY REPORT  {report.week_start} → {report.week_end}"
+    )
+    lines.append(bar)
+
+    # Summary
+    lines.append("")
+    lines.append("  SUMMARY")
+    lines.append("  " + "-" * 58)
+    pf_str = f"{report.profit_factor:.2f}" if report.profit_factor < 100 else "inf"
+    lines.append(f"  Trades:          {report.trade_count}  ({report.wins}W / {report.losses}L)")
+    lines.append(f"  Net PnL:         ${report.net_pnl:+.2f}")
+    lines.append(f"  Win Rate:        {report.win_rate_pct:.1f}%")
+    lines.append(f"  Profit Factor:   {pf_str}")
+    lines.append(f"  Max DD:          {report.max_drawdown_pct:.2f}%")
+    lines.append(f"  Avg Winner:      +{report.avg_winner_pts:.1f} pts")
+    lines.append(f"  Avg Loser:       -{report.avg_loser_pts:.1f} pts")
+    lines.append(f"  Max Consec Loss: {report.max_consecutive_losses}")
+
+    # C1/C2 breakdown
+    lines.append("")
+    lines.append("  C1/C2 BREAKDOWN")
+    lines.append("  " + "-" * 58)
+    lines.append(f"  C1 PnL:  ${report.c1_pnl:+.2f}  ({report.c1_pnl_pts:+.1f} pts)")
+    lines.append(f"  C2 PnL:  ${report.c2_pnl:+.2f}  ({report.c2_pnl_pts:+.1f} pts)")
+    c1_pct = (report.c1_pnl / report.net_pnl * 100) if report.net_pnl != 0 else 0
+    c2_pct = (report.c2_pnl / report.net_pnl * 100) if report.net_pnl != 0 else 0
+    lines.append(f"  C1 share: {c1_pct:.0f}%     C2 share: {c2_pct:.0f}%")
+
+    # Backtest comparison
+    lines.append("")
+    lines.append("  VS BACKTEST")
+    lines.append("  " + "-" * 58)
+    wr_sig = " *" if report.wr_significant else ""
+    pf_sig = " *" if report.pf_significant else ""
+    lines.append(f"  Metric        Paper      Backtest    Z-score")
+    lines.append(
+        f"  Win Rate      {report.win_rate_pct:5.1f}%"
+        f"     {baseline.win_rate_pct:5.1f}%"
+        f"       {report.wr_z_score:+.2f}{wr_sig}"
+    )
+    lines.append(
+        f"  Profit Fac    {pf_str:>5}"
+        f"      {baseline.profit_factor:5.2f}"
+        f"       {report.pf_z_score:+.2f}{pf_sig}"
+    )
+    if wr_sig or pf_sig:
+        lines.append(f"  (* = statistically significant at 95%)")
+
+    # 4-week trend
+    lines.append("")
+    lines.append("  4-WEEK TREND")
+    lines.append("  " + "-" * 58)
+    if trend.get("status") == "insufficient_data":
+        lines.append(
+            f"  Insufficient data ({trend['weeks_available']} weeks, need 4)"
+        )
+    else:
+        pf_t = trend["pf_trend"].upper()
+        wr_t = trend["wr_trend"].upper()
+        pnl_t = trend["pnl_trend"].upper()
+        lines.append(f"  PF trend:   {pf_t}")
+        lines.append(f"  WR trend:   {wr_t}")
+        lines.append(f"  PnL trend:  {pnl_t}")
+        prior = trend["prior_2_weeks"]
+        latest = trend["latest_2_weeks"]
+        lines.append(
+            f"  Prior 2wk:  PF {prior['avg_pf']:.2f}"
+            f"  WR {prior['avg_wr']:.1f}%"
+            f"  PnL ${prior['total_pnl']:+.2f}"
+        )
+        lines.append(
+            f"  Last 2wk:   PF {latest['avg_pf']:.2f}"
+            f"  WR {latest['avg_wr']:.1f}%"
+            f"  PnL ${latest['total_pnl']:+.2f}"
+        )
+
+    lines.append("")
+    lines.append(bar)
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════
 # LOG PARSER
 # ═══════════════════════════════════════════════════════════════
 
@@ -704,6 +1117,7 @@ def run_live():
 
     trades_mtime: float = 0
     decisions_mtime: float = 0
+    weekly_report_generated_today = False
 
     try:
         while True:
@@ -724,6 +1138,17 @@ def run_live():
                 os.system("clear" if os.name != "nt" else "cls")
                 print(render_dashboard(stats, alerts))
 
+            # Friday RTH close auto-trigger for weekly report
+            if is_friday_rth_close() and not weekly_report_generated_today:
+                weekly_report_generated_today = True
+                print("\n  [AUTO] Generating weekly report (Friday RTH close)...")
+                run_weekly_report()
+
+            # Reset flag at midnight
+            now_utc = datetime.now(timezone.utc)
+            if now_utc.hour == 0 and now_utc.minute < 1:
+                weekly_report_generated_today = False
+
             time.sleep(2)
 
     except KeyboardInterrupt:
@@ -738,9 +1163,15 @@ def main():
         "--snapshot", action="store_true",
         help="One-time snapshot instead of live tail",
     )
+    parser.add_argument(
+        "--weekly-report", action="store_true",
+        help="Generate weekly report and exit",
+    )
     args = parser.parse_args()
 
-    if args.snapshot:
+    if args.weekly_report:
+        run_weekly_report()
+    elif args.snapshot:
         run_snapshot()
     else:
         run_live()
