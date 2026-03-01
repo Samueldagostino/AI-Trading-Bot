@@ -45,6 +45,7 @@ import logging
 import os
 import signal
 import sys
+import time
 import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -179,6 +180,8 @@ class IBKRLiveRunner:
 
     # Bars needed to prime ATR-14 and 20-bar volume average
     WARMUP_BARS = 30
+    # Terminal dashboard refresh interval
+    DASHBOARD_INTERVAL_SECONDS = 120
 
     def __init__(
         self,
@@ -204,6 +207,9 @@ class IBKRLiveRunner:
         # Structured loggers
         self._trade_log = JSONLogger(TRADES_LOG)
         self._decision_log = JSONLogger(DECISIONS_LOG)
+
+        # Dashboard timer
+        self._last_dashboard_time: float = 0.0
 
     # ──────────────────────────────────────────────────────────
     # STARTUP
@@ -382,6 +388,168 @@ class IBKRLiveRunner:
         logger.info("Daily reset complete — new session: %s", self._session_date)
 
     # ──────────────────────────────────────────────────────────
+    # TERMINAL DASHBOARD
+    # ──────────────────────────────────────────────────────────
+
+    def _print_dashboard(self) -> None:
+        """
+        Print a status dashboard to terminal.
+        Display only — no trading logic.
+        """
+        if not self._pipeline:
+            return
+
+        now_utc = datetime.now(timezone.utc)
+        et_now = now_utc.astimezone(ET_OFFSET)
+        session = get_session_type(now_utc)
+
+        pipeline = self._pipeline
+        executor = pipeline._executor
+        pm = pipeline._position_manager
+        bridge = pipeline._bridge
+
+        exec_status = executor.get_status()
+        pm_status = pm.get_status()
+
+        # ── Position ──
+        positions = pm.open_positions
+        if positions:
+            # Determine side + contracts from open positions
+            pos_list = list(positions.values())
+            side = pos_list[0].side.value  # "LONG" or "SHORT"
+            total_contracts = sum(p.contracts for p in pos_list)
+            avg_entry = sum(
+                p.entry_price * p.contracts for p in pos_list
+            ) / total_contracts
+            pos_line = f"{side} {total_contracts}x @ {avg_entry:.2f}"
+            tags = ", ".join(p.tag for p in pos_list if p.tag)
+            pos_detail = f"Legs: {tags}" if tags else ""
+        else:
+            pos_line = "FLAT"
+            pos_detail = "(waiting for signal)"
+
+        # ── P&L ──
+        realized = pm_status["daily_realized_pnl"]
+        current_price = 0.0
+        if pipeline._last_bar:
+            current_price = pipeline._last_bar.close
+        unrealized = pm.get_unrealized_pnl(current_price)
+        net_pnl = realized + unrealized
+
+        # ── Trades today — wins / losses ──
+        trade_count = pm_status["trade_count"]
+        wins = 0
+        losses = 0
+        for pos in pm._closed_positions:
+            if pos.net_pnl > 0:
+                wins += 1
+            elif pos.net_pnl < 0:
+                losses += 1
+
+        # ── Filter blocks ──
+        signal_stats = pipeline._signal_aggregator.get_signal_stats()
+        htf_blocked = signal_stats.get("htf_blocked_signals", 0)
+        bridge_rejected = bridge.rejections
+        exec_blocked = exec_status["daily_blocked"]
+
+        # ── Connection ──
+        client_status = pipeline._client.get_status()
+        gw_ok = client_status.get("connected", False)
+        feed_status = pipeline._data_feed.get_status()
+        feed_mode = feed_status.get("data_mode", "none")
+        recon_ok = pm_status.get("recon_loop_active", False)
+        halted = exec_status["is_halted"]
+        halt_reason = exec_status["halt_reason"]
+
+        # ── Time to next session boundary ──
+        boundary_label, boundary_delta = self._next_session_boundary(et_now)
+
+        # ── Render ──
+        W = 62
+        bar = "=" * W
+        et_str = et_now.strftime("%H:%M:%S ET")
+
+        lines = [
+            "",
+            bar,
+            f"  IBKR DASHBOARD  {et_str:>20}      Session: {session.value}",
+            bar,
+            "",
+            f"  POSITION    {pos_line}",
+            f"              {pos_detail}",
+            "",
+            f"  DAILY P&L   Realized: ${realized:+.2f}"
+            f"   Unrealized: ${unrealized:+.2f}",
+            f"              Net: ${net_pnl:+.2f}",
+            "",
+            f"  TRADES      {trade_count} today"
+            f" ({wins}W / {losses}L)",
+            f"              Blocked:"
+            f" {bridge_rejected} HC"
+            f" | {htf_blocked} HTF"
+            f" | {exec_blocked} executor",
+            "",
+            f"  CONNECTION  Gateway: {'OK' if gw_ok else 'DOWN'}"
+            f"  Feed: {feed_mode}"
+            f"  Recon: {'OK' if recon_ok else 'OFF'}",
+            f"              Halted: "
+            + (f"YES — {halt_reason}" if halted else "No"),
+            "",
+            f"  NEXT        {boundary_label} in {boundary_delta}",
+            "",
+            bar,
+        ]
+
+        print("\n".join(lines))
+
+    @staticmethod
+    def _next_session_boundary(et_now: datetime) -> tuple:
+        """
+        Compute the next RTH boundary from current ET time.
+
+        Returns (label, "Xh Ym") tuple.
+
+        Session boundaries (ET):
+          RTH open:  09:30
+          RTH close: 16:00
+          ETH start: 18:00
+        """
+        h = et_now.hour
+        m = et_now.minute
+        t = h + m / 60.0
+
+        if 9.5 <= t < 16.0:
+            # Currently RTH → next boundary is RTH close at 16:00
+            target = et_now.replace(
+                hour=16, minute=0, second=0, microsecond=0
+            )
+            label = "RTH close"
+        elif t < 9.5:
+            # Before RTH open → next boundary is RTH open at 09:30
+            target = et_now.replace(
+                hour=9, minute=30, second=0, microsecond=0
+            )
+            label = "RTH open"
+        else:
+            # After 16:00 (ETH evening) → next boundary is RTH open tomorrow
+            target = (et_now + timedelta(days=1)).replace(
+                hour=9, minute=30, second=0, microsecond=0
+            )
+            label = "RTH open"
+
+        delta = target - et_now
+        total_minutes = int(delta.total_seconds() / 60)
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
+
+        if hours > 0:
+            delta_str = f"{hours}h {minutes:02d}m"
+        else:
+            delta_str = f"{minutes}m"
+
+        return label, delta_str
+
+    # ──────────────────────────────────────────────────────────
     # MAIN LOOP
     # ──────────────────────────────────────────────────────────
 
@@ -404,6 +572,13 @@ class IBKRLiveRunner:
                         "reason": self._pipeline._executor._state.halt_reason,
                     })
                     break
+
+                # Dashboard refresh every 2 minutes
+                now = time.monotonic()
+                if now - self._last_dashboard_time >= self.DASHBOARD_INTERVAL_SECONDS:
+                    if self._warmup_complete:
+                        self._print_dashboard()
+                    self._last_dashboard_time = now
 
         except asyncio.CancelledError:
             pass
