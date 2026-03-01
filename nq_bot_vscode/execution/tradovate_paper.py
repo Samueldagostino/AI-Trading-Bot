@@ -29,6 +29,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Callable, Dict, List, Any
 from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -422,12 +423,8 @@ class TradovatePaperConnector:
     # ================================================================
     @staticmethod
     def get_et_now() -> datetime:
-        """Get current time in US/Eastern (UTC-5 or UTC-4 for DST)."""
-        utc_now = datetime.now(timezone.utc)
-        # Simple EST offset (UTC-5). For DST, this would need pytz/zoneinfo.
-        # Futures sessions are defined in ET.
-        et_offset = timezone(timedelta(hours=-5))
-        return utc_now.astimezone(et_offset)
+        """Get current time in US/Eastern — DST-aware via ZoneInfo."""
+        return datetime.now(ZoneInfo("America/New_York"))
 
     @staticmethod
     def is_within_session(et_time: datetime = None) -> bool:

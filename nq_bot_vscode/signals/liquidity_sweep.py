@@ -32,6 +32,7 @@ Integration:
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Tuple
 
 logger = logging.getLogger(__name__)
@@ -477,8 +478,7 @@ class LiquiditySweepDetector:
 
         # +0.1 if sweep occurs during first 30min of RTH (highest probability)
         if is_rth:
-            et_offset = timezone(timedelta(hours=-5))
-            et_time = bar.timestamp.astimezone(et_offset)
+            et_time = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
             h, m = et_time.hour, et_time.minute
             t = h + m / 60.0
             if 9.5 <= t <= 10.0:  # First 30 min of RTH

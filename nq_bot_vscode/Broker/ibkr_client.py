@@ -30,6 +30,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
+from zoneinfo import ZoneInfo
 from typing import Optional, Dict, List, Callable, Any
 
 from features.engine import Bar
@@ -111,9 +112,11 @@ class ContractInfo:
 # SESSION TYPE
 # ================================================================
 
-# US Eastern timezone offset (standard: UTC-5, daylight: UTC-4).
-# Using fixed UTC-5 matches main.py process_bar() logic.
-ET_OFFSET = timezone(timedelta(hours=-5))
+# US Eastern timezone — DST-aware via IANA database.
+# ZoneInfo automatically handles EST (UTC-5) / EDT (UTC-4) transitions.
+ET_TZ = ZoneInfo("America/New_York")
+# Back-compat alias (existing code imports ET_OFFSET)
+ET_OFFSET = ET_TZ
 
 
 class SessionType(Enum):
@@ -127,7 +130,7 @@ def get_session_type(ts: datetime) -> SessionType:
     RTH = 9:30–16:00 ET (same logic as main.py process_bar).
     Everything else is ETH.
     """
-    et_time = ts.astimezone(ET_OFFSET)
+    et_time = ts.astimezone(ET_TZ)
     t = et_time.hour + et_time.minute / 60.0
     if 9.5 <= t < 16.0:
         return SessionType.RTH

@@ -29,6 +29,7 @@ import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
 from features.engine import NQFeatureEngine, Bar
@@ -298,8 +299,7 @@ class IBKRLivePipeline:
 
         # === 3b. LIQUIDITY SWEEP DETECTOR ===
         sweep_signal = None
-        et_offset = timezone(timedelta(hours=-5))
-        et_time = bar.timestamp.astimezone(et_offset)
+        et_time = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
         h, m = et_time.hour, et_time.minute
         t = h + m / 60.0
         is_rth = 9.5 <= t < 16.0

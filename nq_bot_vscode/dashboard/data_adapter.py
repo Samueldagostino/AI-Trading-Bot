@@ -28,12 +28,12 @@ import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────
-ET_OFFSET = timedelta(hours=-5)  # EST (no DST handling — futures timestamps are usually ET)
-EDT_OFFSET = timedelta(hours=-4)
+ET_TZ = ZoneInfo("America/New_York")  # DST-aware US Eastern
 
 # NQ futures schedule (ET)
 NQ_OPEN_HOUR = 18       # 6:00 PM ET (prior day)
