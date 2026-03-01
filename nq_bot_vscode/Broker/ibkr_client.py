@@ -32,6 +32,8 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Optional, Dict, List, Callable, Any
 
+from features.engine import Bar
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -561,9 +563,8 @@ class IBKRDataFeed:
         ...
         await feed.stop()
 
-    The on_bar callback receives dicts matching features.engine.Bar:
-        {"timestamp", "open", "high", "low", "close", "volume",
-         "tick_count", "session_type"}
+    The on_bar callback receives features.engine.Bar instances with
+    session_type set to "RTH" or "ETH".
     """
 
     def __init__(self, client: 'IBKRClient'):
@@ -706,8 +707,10 @@ class IBKRDataFeed:
             bar_dict.setdefault("tick_count", 0)
 
             if self._on_bar:
-                self._on_bar(bar_dict)
-                count += 1
+                bar = self.candle_to_bar(bar_dict)
+                if bar is not None:
+                    self._on_bar(bar)
+                    count += 1
 
         logger.info("Backfill complete: %d bars dispatched for warmup", count)
 
@@ -786,10 +789,64 @@ class IBKRDataFeed:
     # BAR DISPATCH
     # ================================================================
 
+    # Fields required to construct a Bar (excluding optional session_type)
+    _BAR_REQUIRED_FIELDS = ("timestamp", "open", "high", "low", "close", "volume")
+    _BAR_OPTIONAL_FIELDS = ("bid_volume", "ask_volume", "delta", "tick_count", "vwap")
+
+    @staticmethod
+    def candle_to_bar(candle: dict) -> Optional[Bar]:
+        """
+        Convert a candle dict (from CandleAggregator or backfill) to a Bar.
+
+        Steps:
+        1. Extract session_type before constructing Bar
+        2. Build Bar with explicit field mapping (no **kwargs)
+        3. Attach session_type after construction
+        4. Log warning for any missing expected field
+        """
+        # 1. Extract session_type — may be SessionType enum or string
+        raw_session = candle.get("session_type")
+        if raw_session is not None:
+            session_str = raw_session.value if isinstance(raw_session, SessionType) else str(raw_session)
+        else:
+            session_str = None
+
+        # 4. Check for missing required fields
+        for f in IBKRDataFeed._BAR_REQUIRED_FIELDS:
+            if f not in candle:
+                logger.warning("candle_to_bar: missing required field '%s' — skipping bar", f)
+                return None
+
+        for f in IBKRDataFeed._BAR_OPTIONAL_FIELDS:
+            if f not in candle:
+                logger.warning("candle_to_bar: missing optional field '%s' — using default", f)
+
+        # 2. Build Bar with explicit field mapping
+        bar = Bar(
+            timestamp=candle["timestamp"],
+            open=candle["open"],
+            high=candle["high"],
+            low=candle["low"],
+            close=candle["close"],
+            volume=candle["volume"],
+            bid_volume=candle.get("bid_volume", 0),
+            ask_volume=candle.get("ask_volume", 0),
+            delta=candle.get("delta", 0),
+            tick_count=candle.get("tick_count", 0),
+            vwap=candle.get("vwap", 0.0),
+        )
+
+        # 3. Attach session_type after construction
+        bar.session_type = session_str
+
+        return bar
+
     def _dispatch_bar(self, candle: dict) -> None:
-        """Forward a completed candle to the on_bar callback."""
+        """Convert candle dict to Bar and forward to the on_bar callback."""
         if self._on_bar:
-            self._on_bar(candle)
+            bar = self.candle_to_bar(candle)
+            if bar is not None:
+                self._on_bar(bar)
 
 
 # ================================================================

@@ -1144,20 +1144,30 @@ class TestIBKRDataFeed:
         assert "client" in status
 
     def test_dispatch_bar(self, feed):
-        """_dispatch_bar should forward candle to on_bar callback."""
+        """_dispatch_bar should convert candle dict to Bar and forward."""
         received = []
         feed.on_bar(lambda c: received.append(c))
 
-        candle = {"timestamp": _ts(0, 0), "open": 21000.0}
+        candle = {
+            "timestamp": _ts(0, 0), "open": 21000.0, "high": 21010.0,
+            "low": 20990.0, "close": 21005.0, "volume": 100,
+            "tick_count": 5, "session_type": SessionType.RTH,
+        }
         feed._dispatch_bar(candle)
 
         assert len(received) == 1
-        assert received[0]["open"] == 21000.0
+        from features.engine import Bar
+        assert isinstance(received[0], Bar)
+        assert received[0].open == 21000.0
+        assert received[0].session_type == "RTH"
 
     def test_dispatch_bar_no_callback(self, feed):
         """_dispatch_bar should not fail with no callback."""
         feed._on_bar = None
-        feed._dispatch_bar({"open": 21000.0})  # Should not raise
+        feed._dispatch_bar({
+            "timestamp": _ts(0, 0), "open": 21000.0, "high": 21010.0,
+            "low": 20990.0, "close": 21005.0, "volume": 100,
+        })  # Should not raise
 
 
 # ================================================================
@@ -1180,11 +1190,12 @@ class TestBackfill:
 
         assert len(received) == 5
         assert feed._backfill_bars == bars
-        # Each bar should have session_type added
+        # Each bar should be a Bar with session_type set
+        from features.engine import Bar
         for bar in received:
-            assert "session_type" in bar
-            assert isinstance(bar["session_type"], SessionType)
-            assert "tick_count" in bar
+            assert isinstance(bar, Bar)
+            assert bar.session_type in ("RTH", "ETH")
+            assert bar.tick_count >= 0
 
     @pytest.mark.asyncio
     async def test_backfill_uses_correct_params(self, feed):
@@ -1224,7 +1235,7 @@ class TestBackfill:
         await feed._run_backfill()
 
         # tick_count should not be overwritten by setdefault
-        assert received[0]["tick_count"] == 42
+        assert received[0].tick_count == 42
 
     @pytest.mark.asyncio
     async def test_backfill_no_callback(self, feed):
@@ -1345,8 +1356,8 @@ class TestPollingFallback:
         await feed._on_poll_snapshot(snap3)
 
         assert len(received) == 1
-        assert received[0]["open"] == 21000.0
-        assert received[0]["high"] == 21010.0
+        assert received[0].open == 21000.0
+        assert received[0].high == 21010.0
 
     @pytest.mark.asyncio
     async def test_on_poll_snapshot_ignores_zero_price(self, feed):
@@ -1386,7 +1397,7 @@ class TestHealthMonitor:
         assert BACKFILL_BAR_SIZE == "2min"
 
     def test_feed_aggregator_wired(self, feed):
-        """CandleAggregator should dispatch to feed's on_bar callback."""
+        """CandleAggregator should dispatch Bar to feed's on_bar callback."""
         received = []
         feed.on_bar(lambda c: received.append(c))
 
@@ -1395,7 +1406,9 @@ class TestHealthMonitor:
         feed._aggregator.process_tick(21010.0, 1, _ts(2, 0))
 
         assert len(received) == 1
-        assert received[0]["open"] == 21000.0
+        from features.engine import Bar
+        assert isinstance(received[0], Bar)
+        assert received[0].open == 21000.0
 
 
 # ================================================================
@@ -1427,12 +1440,14 @@ class TestDataFeedIntegration:
 
         assert len(received) == 1
         bar = received[0]
-        assert bar["open"] == 21000.0
-        assert bar["high"] == 21010.0
-        assert bar["low"] == 20990.0
-        assert bar["close"] == 21005.0
-        assert bar["volume"] == 4
-        assert bar["session_type"] == SessionType.RTH
+        from features.engine import Bar
+        assert isinstance(bar, Bar)
+        assert bar.open == 21000.0
+        assert bar.high == 21010.0
+        assert bar.low == 20990.0
+        assert bar.close == 21005.0
+        assert bar.volume == 4
+        assert bar.session_type == "RTH"
 
     @pytest.mark.asyncio
     async def test_backfill_then_live_ticks(self):
@@ -1455,5 +1470,152 @@ class TestDataFeedIntegration:
 
         assert len(received) == 4  # 3 backfill + 1 live candle
         live_bar = received[3]
-        assert live_bar["open"] == 21100.0
-        assert live_bar["close"] == 21100.0
+        assert live_bar.open == 21100.0
+        assert live_bar.close == 21100.0
+
+
+# ================================================================
+# CANDLE-TO-BAR ADAPTER TESTS
+# ================================================================
+
+class TestCandleToBar:
+    """Tests for the dict→Bar adapter in IBKRDataFeed."""
+
+    def test_basic_conversion(self):
+        """candle_to_bar should convert dict to Bar with all fields."""
+        candle = {
+            "timestamp": _ts(30, 0),
+            "open": 21000.0,
+            "high": 21010.0,
+            "low": 20990.0,
+            "close": 21005.0,
+            "volume": 150,
+            "tick_count": 12,
+            "session_type": SessionType.RTH,
+        }
+        bar = IBKRDataFeed.candle_to_bar(candle)
+
+        from features.engine import Bar
+        assert isinstance(bar, Bar)
+        assert bar.timestamp == _ts(30, 0)
+        assert bar.open == 21000.0
+        assert bar.high == 21010.0
+        assert bar.low == 20990.0
+        assert bar.close == 21005.0
+        assert bar.volume == 150
+        assert bar.tick_count == 12
+
+    def test_session_type_enum_to_string(self):
+        """SessionType enum should be stored as string on Bar."""
+        candle = {
+            "timestamp": _ts(30, 0), "open": 21000.0, "high": 21010.0,
+            "low": 20990.0, "close": 21005.0, "volume": 100,
+            "session_type": SessionType.RTH,
+        }
+        bar = IBKRDataFeed.candle_to_bar(candle)
+        assert bar.session_type == "RTH"
+
+        candle["session_type"] = SessionType.ETH
+        bar = IBKRDataFeed.candle_to_bar(candle)
+        assert bar.session_type == "ETH"
+
+    def test_session_type_string_passthrough(self):
+        """String session_type should pass through unchanged."""
+        candle = {
+            "timestamp": _ts(30, 0), "open": 21000.0, "high": 21010.0,
+            "low": 20990.0, "close": 21005.0, "volume": 100,
+            "session_type": "RTH",
+        }
+        bar = IBKRDataFeed.candle_to_bar(candle)
+        assert bar.session_type == "RTH"
+
+    def test_session_type_none(self):
+        """Missing session_type should result in None on Bar."""
+        candle = {
+            "timestamp": _ts(30, 0), "open": 21000.0, "high": 21010.0,
+            "low": 20990.0, "close": 21005.0, "volume": 100,
+        }
+        bar = IBKRDataFeed.candle_to_bar(candle)
+        assert bar.session_type is None
+
+    def test_missing_required_field_returns_none(self):
+        """Missing required field should return None and log warning."""
+        candle = {
+            "timestamp": _ts(30, 0), "open": 21000.0,
+            # Missing high, low, close, volume
+        }
+        bar = IBKRDataFeed.candle_to_bar(candle)
+        assert bar is None
+
+    def test_optional_fields_default(self):
+        """Missing optional fields should use defaults."""
+        candle = {
+            "timestamp": _ts(30, 0), "open": 21000.0, "high": 21010.0,
+            "low": 20990.0, "close": 21005.0, "volume": 100,
+        }
+        bar = IBKRDataFeed.candle_to_bar(candle)
+        assert bar.bid_volume == 0
+        assert bar.ask_volume == 0
+        assert bar.delta == 0
+        assert bar.tick_count == 0
+        assert bar.vwap == 0.0
+
+    def test_explicit_field_mapping_no_kwargs(self):
+        """Extra keys in candle dict should NOT appear on Bar."""
+        candle = {
+            "timestamp": _ts(30, 0), "open": 21000.0, "high": 21010.0,
+            "low": 20990.0, "close": 21005.0, "volume": 100,
+            "session_type": SessionType.RTH,
+            "extra_key": "should_not_appear",
+        }
+        bar = IBKRDataFeed.candle_to_bar(candle)
+        assert not hasattr(bar, "extra_key")
+
+    def test_round_trip_candle_to_bar_accepted_by_process_bar(self):
+        """
+        Round-trip: raw candle dict → candle_to_bar → Bar → process_bar()
+        accepts it without AttributeError.
+
+        Verifies that every attribute access process_bar() makes on the bar
+        object succeeds on the adapter output.
+        """
+        from features.engine import Bar
+
+        # Simulate a CandleAggregator output dict
+        candle = {
+            "timestamp": _ts(30, 0),
+            "open": 21000.0,
+            "high": 21010.0,
+            "low": 20990.0,
+            "close": 21005.0,
+            "volume": 150,
+            "tick_count": 12,
+            "session_type": SessionType.RTH,
+        }
+
+        bar = IBKRDataFeed.candle_to_bar(candle)
+        assert isinstance(bar, Bar)
+
+        # Verify all attribute accesses that process_bar() makes:
+        # bar.timestamp (line 254: bar.timestamp.astimezone)
+        assert isinstance(bar.timestamp, datetime)
+        _ = bar.timestamp.astimezone(timezone(timedelta(hours=-5)))
+
+        # bar.volume (line 234, 241)
+        assert isinstance(bar.volume, int)
+        assert bar.volume > 0
+
+        # bar.close (line 268)
+        assert isinstance(bar.close, float)
+
+        # bar.open, bar.high, bar.low (used by feature_engine.update)
+        assert isinstance(bar.open, float)
+        assert isinstance(bar.high, float)
+        assert isinstance(bar.low, float)
+
+        # bar.session_type (stored for risk engine RTH/ETH slippage modeling)
+        assert bar.session_type == "RTH"
+
+        # Verify Bar.range and Bar.body properties work
+        assert bar.range == bar.high - bar.low
+        assert bar.body == abs(bar.close - bar.open)

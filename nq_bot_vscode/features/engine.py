@@ -38,6 +38,7 @@ class Bar:
     delta: int = 0                 # ask_volume - bid_volume
     tick_count: int = 0
     vwap: float = 0.0
+    session_type: Optional[str] = None  # "RTH" or "ETH", set by IBKRDataFeed
 
     @property
     def range(self) -> float:
