@@ -207,8 +207,18 @@ class SignalAggregator:
             rejection_reason = "Discord signal alone — requires technical or ML confluence"
 
         # === HTF BIAS GATE ===
-        if should_trade and htf_bias is not None:
-            if direction == SignalDirection.LONG and not htf_bias.htf_allows_long:
+        # CRITICAL: fail-safe — if HTF data is unavailable, block all trades.
+        # The HTF gate provides 84% of the system's edge; trading without it
+        # is trading blind.  Never default to allowing trades.
+        if should_trade:
+            if htf_bias is None:
+                should_trade = False
+                rejection_reason = (
+                    "HTF data unavailable — blocking trade (fail-safe)"
+                )
+                self._htf_blocked_count += 1
+                logger.warning("HTF FAIL-SAFE: no HTF data, blocking %s signal", direction.value)
+            elif direction == SignalDirection.LONG and not htf_bias.htf_allows_long:
                 should_trade = False
                 rejection_reason = (
                     f"HTF bias blocks long: {htf_bias.consensus_direction} "

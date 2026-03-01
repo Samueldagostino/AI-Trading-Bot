@@ -153,9 +153,11 @@ class PositionManager:
         self,
         client: IBKRClient,
         executor: IBKROrderExecutor,
+        trade_lock: Optional[asyncio.Lock] = None,
     ):
         self._client = client
         self._executor = executor
+        self._trade_lock = trade_lock  # Shared with bar processing
 
         # Position ledger
         self._open_positions: Dict[str, TrackedPosition] = {}
@@ -365,11 +367,19 @@ class PositionManager:
             logger.info("Reconciliation loop stopped")
 
     async def _reconciliation_loop(self) -> None:
-        """Run reconciliation on a fixed interval."""
+        """Run reconciliation on a fixed interval.
+
+        Acquires the shared trade lock (if provided) to prevent
+        interleaving with bar processing on shared state.
+        """
         try:
             while True:
                 await asyncio.sleep(RECONCILIATION_INTERVAL_SECONDS)
-                await self.reconcile()
+                if self._trade_lock:
+                    async with self._trade_lock:
+                        await self.reconcile()
+                else:
+                    await self.reconcile()
         except asyncio.CancelledError:
             return
 

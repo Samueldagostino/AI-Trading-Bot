@@ -156,7 +156,14 @@ class TestPipelineWiring:
         pipeline._last_bar = None
         pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
-        pipeline._htf_bias = None
+        # HTF bias must be present — fail-safe blocks trades when None
+        from features.htf_engine import HTFBiasResult
+        pipeline._htf_bias = HTFBiasResult(
+            consensus_direction="bullish",
+            consensus_strength=0.6,
+            htf_allows_long=True,
+            htf_allows_short=False,
+        )
 
         # Mock signal pipeline to produce a strong long signal
         mock_features = MagicMock()
@@ -370,7 +377,14 @@ class TestPartialFill:
         pipeline._last_bar = None
         pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
-        pipeline._htf_bias = None
+        # HTF bias must be present — fail-safe blocks trades when None
+        from features.htf_engine import HTFBiasResult
+        pipeline._htf_bias = HTFBiasResult(
+            consensus_direction="bullish",
+            consensus_strength=0.6,
+            htf_allows_long=True,
+            htf_allows_short=False,
+        )
 
         mock_features = MagicMock()
         mock_features.atr_14 = 10.0

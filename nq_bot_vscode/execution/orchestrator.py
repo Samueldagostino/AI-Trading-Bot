@@ -25,6 +25,7 @@ SignalBridge → IBKROrderExecutor → PositionManager.
 
 import asyncio
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -100,11 +101,16 @@ class IBKRLivePipeline:
         self._ibkr_config = ibkr_config or IBKRConfig()
         self._client = IBKRClient(self._ibkr_config)
         self._executor_config = executor_config or ExecutorConfig()
+        # ── Concurrency guard ──
+        # Prevents overlapping bar processing and ensures reconciliation
+        # cannot interleave with trading logic at await points.
+        self._bar_lock = asyncio.Lock()
+
         self._executor = IBKROrderExecutor(
             self._client, self._executor_config
         )
         self._position_manager = PositionManager(
-            self._client, self._executor
+            self._client, self._executor, trade_lock=self._bar_lock
         )
         self._bridge = SignalBridge(bot_config.risk)
         self._data_feed = IBKRDataFeed(self._client)
@@ -225,9 +231,14 @@ class IBKRLivePipeline:
         """
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            loop.create_task(self._process_bar(bar))
+            loop.create_task(self._process_bar_guarded(bar))
         else:
-            asyncio.run(self._process_bar(bar))
+            asyncio.run(self._process_bar_guarded(bar))
+
+    async def _process_bar_guarded(self, bar: Bar) -> Optional[Dict[str, Any]]:
+        """Serialize bar processing — prevents concurrent mutations of shared state."""
+        async with self._bar_lock:
+            return await self._process_bar(bar)
 
     async def _process_bar(self, bar: Bar) -> Optional[Dict[str, Any]]:
         """
@@ -345,6 +356,11 @@ class IBKRLivePipeline:
         if entry_direction is None:
             return None
 
+        # === NaN GUARD — NaN comparisons always return False, bypassing gates ===
+        if not math.isfinite(entry_score):
+            logger.error("HC REJECT: entry_score is NaN/Inf — blocking trade")
+            return None
+
         # === 6. HIGH-CONVICTION GATE 1 — min score ===
         if entry_score < HIGH_CONVICTION_MIN_SCORE:
             return None
@@ -359,6 +375,10 @@ class IBKRLivePipeline:
         )
 
         raw_stop = risk_assessment.suggested_stop_distance
+
+        if not math.isfinite(raw_stop):
+            logger.error("HC REJECT: stop distance is NaN/Inf — blocking trade")
+            return None
 
         # === 8. HIGH-CONVICTION GATE 2 — stop distance cap ===
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
@@ -387,10 +407,10 @@ class IBKRLivePipeline:
                 htf_bias.consensus_direction if htf_bias else "neutral"
             ),
             htf_allows_long=(
-                htf_bias.htf_allows_long if htf_bias else True
+                htf_bias.htf_allows_long if htf_bias else False
             ),
             htf_allows_short=(
-                htf_bias.htf_allows_short if htf_bias else True
+                htf_bias.htf_allows_short if htf_bias else False
             ),
             entry_source=entry_source,
             market_regime=self._current_regime,

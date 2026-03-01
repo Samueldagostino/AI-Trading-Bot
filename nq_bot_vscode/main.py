@@ -14,6 +14,7 @@ Two operating modes:
 
 import asyncio
 import logging
+import math
 import sys
 import numpy as np
 from datetime import datetime, timezone, timedelta
@@ -346,6 +347,11 @@ class TradingOrchestrator:
             )
 
         if entry_direction is not None:
+            # -- NaN GUARD: NaN comparisons always return False, bypassing gates --
+            if not math.isfinite(entry_score):
+                logger.error("HC REJECT: entry_score is NaN/Inf — blocking trade")
+                return None
+
             # -- HIGH-CONVICTION GATE 1: Signal Score --
             if entry_score < HIGH_CONVICTION_MIN_SCORE:
                 logger.debug(
@@ -367,6 +373,10 @@ class TradingOrchestrator:
             raw_stop = risk_assessment.suggested_stop_distance
             if sweep_stop_override is not None and sweep_stop_override < raw_stop:
                 raw_stop = sweep_stop_override
+
+            if not math.isfinite(raw_stop):
+                logger.error("HC REJECT: stop distance is NaN/Inf — blocking trade")
+                return None
 
             # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
             if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
@@ -657,8 +667,8 @@ class TradingOrchestrator:
             "current_regime": self._current_regime,
             "htf_consensus": htf.consensus_direction if htf else "n/a",
             "htf_strength": htf.consensus_strength if htf else 0,
-            "htf_allows_long": htf.htf_allows_long if htf else True,
-            "htf_allows_short": htf.htf_allows_short if htf else True,
+            "htf_allows_long": htf.htf_allows_long if htf else False,
+            "htf_allows_short": htf.htf_allows_short if htf else False,
             "risk_state": self.risk_engine.get_state_snapshot(),
             "signal_stats": self.signal_aggregator.get_signal_stats(),
             "scale_out_stats": self.executor.get_stats(),

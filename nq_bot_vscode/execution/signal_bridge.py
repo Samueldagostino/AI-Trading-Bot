@@ -22,6 +22,7 @@ Responsibilities:
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -130,6 +131,12 @@ class SignalBridge:
         Metadata is always populated for audit logging.
         """
         metadata = self._build_metadata(decision)
+
+        # ── NaN GUARD: NaN comparisons return False, bypassing gates ──
+        if not math.isfinite(decision.signal_score):
+            return self._reject("signal_score is NaN/Inf", metadata)
+        if not math.isfinite(decision.atr):
+            return self._reject("ATR is NaN/Inf", metadata)
 
         # ── SAFETY GATE 1: direction must be valid ──
         if decision.direction not in ("long", "short"):
