@@ -37,6 +37,8 @@ token.json
 # ── Trading Data (too large / sensitive for git) ─────────────
 data/tradingview/*.csv
 data/tradingview/*.json
+data/historical/*.csv
+data/firstrate/
 data/backtest_results/
 data/live_logs/
 *.parquet
