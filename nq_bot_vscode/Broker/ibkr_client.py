@@ -21,6 +21,7 @@ SECURITY: This module NEVER logs tokens, credentials, or session cookies.
 """
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -354,6 +355,441 @@ class CandleAggregator:
                 )
         else:
             self._consecutive_gaps = 0
+
+
+# ================================================================
+# WEBSOCKET STREAMING
+# ================================================================
+
+# Number of consecutive WebSocket failures before switching to HTTP fallback.
+WS_FALLBACK_THRESHOLD = 3
+
+# Seconds between WebSocket reconnection attempts.
+WS_RECONNECT_DELAY = 5.0
+
+
+class IBKRWebSocket:
+    """
+    WebSocket client for IBKR Client Portal Gateway streaming data.
+
+    Connects to wss://{host}:{port}/v1/api/ws and subscribes to
+    market data fields for a given conid. Parses incoming JSON
+    messages and forwards ticks to a callback.
+
+    Falls back gracefully — the caller (IBKRDataFeed) handles
+    switching to HTTP polling when this fails.
+    """
+
+    def __init__(self, config: 'IBKRConfig', conid: int):
+        self.config = config
+        self._conid = conid
+        self._ws: Optional[Any] = None
+        self._session: Optional[Any] = None
+        self._connected: bool = False
+        self._on_tick: Optional[Callable] = None
+        self._receive_task: Optional[asyncio.Task] = None
+        self._consecutive_failures: int = 0
+
+    @property
+    def ws_url(self) -> str:
+        return f"wss://{self.config.gateway_host}:{self.config.gateway_port}/v1/api/ws"
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def on_tick(self, callback: Callable) -> None:
+        """Register callback: fn(price: float, volume: int, timestamp: datetime)."""
+        self._on_tick = callback
+
+    async def connect(self) -> bool:
+        """Open WebSocket connection and subscribe to market data."""
+        if aiohttp is None:
+            logger.error("aiohttp required for WebSocket: pip install aiohttp")
+            self._consecutive_failures += 1
+            return False
+
+        try:
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+
+            connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+            self._session = aiohttp.ClientSession(connector=connector)
+            self._ws = await self._session.ws_connect(self.ws_url, ssl=ssl_ctx)
+
+            # Subscribe to market data for this conid
+            sub_msg = f'smd+{self._conid}+{{"fields":["31","84","85","86","88"]}}'
+            await self._ws.send_str(sub_msg)
+
+            self._connected = True
+            self._consecutive_failures = 0
+            logger.info("WebSocket connected to %s, subscribed conid %d",
+                        self.ws_url, self._conid)
+
+            # Start background receive loop
+            self._receive_task = asyncio.create_task(self._receive_loop())
+            return True
+
+        except Exception as e:
+            logger.warning("WebSocket connect failed: %s", e)
+            self._consecutive_failures += 1
+            await self._cleanup()
+            return False
+
+    async def disconnect(self) -> None:
+        """Unsubscribe and close WebSocket."""
+        self._connected = False
+
+        if self._receive_task and not self._receive_task.done():
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._ws and not self._ws.closed:
+            try:
+                unsub_msg = f'umd+{self._conid}+{{}}'
+                await self._ws.send_str(unsub_msg)
+            except Exception:
+                pass
+
+        await self._cleanup()
+        logger.info("WebSocket disconnected")
+
+    async def _cleanup(self) -> None:
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
+        self._ws = None
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
+        self._connected = False
+
+    async def _receive_loop(self) -> None:
+        """Read messages from WebSocket and dispatch ticks."""
+        while self._connected and self._ws and not self._ws.closed:
+            try:
+                msg = await self._ws.receive(timeout=30.0)
+
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    self._handle_message(msg.data)
+                elif msg.type == aiohttp.WSMsgType.CLOSED:
+                    logger.warning("WebSocket closed by server")
+                    break
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    logger.error("WebSocket error: %s", self._ws.exception())
+                    break
+
+            except asyncio.TimeoutError:
+                # No data in 30s — still connected, just quiet market
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("WebSocket receive error: %s", e)
+                self._consecutive_failures += 1
+                break
+
+        self._connected = False
+
+    def _handle_message(self, raw: str) -> None:
+        """Parse a WebSocket JSON message and fire tick callback."""
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return
+
+        # IBKR WS sends various message types. Market data updates
+        # contain the conid as a key or a "conid" field.
+        conid_key = str(self._conid)
+
+        # Format 1: list of updates
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and str(item.get("conid", "")) == conid_key:
+                    snap = item
+                    break
+            else:
+                return
+        # Format 2: {"conid_str": {...fields...}}
+        elif isinstance(data, dict) and conid_key in data:
+            snap = data[conid_key]
+        # Format 3: top-level dict with "conid" field
+        elif isinstance(data, dict) and data.get("conid") == self._conid:
+            snap = data
+        else:
+            return
+
+        # Extract last price (field 31)
+        last_raw = snap.get("31") or snap.get("last_price")
+        if last_raw is None:
+            return
+
+        price = IBKRClient._parse_price(last_raw)
+        if price <= 0:
+            return
+
+        ts = datetime.now(timezone.utc)
+
+        if self._on_tick:
+            self._on_tick(price, 1, ts)
+
+
+# ================================================================
+# IBKR DATA FEED — HIGH-LEVEL ORCHESTRATOR
+# ================================================================
+
+# Historical backfill: 2 hours of 2-minute bars = 60 bars.
+BACKFILL_PERIOD = "2h"
+BACKFILL_BAR_SIZE = "2min"
+
+
+class IBKRDataFeed:
+    """
+    High-level data feed that ties together:
+    - IBKRClient (REST API for auth, contract, historical data)
+    - IBKRWebSocket (primary streaming data)
+    - CandleAggregator (builds 2m candles from ticks)
+    - HTTP snapshot polling (fallback when WebSocket is down)
+
+    Lifecycle:
+        feed = IBKRDataFeed(client)
+        feed.on_bar(my_callback)
+        await feed.start()     # backfill + stream
+        ...
+        await feed.stop()
+
+    The on_bar callback receives dicts matching features.engine.Bar:
+        {"timestamp", "open", "high", "low", "close", "volume",
+         "tick_count", "session_type"}
+    """
+
+    def __init__(self, client: 'IBKRClient'):
+        self._client = client
+        self._aggregator = CandleAggregator()
+        self._ws: Optional[IBKRWebSocket] = None
+
+        # Callbacks
+        self._on_bar: Optional[Callable] = None
+
+        # State
+        self._running: bool = False
+        self._data_mode: str = "none"  # "websocket" | "polling" | "none"
+        self._monitor_task: Optional[asyncio.Task] = None
+        self._backfill_bars: List[dict] = []
+
+        # Wire aggregator candle output to our bar dispatch
+        self._aggregator.on_candle(self._dispatch_bar)
+
+    def on_bar(self, callback: Callable) -> None:
+        """Register callback for completed 2-minute bars."""
+        self._on_bar = callback
+
+    def get_current_price(self) -> Optional[Dict[str, float]]:
+        """Return latest bid/ask/last from the underlying client."""
+        return self._client.get_current_price()
+
+    def is_connected(self) -> bool:
+        """True if feed is running and receiving data."""
+        if not self._running:
+            return False
+        if self._data_mode == "websocket":
+            return self._ws is not None and self._ws.is_connected
+        if self._data_mode == "polling":
+            return self._client.is_connected
+        return False
+
+    def get_status(self) -> dict:
+        return {
+            "running": self._running,
+            "data_mode": self._data_mode,
+            "ws_connected": self._ws.is_connected if self._ws else False,
+            "backfill_bars": len(self._backfill_bars),
+            "aggregator": self._aggregator.get_stats(),
+            "client": self._client.get_status(),
+        }
+
+    # ================================================================
+    # LIFECYCLE
+    # ================================================================
+
+    async def start(self) -> bool:
+        """
+        Start the data feed:
+        1. Verify client is connected
+        2. Run historical backfill (2h of 2m bars)
+        3. Try WebSocket streaming (primary)
+        4. Fall back to HTTP polling if WS fails
+        5. Start health monitor
+        """
+        if not self._client.is_connected:
+            logger.error("IBKRDataFeed.start(): client not connected")
+            return False
+
+        if not self._client.contract:
+            logger.error("IBKRDataFeed.start(): no contract resolved")
+            return False
+
+        self._running = True
+
+        # Step 1: Historical backfill
+        await self._run_backfill()
+
+        # Step 2: Try WebSocket
+        ws_ok = await self._start_websocket()
+        if ws_ok:
+            self._data_mode = "websocket"
+            logger.info("Data feed started — mode: WebSocket")
+        else:
+            # Step 3: Fallback to HTTP polling
+            await self._start_polling()
+            self._data_mode = "polling"
+            logger.info("Data feed started — mode: HTTP polling (WebSocket unavailable)")
+
+        # Step 4: Health monitor
+        self._monitor_task = asyncio.create_task(self._health_monitor())
+
+        return True
+
+    async def stop(self) -> None:
+        """Stop all data feed activity."""
+        self._running = False
+
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._ws:
+            await self._ws.disconnect()
+            self._ws = None
+
+        await self._client.stop_polling()
+
+        # Flush any partial candle
+        self._aggregator.flush()
+
+        self._data_mode = "none"
+        logger.info("Data feed stopped")
+
+    # ================================================================
+    # HISTORICAL BACKFILL
+    # ================================================================
+
+    async def _run_backfill(self) -> None:
+        """
+        Fetch 2 hours of 2-minute historical bars for indicator warmup.
+        Dispatches each bar through the on_bar callback.
+        """
+        logger.info("Starting historical backfill (%s, %s)...",
+                     BACKFILL_PERIOD, BACKFILL_BAR_SIZE)
+
+        raw_bars = await self._client.get_historical_bars(
+            period=BACKFILL_PERIOD,
+            bar_size=BACKFILL_BAR_SIZE,
+        )
+
+        if not raw_bars:
+            logger.warning("Backfill returned no data — indicators will cold-start")
+            return
+
+        self._backfill_bars = raw_bars
+        count = 0
+
+        for bar_dict in raw_bars:
+            # Add session_type tag to match CandleAggregator output format
+            bar_dict["session_type"] = get_session_type(bar_dict["timestamp"])
+            bar_dict.setdefault("tick_count", 0)
+
+            if self._on_bar:
+                self._on_bar(bar_dict)
+                count += 1
+
+        logger.info("Backfill complete: %d bars dispatched for warmup", count)
+
+    # ================================================================
+    # WEBSOCKET STREAMING (PRIMARY)
+    # ================================================================
+
+    async def _start_websocket(self) -> bool:
+        """Attempt to connect WebSocket and wire it to the aggregator."""
+        conid = self._client.contract.conid
+        self._ws = IBKRWebSocket(self._client.config, conid)
+        self._ws.on_tick(self._aggregator.process_tick)
+
+        return await self._ws.connect()
+
+    # ================================================================
+    # HTTP POLLING FALLBACK
+    # ================================================================
+
+    async def _start_polling(self) -> None:
+        """Start HTTP snapshot polling and wire snapshots to the aggregator."""
+        self._client.on_snapshot(self._on_poll_snapshot)
+        await self._client.start_polling()
+
+    async def _on_poll_snapshot(self, snapshot: 'MarketSnapshot') -> None:
+        """Convert HTTP snapshot to tick for the aggregator."""
+        if snapshot.last_price > 0:
+            self._aggregator.process_tick(
+                snapshot.last_price,
+                1,
+                snapshot.timestamp or datetime.now(timezone.utc),
+            )
+
+    # ================================================================
+    # HEALTH MONITOR
+    # ================================================================
+
+    async def _health_monitor(self) -> None:
+        """
+        Background loop that monitors data feed health.
+        - If WebSocket drops, switch to HTTP polling.
+        - If WebSocket recovers, switch back from polling.
+        """
+        while self._running:
+            try:
+                await asyncio.sleep(10.0)
+
+                if self._data_mode == "websocket":
+                    if self._ws and not self._ws.is_connected:
+                        logger.warning("WebSocket lost — attempting reconnect...")
+                        reconnected = await self._ws.connect()
+                        if not reconnected:
+                            if self._ws._consecutive_failures >= WS_FALLBACK_THRESHOLD:
+                                logger.warning(
+                                    "WebSocket failed %d times — falling back to HTTP polling",
+                                    self._ws._consecutive_failures,
+                                )
+                                await self._start_polling()
+                                self._data_mode = "polling"
+
+                elif self._data_mode == "polling":
+                    # Periodically try to upgrade back to WebSocket
+                    if self._ws and not self._ws.is_connected:
+                        reconnected = await self._ws.connect()
+                        if reconnected:
+                            logger.info("WebSocket reconnected — switching back from polling")
+                            await self._client.stop_polling()
+                            self._data_mode = "websocket"
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Health monitor error: %s", e)
+
+    # ================================================================
+    # BAR DISPATCH
+    # ================================================================
+
+    def _dispatch_bar(self, candle: dict) -> None:
+        """Forward a completed candle to the on_bar callback."""
+        if self._on_bar:
+            self._on_bar(candle)
 
 
 # ================================================================

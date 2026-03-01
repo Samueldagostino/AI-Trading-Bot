@@ -11,26 +11,34 @@ Tests:
 - Candle aggregation from tick/snapshot data
 - Session type detection (RTH vs ETH)
 - Data quality checks (zero volume, high < low, gap detection)
+- WebSocket streaming and HTTP polling fallback
+- IBKRDataFeed lifecycle, backfill, and health monitoring
 """
 
 import asyncio
+import json
 import math
 import time
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock, call
 
 from Broker.ibkr_client import (
     IBKRClient,
     IBKRConfig,
+    IBKRDataFeed,
+    IBKRWebSocket,
     CandleAggregator,
     ContractInfo,
     MarketSnapshot,
     SessionType,
     get_session_type,
+    BACKFILL_BAR_SIZE,
+    BACKFILL_PERIOD,
     CANDLE_INTERVAL_SECONDS,
     CONSECUTIVE_GAP_ALERT_THRESHOLD,
     SNAPSHOT_FIELDS,
+    WS_FALLBACK_THRESHOLD,
 )
 
 
@@ -893,3 +901,559 @@ class TestDataQualityChecks:
         assert CandleAggregator._validate_candle({
             "volume": 10, "high": 80.0, "low": 90.0,
         }) == "high_lt_low"
+
+
+# ================================================================
+# WEBSOCKET TESTS
+# ================================================================
+
+@pytest.fixture
+def ws(config):
+    return IBKRWebSocket(config, conid=654321)
+
+
+class TestIBKRWebSocket:
+    """Tests for WebSocket streaming client."""
+
+    def test_ws_url(self, ws):
+        assert ws.ws_url == "wss://localhost:5000/v1/api/ws"
+
+    def test_initial_state(self, ws):
+        assert ws.is_connected is False
+        assert ws._consecutive_failures == 0
+
+    def test_on_tick_registration(self, ws):
+        """on_tick() should register a callback."""
+        callback = MagicMock()
+        ws.on_tick(callback)
+        assert ws._on_tick is callback
+
+    def test_handle_message_conid_key(self, ws):
+        """Should parse message where conid is the top-level key."""
+        received = []
+        ws.on_tick(lambda p, v, t: received.append(p))
+
+        msg = json.dumps({"654321": {"31": "21050.25"}})
+        ws._handle_message(msg)
+
+        assert len(received) == 1
+        assert received[0] == 21050.25
+
+    def test_handle_message_conid_field(self, ws):
+        """Should parse message with conid as a field."""
+        received = []
+        ws.on_tick(lambda p, v, t: received.append(p))
+
+        msg = json.dumps({"conid": 654321, "31": 21000.0})
+        ws._handle_message(msg)
+
+        assert len(received) == 1
+        assert received[0] == 21000.0
+
+    def test_handle_message_list_format(self, ws):
+        """Should parse list-of-updates format."""
+        received = []
+        ws.on_tick(lambda p, v, t: received.append(p))
+
+        msg = json.dumps([
+            {"conid": 999, "31": 10000.0},
+            {"conid": 654321, "31": "21075.50"},
+        ])
+        ws._handle_message(msg)
+
+        assert len(received) == 1
+        assert received[0] == 21075.50
+
+    def test_handle_message_no_price(self, ws):
+        """Should ignore messages without field 31."""
+        received = []
+        ws.on_tick(lambda p, v, t: received.append(p))
+
+        msg = json.dumps({"654321": {"84": "21050.0"}})
+        ws._handle_message(msg)
+
+        assert len(received) == 0
+
+    def test_handle_message_wrong_conid(self, ws):
+        """Should ignore messages for other conids."""
+        received = []
+        ws.on_tick(lambda p, v, t: received.append(p))
+
+        msg = json.dumps({"999999": {"31": "21050.25"}})
+        ws._handle_message(msg)
+
+        assert len(received) == 0
+
+    def test_handle_message_invalid_json(self, ws):
+        """Should silently handle invalid JSON."""
+        received = []
+        ws.on_tick(lambda p, v, t: received.append(p))
+
+        ws._handle_message("not json")
+        ws._handle_message("")
+        ws._handle_message("{bad")
+
+        assert len(received) == 0
+
+    def test_handle_message_zero_price(self, ws):
+        """Should ignore zero price ticks."""
+        received = []
+        ws.on_tick(lambda p, v, t: received.append(p))
+
+        msg = json.dumps({"654321": {"31": "0.0"}})
+        ws._handle_message(msg)
+
+        assert len(received) == 0
+
+    def test_handle_message_c_prefix(self, ws):
+        """Should handle IBKR 'C' prefix on closing prices."""
+        received = []
+        ws.on_tick(lambda p, v, t: received.append(p))
+
+        msg = json.dumps({"654321": {"31": "C21050.25"}})
+        ws._handle_message(msg)
+
+        assert len(received) == 1
+        assert received[0] == 21050.25
+
+    @pytest.mark.asyncio
+    async def test_connect_failure_increments_counter(self, ws):
+        """Failed connect should increment consecutive_failures."""
+        # No real gateway → connection will fail
+        ws.config = IBKRConfig(gateway_host="127.0.0.1", gateway_port=59999)
+
+        result = await ws.connect()
+
+        assert result is False
+        assert ws._consecutive_failures == 1
+        assert ws.is_connected is False
+
+    @pytest.mark.asyncio
+    async def test_disconnect_cleans_up(self, ws):
+        """Disconnect should reset state even if not connected."""
+        ws._connected = False
+        await ws.disconnect()
+        assert ws.is_connected is False
+        assert ws._ws is None
+
+
+# ================================================================
+# IBKR DATA FEED FIXTURES
+# ================================================================
+
+def _make_connected_client(config=None):
+    """Create a mock IBKRClient that appears connected."""
+    client = IBKRClient(config or IBKRConfig())
+    client._connected = True
+    client._session_valid = True
+    client._contract = ContractInfo(conid=654321, symbol="MNQH6", expiry="20260320")
+    client._last_snapshot = MarketSnapshot(
+        conid=654321, last_price=21050.0, bid=21049.75, ask=21050.25,
+        timestamp=datetime.now(timezone.utc),
+    )
+    return client
+
+
+def _make_backfill_bars(count: int = 5) -> list:
+    """Generate synthetic backfill bar dicts."""
+    base_ts = datetime(2026, 2, 28, 14, 0, 0, tzinfo=timezone.utc)
+    bars = []
+    for i in range(count):
+        ts = base_ts + timedelta(minutes=i * 2)
+        bars.append({
+            "timestamp": ts,
+            "open": round(21000.0 + i * 5, 2),
+            "high": round(21010.0 + i * 5, 2),
+            "low": round(20990.0 + i * 5, 2),
+            "close": round(21005.0 + i * 5, 2),
+            "volume": 100 + i * 10,
+        })
+    return bars
+
+
+@pytest.fixture
+def mock_client():
+    return _make_connected_client()
+
+
+@pytest.fixture
+def feed(mock_client):
+    return IBKRDataFeed(mock_client)
+
+
+# ================================================================
+# IBKR DATA FEED TESTS
+# ================================================================
+
+class TestIBKRDataFeed:
+    """Tests for the high-level data feed orchestrator."""
+
+    def test_initial_state(self, feed):
+        assert feed._running is False
+        assert feed._data_mode == "none"
+        assert feed.is_connected() is False
+
+    def test_on_bar_registration(self, feed):
+        callback = MagicMock()
+        feed.on_bar(callback)
+        assert feed._on_bar is callback
+
+    def test_get_current_price(self, feed):
+        """get_current_price delegates to the underlying client."""
+        prices = feed.get_current_price()
+        assert prices is not None
+        assert prices["last"] == 21050.0
+        assert prices["bid"] == 21049.75
+        assert prices["ask"] == 21050.25
+
+    def test_get_current_price_no_snapshot(self, feed):
+        """Should return None if client has no snapshot."""
+        feed._client._last_snapshot = None
+        assert feed.get_current_price() is None
+
+    def test_is_connected_not_running(self, feed):
+        """Should be False when feed is not running."""
+        assert feed.is_connected() is False
+
+    def test_is_connected_websocket_mode(self, feed):
+        """Should reflect WebSocket state when in ws mode."""
+        feed._running = True
+        feed._data_mode = "websocket"
+        feed._ws = MagicMock()
+        feed._ws.is_connected = True
+        assert feed.is_connected() is True
+
+        feed._ws.is_connected = False
+        assert feed.is_connected() is False
+
+    def test_is_connected_polling_mode(self, feed):
+        """Should reflect client connection in polling mode."""
+        feed._running = True
+        feed._data_mode = "polling"
+        assert feed.is_connected() is True  # mock_client is connected
+
+        feed._client._session_valid = False
+        assert feed.is_connected() is False
+
+    def test_get_status(self, feed):
+        status = feed.get_status()
+        assert status["running"] is False
+        assert status["data_mode"] == "none"
+        assert status["ws_connected"] is False
+        assert "aggregator" in status
+        assert "client" in status
+
+    def test_dispatch_bar(self, feed):
+        """_dispatch_bar should forward candle to on_bar callback."""
+        received = []
+        feed.on_bar(lambda c: received.append(c))
+
+        candle = {"timestamp": _ts(0, 0), "open": 21000.0}
+        feed._dispatch_bar(candle)
+
+        assert len(received) == 1
+        assert received[0]["open"] == 21000.0
+
+    def test_dispatch_bar_no_callback(self, feed):
+        """_dispatch_bar should not fail with no callback."""
+        feed._on_bar = None
+        feed._dispatch_bar({"open": 21000.0})  # Should not raise
+
+
+# ================================================================
+# BACKFILL TESTS
+# ================================================================
+
+class TestBackfill:
+    """Tests for historical data backfill."""
+
+    @pytest.mark.asyncio
+    async def test_backfill_dispatches_bars(self, feed):
+        """Backfill should fetch history and dispatch each bar."""
+        bars = _make_backfill_bars(5)
+        feed._client.get_historical_bars = AsyncMock(return_value=bars)
+
+        received = []
+        feed.on_bar(lambda c: received.append(c))
+
+        await feed._run_backfill()
+
+        assert len(received) == 5
+        assert feed._backfill_bars == bars
+        # Each bar should have session_type added
+        for bar in received:
+            assert "session_type" in bar
+            assert isinstance(bar["session_type"], SessionType)
+            assert "tick_count" in bar
+
+    @pytest.mark.asyncio
+    async def test_backfill_uses_correct_params(self, feed):
+        """Backfill should request 2h of 2min bars."""
+        feed._client.get_historical_bars = AsyncMock(return_value=[])
+
+        await feed._run_backfill()
+
+        feed._client.get_historical_bars.assert_called_once_with(
+            period=BACKFILL_PERIOD,
+            bar_size=BACKFILL_BAR_SIZE,
+        )
+
+    @pytest.mark.asyncio
+    async def test_backfill_empty_data(self, feed):
+        """Backfill should handle empty response gracefully."""
+        feed._client.get_historical_bars = AsyncMock(return_value=[])
+
+        received = []
+        feed.on_bar(lambda c: received.append(c))
+
+        await feed._run_backfill()
+
+        assert len(received) == 0
+        assert feed._backfill_bars == []
+
+    @pytest.mark.asyncio
+    async def test_backfill_preserves_existing_fields(self, feed):
+        """Backfill should not overwrite existing bar fields."""
+        bars = _make_backfill_bars(1)
+        bars[0]["tick_count"] = 42  # Pre-existing
+        feed._client.get_historical_bars = AsyncMock(return_value=bars)
+
+        received = []
+        feed.on_bar(lambda c: received.append(c))
+
+        await feed._run_backfill()
+
+        # tick_count should not be overwritten by setdefault
+        assert received[0]["tick_count"] == 42
+
+    @pytest.mark.asyncio
+    async def test_backfill_no_callback(self, feed):
+        """Backfill with no on_bar callback should not fail."""
+        bars = _make_backfill_bars(3)
+        feed._client.get_historical_bars = AsyncMock(return_value=bars)
+        feed._on_bar = None
+
+        await feed._run_backfill()  # Should not raise
+
+        assert feed._backfill_bars == bars
+
+
+# ================================================================
+# DATA FEED START/STOP TESTS
+# ================================================================
+
+class TestDataFeedLifecycle:
+    """Tests for IBKRDataFeed start/stop flow."""
+
+    @pytest.mark.asyncio
+    async def test_start_fails_if_client_not_connected(self, feed):
+        """start() should fail if client is not connected."""
+        feed._client._connected = False
+        feed._client._session_valid = False
+
+        result = await feed.start()
+        assert result is False
+        assert feed._running is False
+
+    @pytest.mark.asyncio
+    async def test_start_fails_if_no_contract(self, feed):
+        """start() should fail if no contract resolved."""
+        feed._client._contract = None
+
+        result = await feed.start()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_start_websocket_success(self, feed):
+        """start() should use WebSocket when it connects."""
+        feed._client.get_historical_bars = AsyncMock(return_value=[])
+
+        mock_ws = MagicMock(spec=IBKRWebSocket)
+        mock_ws.connect = AsyncMock(return_value=True)
+        mock_ws.is_connected = True
+        mock_ws._consecutive_failures = 0
+
+        with patch.object(feed, '_start_websocket', new_callable=AsyncMock, return_value=True):
+            result = await feed.start()
+
+        assert result is True
+        assert feed._running is True
+        assert feed._data_mode == "websocket"
+
+        # Cleanup
+        await feed.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_falls_back_to_polling(self, feed):
+        """start() should fall back to polling if WebSocket fails."""
+        feed._client.get_historical_bars = AsyncMock(return_value=[])
+        feed._client.start_polling = AsyncMock()
+        feed._client.stop_polling = AsyncMock()
+
+        with patch.object(feed, '_start_websocket', new_callable=AsyncMock, return_value=False):
+            result = await feed.start()
+
+        assert result is True
+        assert feed._data_mode == "polling"
+        feed._client.start_polling.assert_called_once()
+
+        await feed.stop()
+
+    @pytest.mark.asyncio
+    async def test_stop_cleans_up(self, feed):
+        """stop() should cancel tasks and reset state."""
+        feed._running = True
+        feed._data_mode = "websocket"
+
+        mock_ws = MagicMock(spec=IBKRWebSocket)
+        mock_ws.disconnect = AsyncMock()
+        feed._ws = mock_ws
+
+        feed._client.stop_polling = AsyncMock()
+
+        await feed.stop()
+
+        assert feed._running is False
+        assert feed._data_mode == "none"
+        mock_ws.disconnect.assert_called_once()
+        feed._client.stop_polling.assert_called_once()
+
+
+# ================================================================
+# POLLING FALLBACK TESTS
+# ================================================================
+
+class TestPollingFallback:
+    """Tests for HTTP polling fallback data path."""
+
+    @pytest.mark.asyncio
+    async def test_on_poll_snapshot_feeds_aggregator(self, feed):
+        """Snapshots from polling should be fed to the aggregator."""
+        received = []
+        feed.on_bar(lambda c: received.append(c))
+
+        # Feed snapshots that span two 2-min windows
+        snap1 = MarketSnapshot(conid=654321, last_price=21000.0,
+                               timestamp=_ts(0, 0))
+        snap2 = MarketSnapshot(conid=654321, last_price=21010.0,
+                               timestamp=_ts(0, 30))
+        snap3 = MarketSnapshot(conid=654321, last_price=21005.0,
+                               timestamp=_ts(2, 0))  # new window → emit
+
+        await feed._on_poll_snapshot(snap1)
+        await feed._on_poll_snapshot(snap2)
+        await feed._on_poll_snapshot(snap3)
+
+        assert len(received) == 1
+        assert received[0]["open"] == 21000.0
+        assert received[0]["high"] == 21010.0
+
+    @pytest.mark.asyncio
+    async def test_on_poll_snapshot_ignores_zero_price(self, feed):
+        """Snapshots with zero price should be ignored."""
+        snap = MarketSnapshot(conid=654321, last_price=0.0,
+                              timestamp=_ts(0, 0))
+
+        await feed._on_poll_snapshot(snap)
+
+        assert feed._aggregator._ticks_processed == 0
+
+    @pytest.mark.asyncio
+    async def test_on_poll_snapshot_uses_now_if_no_timestamp(self, feed):
+        """Should use current time if snapshot has no timestamp."""
+        snap = MarketSnapshot(conid=654321, last_price=21000.0,
+                              timestamp=None)
+
+        await feed._on_poll_snapshot(snap)
+
+        assert feed._aggregator._ticks_processed == 1
+
+
+# ================================================================
+# HEALTH MONITOR TESTS
+# ================================================================
+
+class TestHealthMonitor:
+    """Tests for the background health monitoring logic."""
+
+    def test_ws_fallback_threshold_constant(self):
+        """WS_FALLBACK_THRESHOLD should be 3."""
+        assert WS_FALLBACK_THRESHOLD == 3
+
+    def test_backfill_constants(self):
+        """Backfill should request 2h of 2min bars."""
+        assert BACKFILL_PERIOD == "2h"
+        assert BACKFILL_BAR_SIZE == "2min"
+
+    def test_feed_aggregator_wired(self, feed):
+        """CandleAggregator should dispatch to feed's on_bar callback."""
+        received = []
+        feed.on_bar(lambda c: received.append(c))
+
+        # Manually push ticks through the aggregator
+        feed._aggregator.process_tick(21000.0, 1, _ts(0, 0))
+        feed._aggregator.process_tick(21010.0, 1, _ts(2, 0))
+
+        assert len(received) == 1
+        assert received[0]["open"] == 21000.0
+
+
+# ================================================================
+# INTEGRATION-STYLE TESTS
+# ================================================================
+
+class TestDataFeedIntegration:
+    """End-to-end tests for tick→candle→callback pipeline."""
+
+    def test_ws_tick_to_bar_pipeline(self):
+        """WebSocket tick → aggregator → on_bar callback."""
+        client = _make_connected_client()
+        feed = IBKRDataFeed(client)
+
+        received = []
+        feed.on_bar(lambda c: received.append(c))
+
+        # Simulate WebSocket ticks flowing through the aggregator
+        agg = feed._aggregator
+
+        # Window 1: [14:30, 14:32) — 14:30 UTC = 9:30 ET = RTH
+        agg.process_tick(21000.0, 1, _ts(30, 0))
+        agg.process_tick(21010.0, 1, _ts(30, 30))
+        agg.process_tick(20990.0, 1, _ts(31, 0))
+        agg.process_tick(21005.0, 1, _ts(31, 30))
+
+        # Window 2 starts → emits candle 1
+        agg.process_tick(21020.0, 1, _ts(32, 0))
+
+        assert len(received) == 1
+        bar = received[0]
+        assert bar["open"] == 21000.0
+        assert bar["high"] == 21010.0
+        assert bar["low"] == 20990.0
+        assert bar["close"] == 21005.0
+        assert bar["volume"] == 4
+        assert bar["session_type"] == SessionType.RTH
+
+    @pytest.mark.asyncio
+    async def test_backfill_then_live_ticks(self):
+        """Backfill bars followed by live ticks should all dispatch."""
+        client = _make_connected_client()
+        backfill_bars = _make_backfill_bars(3)
+        client.get_historical_bars = AsyncMock(return_value=backfill_bars)
+
+        feed = IBKRDataFeed(client)
+        received = []
+        feed.on_bar(lambda c: received.append(c))
+
+        # Step 1: Backfill
+        await feed._run_backfill()
+        assert len(received) == 3  # 3 backfill bars
+
+        # Step 2: Live ticks
+        feed._aggregator.process_tick(21100.0, 1, _ts(30, 0))
+        feed._aggregator.process_tick(21110.0, 1, _ts(32, 0))  # new window → emit
+
+        assert len(received) == 4  # 3 backfill + 1 live candle
+        live_bar = received[3]
+        assert live_bar["open"] == 21100.0
+        assert live_bar["close"] == 21100.0
