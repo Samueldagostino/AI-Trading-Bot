@@ -68,6 +68,7 @@ from collections import deque
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 # Ensure project root is on path
 script_dir = Path(__file__).resolve().parent
@@ -185,9 +186,8 @@ def filter_by_date(
 # SESSION RULES (same logic as TradovatePaperConnector)
 # ================================================================
 def bar_to_et(bar_time: datetime) -> datetime:
-    """Convert a UTC bar timestamp to ET (EST, UTC-5)."""
-    et_offset = timezone(timedelta(hours=-5))
-    return bar_time.astimezone(et_offset)
+    """Convert a UTC bar timestamp to ET — DST-aware via ZoneInfo."""
+    return bar_time.astimezone(ZoneInfo("America/New_York"))
 
 
 def is_within_session(et_time: datetime) -> bool:

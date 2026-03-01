@@ -16,6 +16,7 @@ from datetime import datetime, timezone, timedelta, time
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 from enum import Enum
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -424,10 +425,9 @@ class RiskEngine:
 
     def _is_overnight(self, current_time: datetime) -> bool:
         """Check if current time is in overnight/thin liquidity session."""
-        # Convert to ET (UTC-5 or UTC-4 during DST)
-        # Simplified: assume UTC-5 for consistency
-        et_hour = (current_time.hour - 5) % 24
-        return (et_hour >= self.config.overnight_start_hour or 
+        et_time = current_time.astimezone(ZoneInfo("America/New_York"))
+        et_hour = et_time.hour
+        return (et_hour >= self.config.overnight_start_hour or
                 et_hour < self.config.overnight_end_hour)
 
     def _is_near_news_event(self, current_time: datetime) -> bool:

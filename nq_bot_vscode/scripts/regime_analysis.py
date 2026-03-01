@@ -23,6 +23,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional, Tuple
 
 script_dir = Path(__file__).resolve().parent
@@ -42,9 +43,9 @@ EXEC_TF = "2m"
 
 def classify_session(ts: datetime) -> str:
     """Classify entry timestamp into trading session (ET)."""
-    # Convert UTC to ET (UTC-5, ignoring DST for simplicity)
-    et_hour = (ts.hour - 5) % 24
-    et_minute = ts.minute
+    et_time_obj = ts.astimezone(ZoneInfo("America/New_York"))
+    et_hour = et_time_obj.hour
+    et_minute = et_time_obj.minute
 
     et_time = et_hour * 60 + et_minute
 

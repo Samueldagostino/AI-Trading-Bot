@@ -19,6 +19,7 @@ import sys
 import numpy as np
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
+from zoneinfo import ZoneInfo
 
 from config.settings import BotConfig, CONFIG
 from database.connection import DatabaseManager
@@ -251,8 +252,7 @@ class TradingOrchestrator:
         sweep_signal = None
         if self._sweep_enabled:
             # Determine if we're in RTH
-            et_offset = timezone(timedelta(hours=-5))
-            et_time = bar.timestamp.astimezone(et_offset)
+            et_time = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
             h, m = et_time.hour, et_time.minute
             t = h + m / 60.0
             is_rth = 9.5 <= t < 16.0

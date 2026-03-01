@@ -32,6 +32,7 @@ import argparse
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -39,6 +40,7 @@ import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict
+from zoneinfo import ZoneInfo
 
 # Ensure project root is on path
 script_dir = Path(__file__).resolve().parent
@@ -443,7 +445,11 @@ def main():
         datefmt="%H:%M:%S",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(str(LOGS_DIR / "paper_trading.log")),
+            logging.handlers.RotatingFileHandler(
+                str(LOGS_DIR / "paper_trading.log"),
+                maxBytes=10 * 1024 * 1024,  # 10 MB
+                backupCount=5,
+            ),
         ],
     )
 

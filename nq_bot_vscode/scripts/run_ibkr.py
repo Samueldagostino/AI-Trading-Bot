@@ -42,6 +42,7 @@ import argparse
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -77,6 +78,7 @@ from Broker.ibkr_client import (
     get_session_type,
     SessionType,
     ET_OFFSET,
+    ET_TZ,
 )
 from Broker.order_executor import ExecutorConfig
 from execution.orchestrator import IBKRLivePipeline, PipelineState
@@ -400,7 +402,7 @@ class IBKRLiveRunner:
             return
 
         now_utc = datetime.now(timezone.utc)
-        et_now = now_utc.astimezone(ET_OFFSET)
+        et_now = now_utc.astimezone(ET_TZ)
         session = get_session_type(now_utc)
 
         pipeline = self._pipeline
@@ -715,7 +717,11 @@ def main():
     ))
     root_logger.addHandler(console_handler)
 
-    file_handler = logging.FileHandler(str(LOGS_DIR / "ibkr_trading.log"))
+    file_handler = logging.handlers.RotatingFileHandler(
+        str(LOGS_DIR / "ibkr_trading.log"),
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,
+    )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter(
         "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -723,7 +729,11 @@ def main():
     ))
     root_logger.addHandler(file_handler)
 
-    error_handler = logging.FileHandler(str(ERRORS_LOG))
+    error_handler = logging.handlers.RotatingFileHandler(
+        str(ERRORS_LOG),
+        maxBytes=5 * 1024 * 1024,  # 5 MB
+        backupCount=3,
+    )
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(logging.Formatter(
         "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s\n%(exc_info)s",

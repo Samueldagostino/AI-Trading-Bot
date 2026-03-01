@@ -18,6 +18,7 @@ import json
 import copy
 import logging
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -306,9 +307,9 @@ def compute_kill_save_matrix(config_a_trades: list, htf_snapshots: dict, gate: f
 
 def get_session_bucket(ts: datetime) -> str:
     """Classify timestamp into trading session bucket (ET)."""
-    # Convert UTC to ET (EST = UTC-5, EDT = UTC-4; Feb is EST)
-    et_hour = (ts.hour - 5) % 24
-    et_minute = ts.minute
+    et_time_obj = ts.astimezone(ZoneInfo("America/New_York"))
+    et_hour = et_time_obj.hour
+    et_minute = et_time_obj.minute
 
     time_decimal = et_hour + et_minute / 60.0
 

@@ -42,6 +42,7 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 # ── Project path setup ──
 script_dir = Path(__file__).resolve().parent
@@ -761,9 +762,7 @@ def update_viz_data(
 
 def is_friday_rth_close() -> bool:
     """Check if current time is Friday at/after RTH close (16:00 ET)."""
-    # ET is UTC-5 (ignoring DST for simplicity — matches Broker/ibkr_client.py)
-    et_offset = timedelta(hours=-5)
-    et_now = datetime.now(timezone(et_offset))
+    et_now = datetime.now(ZoneInfo("America/New_York"))
     return (
         et_now.weekday() == 4  # Friday
         and et_now.hour >= RTH_CLOSE_HOUR
