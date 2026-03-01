@@ -764,20 +764,48 @@ def main():
         logger.info("Shutdown signal received (SIGINT/SIGTERM)")
         runner.request_shutdown()
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _signal_handler)
+    # add_signal_handler is Unix-only; on Windows, fall through to
+    # the KeyboardInterrupt handler below.
+    if sys.platform != "win32":
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, _signal_handler)
+    else:
+        logger.info(
+            "Windows detected — using KeyboardInterrupt for Ctrl+C shutdown"
+        )
+
+    # Shutdown timeout: if flatten/cancel hangs, force exit after 30s
+    SHUTDOWN_TIMEOUT_SECONDS = 30
 
     try:
         loop.run_until_complete(runner.start())
     except KeyboardInterrupt:
-        loop.run_until_complete(runner.shutdown())
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(runner.shutdown(), timeout=SHUTDOWN_TIMEOUT_SECONDS)
+            )
+        except asyncio.TimeoutError:
+            logger.critical(
+                "Shutdown timed out after %ds — "
+                "MANUAL POSITION CHECK REQUIRED",
+                SHUTDOWN_TIMEOUT_SECONDS,
+            )
     except Exception:
         # NEVER leave positions open on crash
         logger.critical(
             "UNHANDLED EXCEPTION — flattening all positions\n%s",
             traceback.format_exc(),
         )
-        loop.run_until_complete(runner.shutdown())
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(runner.shutdown(), timeout=SHUTDOWN_TIMEOUT_SECONDS)
+            )
+        except asyncio.TimeoutError:
+            logger.critical(
+                "Shutdown timed out after %ds — "
+                "MANUAL POSITION CHECK REQUIRED",
+                SHUTDOWN_TIMEOUT_SECONDS,
+            )
         sys.exit(1)
     finally:
         loop.close()

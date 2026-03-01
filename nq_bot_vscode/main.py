@@ -651,8 +651,11 @@ class TradingOrchestrator:
                 for r in rows
             ]
             self.risk_engine.load_economic_calendar(events)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "Economic calendar load failed: %s — "
+                "risk engine will proceed without event awareness", e
+            )
 
     # ================================================================
     # STATUS

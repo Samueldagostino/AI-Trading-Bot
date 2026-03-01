@@ -256,6 +256,17 @@ class IBKRLivePipeline:
         if self._executor.is_halted:
             return None
 
+        # === 0. SESSION VALIDITY — halt if gateway session expired ===
+        if hasattr(self, '_client') and self._client and not self._client.is_connected:
+            logger.error(
+                "Gateway session invalid — halting pipeline to prevent "
+                "silent order failures"
+            )
+            self._state = PipelineState.HALTED
+            self._executor._state.is_halted = True
+            self._executor._state.halt_reason = "Gateway session expired"
+            return None
+
         self._bars_processed += 1
         self._last_bar = bar
 

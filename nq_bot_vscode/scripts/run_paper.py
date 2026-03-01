@@ -35,6 +35,7 @@ import logging
 import os
 import signal
 import sys
+import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict
@@ -455,13 +456,28 @@ def main():
         logger.info("Shutdown signal received")
         runner.request_shutdown()
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _signal_handler)
+    # add_signal_handler is Unix-only; on Windows, fall through to
+    # the KeyboardInterrupt handler below.
+    if sys.platform != "win32":
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, _signal_handler)
+    else:
+        logger.info(
+            "Windows detected — using KeyboardInterrupt for Ctrl+C shutdown"
+        )
 
     try:
         loop.run_until_complete(runner.start())
     except KeyboardInterrupt:
         loop.run_until_complete(runner.shutdown())
+    except Exception:
+        # NEVER leave positions open on crash
+        logger.critical(
+            "UNHANDLED EXCEPTION — flattening all positions\n%s",
+            traceback.format_exc(),
+        )
+        loop.run_until_complete(runner.shutdown())
+        sys.exit(1)
     finally:
         loop.close()
 

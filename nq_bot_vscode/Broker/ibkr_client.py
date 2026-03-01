@@ -204,7 +204,7 @@ class CandleAggregator:
         Returns:
             Completed candle dict if a 2-minute boundary was crossed, else None.
         """
-        if price <= 0:
+        if not math.isfinite(price) or price <= 0:
             return None
 
         self._ticks_processed += 1
@@ -328,6 +328,10 @@ class CandleAggregator:
             return "zero_volume"
         if candle["high"] < candle["low"]:
             return "high_lt_low"
+        # NaN/Inf in any OHLC field would corrupt the entire signal pipeline
+        for field in ("open", "high", "low", "close"):
+            if field in candle and not math.isfinite(candle[field]):
+                return f"nan_inf_{field}"
         return None
 
     def _check_gap(self, current_time: datetime) -> None:
@@ -815,6 +819,13 @@ class IBKRDataFeed:
         for f in IBKRDataFeed._BAR_REQUIRED_FIELDS:
             if f not in candle:
                 logger.warning("candle_to_bar: missing required field '%s' — skipping bar", f)
+                return None
+
+        # 5. Validate OHLC prices are finite and positive
+        for f in ("open", "high", "low", "close"):
+            val = candle[f]
+            if not isinstance(val, (int, float)) or not math.isfinite(val) or val <= 0:
+                logger.warning("candle_to_bar: invalid %s=%.4f — skipping bar", f, val if isinstance(val, (int, float)) else 0)
                 return None
 
         for f in IBKRDataFeed._BAR_OPTIONAL_FIELDS:
@@ -1431,12 +1442,18 @@ class IBKRClient:
         if value is None:
             return 0.0
         if isinstance(value, (int, float)):
-            return round(float(value), 2)
+            parsed = round(float(value), 2)
+            if not math.isfinite(parsed):
+                return 0.0
+            return parsed
         if isinstance(value, str):
             # IBKR sometimes prefixes with 'C' for closing price
             cleaned = value.lstrip("C").strip()
             try:
-                return round(float(cleaned), 2)
+                parsed = round(float(cleaned), 2)
+                if not math.isfinite(parsed):
+                    return 0.0
+                return parsed
             except (ValueError, TypeError):
                 return 0.0
         return 0.0
