@@ -6,17 +6,17 @@ used by the backtester. Zero parameter changes.
 
 Pipeline:
   Tradovate WebSocket (1m bars)
-    → TradovatePaperConnector (aggregates 1m → 2m)
-      → TradingOrchestrator.process_bar() (HC filter + HTF gate)
-        → ScaleOutExecutor (trade lifecycle)
-          → TradovatePaperConnector (demo orders)
+    -> TradovatePaperConnector (aggregates 1m -> 2m)
+      -> TradingOrchestrator.process_bar() (HC filter + HTF gate)
+        -> ScaleOutExecutor (trade lifecycle)
+          -> TradovatePaperConnector (demo orders)
 
 Session rules:
   - No entries before 6:01 PM ET
   - Flat by 4:30 PM ET
   - No trading during maintenance (5:00–6:00 PM ET)
-  - Daily loss limit: $500 → halt
-  - Connection loss > 60s → flatten + halt
+  - Daily loss limit: $500 -> halt
+  - Connection loss > 60s -> flatten + halt
 
 Usage:
     python scripts/run_paper.py

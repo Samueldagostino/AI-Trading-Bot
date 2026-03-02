@@ -28,8 +28,8 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 
 # ─── CME Session Constants ───────────────────────────────────────
-# CME MNQ: Sunday 6:00 PM ET → Friday 5:00 PM ET
-# Daily maintenance: 5:00 PM → 6:00 PM ET each weekday
+# CME MNQ: Sunday 6:00 PM ET -> Friday 5:00 PM ET
+# Daily maintenance: 5:00 PM -> 6:00 PM ET each weekday
 SESSION_START_HOUR = 18   # 6 PM ET
 SESSION_END_HOUR = 17     # 5 PM ET
 TRADING_DAY_BOUNDARY_HOUR = 18  # Daily bars roll at 6 PM ET
@@ -146,8 +146,8 @@ def get_trading_day(dt: datetime) -> date:
     CME convention: session runs 6:00 PM ET day D-1 to 5:00 PM ET day D.
     The trading day is labeled as day D (the date of the RTH session).
 
-    - time >= 18:00 ET → belongs to NEXT calendar day's trading session
-    - time <  18:00 ET → belongs to CURRENT calendar day's trading session
+    - time >= 18:00 ET -> belongs to NEXT calendar day's trading session
+    - time <  18:00 ET -> belongs to CURRENT calendar day's trading session
     """
     if dt.hour >= TRADING_DAY_BOUNDARY_HOUR:
         return (dt + timedelta(days=1)).date()
@@ -157,7 +157,7 @@ def get_trading_day(dt: datetime) -> date:
 def is_weekend(dt: datetime) -> bool:
     """Check if timestamp falls during weekend closure.
 
-    CME MNQ: closed Fri 5:00 PM ET → Sun 6:00 PM ET.
+    CME MNQ: closed Fri 5:00 PM ET -> Sun 6:00 PM ET.
     """
     wd = dt.weekday()  # Mon=0 ... Sun=6
     h = dt.hour
@@ -231,7 +231,7 @@ def gap_analysis(bars: List[Dict]) -> List[Dict]:
             and gap_minutes > 120
         )
 
-        # Short holiday early close (e.g. 13:14 → 18:00 same day)
+        # Short holiday early close (e.g. 13:14 -> 18:00 same day)
         is_early_close = (
             not spans_wknd
             and not is_maintenance
@@ -461,7 +461,7 @@ def main():
 
         print(f"  {filename}")
         print(f"    Bars: {len(bars):>10,}")
-        print(f"    Range: {first_dt.strftime('%Y-%m-%d %H:%M')} → "
+        print(f"    Range: {first_dt.strftime('%Y-%m-%d %H:%M')} -> "
               f"{last_dt.strftime('%Y-%m-%d %H:%M')} ET")
         print()
 
@@ -505,7 +505,7 @@ def main():
         print()
         print("  *** MISSING DATA GAPS ***")
         for g in missing_gaps:
-            print(f"    {g['start'].strftime('%Y-%m-%d %H:%M')} → "
+            print(f"    {g['start'].strftime('%Y-%m-%d %H:%M')} -> "
                   f"{g['end'].strftime('%Y-%m-%d %H:%M')} "
                   f"({g['gap_minutes']:.0f} min)")
 
@@ -514,7 +514,7 @@ def main():
         print()
         print(f"  Sample weekend/holiday gaps (first 5):")
         for g in expected_gaps[:5]:
-            print(f"    {g['start'].strftime('%Y-%m-%d %H:%M')} → "
+            print(f"    {g['start'].strftime('%Y-%m-%d %H:%M')} -> "
                   f"{g['end'].strftime('%Y-%m-%d %H:%M')} "
                   f"({g['gap_minutes']:.0f} min, {g['gap_type']})")
     print()
@@ -530,10 +530,10 @@ def main():
     print("  FINAL DATASET SUMMARY")
     print("=" * 70)
     print(f"  Total bars:    {len(clean_bars):>12,}")
-    print(f"  Date range:    {first_ts.strftime('%Y-%m-%d')} → "
+    print(f"  Date range:    {first_ts.strftime('%Y-%m-%d')} -> "
           f"{last_ts.strftime('%Y-%m-%d')}")
     print(f"  Trading days:  {len(trading_days):>12,}")
-    print(f"  Price range:   {min(b['low'] for b in clean_bars):.2f} → "
+    print(f"  Price range:   {min(b['low'] for b in clean_bars):.2f} -> "
           f"{max(b['high'] for b in clean_bars):.2f}")
     print(f"  Total volume:  {sum(b['volume'] for b in clean_bars):>12,}")
     print()
@@ -561,7 +561,7 @@ def main():
         write_csv(htf_bars, htf_path)
         if htf_bars:
             print(f"  {tf_label:>4s}: {len(htf_bars):>8,} bars  "
-                  f"({htf_bars[0]['timestamp'].strftime('%Y-%m-%d')} → "
+                  f"({htf_bars[0]['timestamp'].strftime('%Y-%m-%d')} -> "
                   f"{htf_bars[-1]['timestamp'].strftime('%Y-%m-%d')})")
         else:
             print(f"  {tf_label:>4s}: 0 bars (empty)")

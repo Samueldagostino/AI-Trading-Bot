@@ -310,18 +310,18 @@ class TradingOrchestrator:
             sweep_dir = "long" if sweep_signal.direction == "LONG" else "short"
 
             if direction_str == sweep_dir:
-                # Same direction → confluence bonus
+                # Same direction -> confluence bonus
                 entry_direction = direction_str
                 entry_score = signal.combined_score + SWEEP_CONFLUENCE_BONUS
                 entry_source = "confluence"
                 logger.info(
                     f"SWEEP CONFLUENCE: {direction_str} | "
                     f"signal={signal.combined_score:.3f} + "
-                    f"sweep={sweep_signal.score:.2f} → "
+                    f"sweep={sweep_signal.score:.2f} -> "
                     f"boosted={entry_score:.3f}"
                 )
             else:
-                # Conflicting directions → use existing signal only
+                # Conflicting directions -> use existing signal only
                 entry_direction = direction_str
                 entry_score = signal.combined_score
                 entry_source = "signal"

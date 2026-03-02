@@ -72,7 +72,7 @@ class PaperTradingState:
     halt_reason: str = ""
     session_date: str = ""
 
-    # Bar aggregation state (1m → 2m)
+    # Bar aggregation state (1m -> 2m)
     pending_1m_bar: Optional[Dict] = None
     bars_in_current_2m: int = 0
     current_2m_open: float = 0.0
@@ -176,7 +176,7 @@ class TradovatePaperConnector:
         logger.info("Paper trading connector disconnected")
 
     # ================================================================
-    # BAR AGGREGATION (1m → 2m)
+    # BAR AGGREGATION (1m -> 2m)
     # ================================================================
     async def _handle_raw_bar(self, data: Dict) -> None:
         """
@@ -430,7 +430,7 @@ class TradovatePaperConnector:
     def is_within_session(et_time: datetime = None) -> bool:
         """Check if current ET time is within trading session.
 
-        Session: 6:01 PM ET → 4:30 PM ET next day.
+        Session: 6:01 PM ET -> 4:30 PM ET next day.
         Maintenance: 5:00 PM – 6:00 PM ET.
         """
         if et_time is None:

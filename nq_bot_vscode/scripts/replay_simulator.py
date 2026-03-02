@@ -10,17 +10,17 @@ Modes:
   Validate mode:     Runs at max speed, compares output to OOS baseline
 
 Pipeline (identical to run_paper.py):
-  FirstRate 1m bars → aggregate to 2m
-    → TradingOrchestrator.process_bar()  (HC filter + HTF gate)
-      → ScaleOutExecutor  (trade lifecycle)
-        → Fill simulation  (slippage + commission)
-          → Log to paper_trades.json / paper_decisions.json
+  FirstRate 1m bars -> aggregate to 2m
+    -> TradingOrchestrator.process_bar()  (HC filter + HTF gate)
+      -> ScaleOutExecutor  (trade lifecycle)
+        -> Fill simulation  (slippage + commission)
+          -> Log to paper_trades.json / paper_decisions.json
 
 Session rules enforced:
   - No entries before 6:01 PM ET
   - Flat by 4:30 PM ET
   - No trading during maintenance (5:00–6:00 PM ET)
-  - Daily loss limit: $500 → halt for the day
+  - Daily loss limit: $500 -> halt for the day
   - Max position: 2 contracts
 
 Fill simulation (calibrated slippage — permanent model):
@@ -639,7 +639,7 @@ class ReplaySimulator:
         "baseline": "Original Time 10 bars (exit if profitable)",
         "A": "Minimum Profit Gate (>=4pts or convert to trail)",
         "B": "Fixed TP at entry+6pts (limit=0 slip), fallback 15 bars",
-        "C": "Trail from profit (>=3pts → trail 2.5pt), fallback 12 bars",
+        "C": "Trail from profit (>=3pts -> trail 2.5pt), fallback 12 bars",
         "D": "RTH-only + Original Time 10 (restrict to 9:30-16:00 ET)",
     }
 
@@ -684,7 +684,7 @@ class ReplaySimulator:
         # Track signal source for current open trade
         self._current_trade_source = "signal"
 
-        # Speed → delay between exec bars (seconds)
+        # Speed -> delay between exec bars (seconds)
         self._delay = self._parse_speed(speed)
 
     @staticmethod
@@ -735,7 +735,7 @@ class ReplaySimulator:
             for tf in sorted(tf_bars.keys()):
                 bars = tf_bars[tf]
                 print(f"  {tf:>4s}: {len(bars):>7,} bars  "
-                      f"({bars[0].timestamp.strftime('%Y-%m-%d')} → "
+                      f"({bars[0].timestamp.strftime('%Y-%m-%d')} -> "
                       f"{bars[-1].timestamp.strftime('%Y-%m-%d')})")
 
         # Filter by date
@@ -1746,7 +1746,7 @@ async def run_compare_all(args):
         results["monthly"] = monthly
         all_results[v] = results
 
-        print(f"  → {v}: PF {results['profit_factor']:.2f} | "
+        print(f"  -> {v}: PF {results['profit_factor']:.2f} | "
               f"PnL ${results['total_pnl']:+,.0f} | "
               f"WR {results['win_rate']:.1f}% | "
               f"DD {results['max_drawdown_pct']:.1f}% | "
@@ -1779,7 +1779,7 @@ async def run_compare_all(args):
                                    -all_results[v]['max_drawdown_pct']),
                     reverse=True)
 
-    print(f"\n  RANKING (by PF → PnL → DD):")
+    print(f"\n  RANKING (by PF -> PnL -> DD):")
     for i, v in enumerate(ranked, 1):
         r = all_results[v]
         desc = ReplaySimulator.C1_VARIANTS.get(v, v)
@@ -1890,7 +1890,7 @@ async def run_sweep_compare(args):
         results["monthly"] = monthly
         runs[label] = results
 
-        print(f"  → {label}: PF {results['profit_factor']:.2f} | "
+        print(f"  -> {label}: PF {results['profit_factor']:.2f} | "
               f"PnL ${results['total_pnl']:+,.0f} | "
               f"WR {results['win_rate']:.1f}% | "
               f"DD {results['max_drawdown_pct']:.1f}% | "

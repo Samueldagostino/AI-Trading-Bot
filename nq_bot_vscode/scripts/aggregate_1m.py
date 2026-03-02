@@ -88,7 +88,7 @@ def detect_1m_csv(directory: str) -> Optional[str]:
 def _looks_like_timestamp(value: str) -> bool:
     """Check if a string looks like a timestamp rather than a column name."""
     v = value.strip()
-    # Starts with a digit → likely data, not a header
+    # Starts with a digit -> likely data, not a header
     if v and v[0].isdigit():
         return True
     return False
@@ -409,7 +409,7 @@ def main():
     total_vol = sum(b["volume"] for b in bars_1m)
 
     print(f"  Rows:        {len(bars_1m):,}")
-    print(f"  Date range:  {first_ts.strftime('%Y-%m-%d %H:%M')} → {last_ts.strftime('%Y-%m-%d %H:%M')} UTC")
+    print(f"  Date range:  {first_ts.strftime('%Y-%m-%d %H:%M')} -> {last_ts.strftime('%Y-%m-%d %H:%M')} UTC")
     print(f"  Span:        {days} days")
     print(f"  Price range: {price_low:.2f} – {price_high:.2f}")
     print(f"  Total volume: {total_vol:,}")
@@ -439,12 +439,12 @@ def main():
         agg = aggregate_bars(bars_1m, tf_minutes)
         outfile = os.path.join(output_dir, f"NQ_{tf_label}.csv")
         write_csv(agg, outfile)
-        print(f"  {tf_label:>4s}: {len(agg):>7,} bars → {outfile}")
+        print(f"  {tf_label:>4s}: {len(agg):>7,} bars -> {outfile}")
 
     # Also save a copy of the 1m data in standard format
     outfile_1m = os.path.join(output_dir, "NQ_1m.csv")
     write_csv(bars_1m, outfile_1m)
-    print(f"  {'1m':>4s}: {len(bars_1m):>7,} bars → {outfile_1m} (standardized)")
+    print(f"  {'1m':>4s}: {len(bars_1m):>7,} bars -> {outfile_1m} (standardized)")
 
     print(f"\n{'=' * 60}")
     print(f"  DONE — {len(TIMEFRAMES) + 1} files written to {output_dir}/")

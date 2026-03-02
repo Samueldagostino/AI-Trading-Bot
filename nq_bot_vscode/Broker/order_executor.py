@@ -13,7 +13,7 @@ Safety rails — HARD BLOCKS that cannot be overridden:
   2. Max 4 open positions at any time
   3. No orders outside RTH unless config explicitly allows ETH
   4. Daily loss limit check before every order ($500 default)
-  5. Kill switch: daily P&L hits -$1000 → halt all trading, cancel open orders
+  5. Kill switch: daily P&L hits -$1000 -> halt all trading, cancel open orders
 
 Every order attempt is logged with timestamp, direction, size, price,
 and rejection reason if blocked.
@@ -484,7 +484,7 @@ class IBKROrderExecutor:
         )
 
         logger.info(
-            "PAPER FILL: %s %d×MNQ %s @ %.2f [%s] → %s",
+            "PAPER FILL: %s %d×MNQ %s @ %.2f [%s] -> %s",
             request.side.value,
             request.contracts,
             request.order_type.value,

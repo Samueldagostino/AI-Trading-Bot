@@ -5,7 +5,7 @@ Pure translation layer between the signal pipeline and the
 IBKR order executor.  Does NOT modify signal generation logic.
 
 Flow:
-  process_bar() → signal pipeline → TradeDecision
+  process_bar() -> signal pipeline -> TradeDecision
                                         ↓
                                    SignalBridge.translate()
                                         ↓
@@ -16,7 +16,7 @@ Flow:
 Responsibilities:
   1. Accept validated trade decisions from the signal pipeline
   2. Compute stop/target prices from ATR using RiskConfig values
-  3. Map direction → OrderSide, package as scale-out entry params
+  3. Map direction -> OrderSide, package as scale-out entry params
   4. Attach signal score + HTF bias state as audit metadata
   5. Belt-and-suspenders safety gates (score, HTF, stop distance)
 """

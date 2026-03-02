@@ -1,14 +1,14 @@
 """
-Replay → Weekly Report Adapter
+Replay -> Weekly Report Adapter
 ================================
 Reads logs/replay_feb23-27.json, converts the trade log into the format
 expected by ibkr_monitor.py's weekly report pipeline, then runs:
 
-  1. generate_weekly_report()  → WeeklyReport for the replay week
-  2. export_weekly_report()    → logs/weekly_report_2026-02-27.json
-  3. compute_weekly_reports()  → all weekly reports (just one week here)
-  4. compute_4_week_trend()    → trend analysis
-  5. update_viz_data()         → docs/viz_data.json
+  1. generate_weekly_report()  -> WeeklyReport for the replay week
+  2. export_weekly_report()    -> logs/weekly_report_2026-02-27.json
+  3. compute_weekly_reports()  -> all weekly reports (just one week here)
+  4. compute_4_week_trend()    -> trend analysis
+  5. update_viz_data()         -> docs/viz_data.json
 
 Does NOT modify the weekly report or viz pipeline — only adapts the
 replay output to match the expected input format (TradeRecord).
@@ -96,7 +96,7 @@ def convert_replay_to_trade_records(raw_trades: list) -> list:
 def main():
     # ── Load and convert ──
     print(f"\n{'=' * 62}")
-    print(f"  REPLAY → WEEKLY REPORT PIPELINE")
+    print(f"  REPLAY -> WEEKLY REPORT PIPELINE")
     print(f"{'=' * 62}\n")
 
     if not REPLAY_JSON.exists():
@@ -117,7 +117,7 @@ def main():
 
     # Show date range
     dates = sorted(set(t.timestamp[:10] for t in trades if t.timestamp))
-    print(f"  Date range: {dates[0]} → {dates[-1]}")
+    print(f"  Date range: {dates[0]} -> {dates[-1]}")
     print(f"  Trading days: {len(dates)} ({', '.join(dates)})")
 
     # ── Load baseline ──
@@ -128,7 +128,7 @@ def main():
     # ── Step 1: Generate weekly report ──
     print(f"\n  Step 1: generate_weekly_report()")
     report = generate_weekly_report(trades, baseline, "2026-02-23")
-    print(f"    Week: {report.week_start} → {report.week_end}")
+    print(f"    Week: {report.week_start} -> {report.week_end}")
     print(f"    Trades: {report.trade_count}")
     print(f"    PnL: ${report.net_pnl:+.2f}")
     print(f"    WR: {report.win_rate_pct:.1f}%")
@@ -145,7 +145,7 @@ def main():
     all_reports = compute_weekly_reports(trades, baseline)
     print(f"    Reports generated: {len(all_reports)}")
     for r in all_reports:
-        print(f"      {r.week_start} → {r.week_end}: "
+        print(f"      {r.week_start} -> {r.week_end}: "
               f"{r.trade_count} trades, ${r.net_pnl:+.2f}")
 
     # ── Step 4: Compute 4-week trend ──
@@ -166,7 +166,7 @@ def main():
     wr = viz_data.get("weekly_reports", [])
     print(f"    Weekly reports: {len(wr)}")
     if wr:
-        print(f"    First report: {wr[0].get('week_start')} → {wr[0].get('week_end')}")
+        print(f"    First report: {wr[0].get('week_start')} -> {wr[0].get('week_end')}")
 
     # ── Print the full weekly report ──
     print(_render_weekly_report(report, trend, baseline))
