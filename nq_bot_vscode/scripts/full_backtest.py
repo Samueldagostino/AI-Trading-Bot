@@ -93,6 +93,9 @@ KILL_SWITCH_LIMIT = 1000.0  # $1000
 
 # ── Progress Reporting ──────────────────────────────────────────
 PROGRESS_INTERVAL = 25_000  # Every 25K bars (~14 reports for 700K)
+CHECKPOINT_INTERVAL = 25_000  # Checkpoint every 25K bars (matches progress)
+CHECKPOINT_PATH = str(PROJECT_DIR / "logs" / "backtest_checkpoint.json")
+PARTIAL_TRADES_PATH = str(PROJECT_DIR / "logs" / "backtest_trades_partial.json")
 
 
 # =====================================================================
@@ -288,6 +291,369 @@ class HTFScheduler:
             self._indices[tf] = idx
 
         return completed
+
+
+# =====================================================================
+#  CHECKPOINT SYSTEM
+# =====================================================================
+
+def _serialize_datetime(dt):
+    if dt is None:
+        return None
+    return dt.isoformat()
+
+
+def _deserialize_datetime(s):
+    if s is None:
+        return None
+    return datetime.fromisoformat(s)
+
+
+def _serialize_bar(bar):
+    return {
+        "timestamp": bar.timestamp.isoformat(),
+        "open": bar.open, "high": bar.high,
+        "low": bar.low, "close": bar.close,
+        "volume": bar.volume,
+        "bid_volume": getattr(bar, "bid_volume", 0),
+        "ask_volume": getattr(bar, "ask_volume", 0),
+        "delta": getattr(bar, "delta", 0),
+    }
+
+
+def _serialize_htf_bar(bar):
+    return {
+        "timestamp": bar.timestamp.isoformat(),
+        "open": bar.open, "high": bar.high,
+        "low": bar.low, "close": bar.close,
+        "volume": bar.volume,
+    }
+
+
+def _serialize_contract_leg(leg):
+    return {
+        "leg_id": leg.leg_id, "leg_number": leg.leg_number,
+        "contracts": leg.contracts,
+        "entry_price": leg.entry_price,
+        "entry_time": _serialize_datetime(leg.entry_time),
+        "stop_price": leg.stop_price, "target_price": leg.target_price,
+        "exit_price": leg.exit_price,
+        "exit_time": _serialize_datetime(leg.exit_time),
+        "exit_reason": leg.exit_reason,
+        "gross_pnl": leg.gross_pnl, "commission": leg.commission,
+        "net_pnl": leg.net_pnl,
+        "is_open": leg.is_open, "is_filled": leg.is_filled,
+    }
+
+
+def _deserialize_contract_leg(d):
+    from execution.scale_out_executor import ContractLeg
+    leg = ContractLeg()
+    for k, v in d.items():
+        if k in ("entry_time", "exit_time"):
+            setattr(leg, k, _deserialize_datetime(v))
+        else:
+            setattr(leg, k, v)
+    return leg
+
+
+def _serialize_scale_out_trade(trade):
+    return {
+        "trade_id": trade.trade_id,
+        "direction": trade.direction, "symbol": trade.symbol,
+        "c1": _serialize_contract_leg(trade.c1),
+        "c2": _serialize_contract_leg(trade.c2),
+        "initial_stop": trade.initial_stop,
+        "entry_price": trade.entry_price,
+        "entry_time": _serialize_datetime(trade.entry_time),
+        "phase": trade.phase.value,
+        "phase_history": trade.phase_history,
+        "signal_score": trade.signal_score,
+        "market_regime": trade.market_regime,
+        "atr_at_entry": trade.atr_at_entry,
+        "c1_bars_elapsed": trade.c1_bars_elapsed,
+        "c1_best_price": trade.c1_best_price,
+        "c1_trailing_active": trade.c1_trailing_active,
+        "c2_trailing_stop": trade.c2_trailing_stop,
+        "c2_best_price": trade.c2_best_price,
+        "total_gross_pnl": trade.total_gross_pnl,
+        "total_commission": trade.total_commission,
+        "total_net_pnl": trade.total_net_pnl,
+        "created_at": _serialize_datetime(trade.created_at),
+        "closed_at": _serialize_datetime(trade.closed_at),
+    }
+
+
+def _deserialize_scale_out_trade(d):
+    from execution.scale_out_executor import ScaleOutTrade, ContractLeg
+    trade = ScaleOutTrade.__new__(ScaleOutTrade)
+    trade.trade_id = d["trade_id"]
+    trade.direction = d["direction"]
+    trade.symbol = d.get("symbol", "MNQ")
+    trade.c1 = _deserialize_contract_leg(d["c1"])
+    trade.c2 = _deserialize_contract_leg(d["c2"])
+    trade.initial_stop = d["initial_stop"]
+    trade.entry_price = d["entry_price"]
+    trade.entry_time = _deserialize_datetime(d.get("entry_time"))
+    trade.phase = ScaleOutPhase(d["phase"])
+    trade.phase_history = d.get("phase_history", [])
+    trade.signal_score = d.get("signal_score", 0.0)
+    trade.market_regime = d.get("market_regime", "unknown")
+    trade.atr_at_entry = d.get("atr_at_entry", 0.0)
+    trade.c1_bars_elapsed = d.get("c1_bars_elapsed", 0)
+    trade.c1_best_price = d.get("c1_best_price", 0.0)
+    trade.c1_trailing_active = d.get("c1_trailing_active", False)
+    trade.c2_trailing_stop = d.get("c2_trailing_stop", 0.0)
+    trade.c2_best_price = d.get("c2_best_price", 0.0)
+    trade.total_gross_pnl = d.get("total_gross_pnl", 0.0)
+    trade.total_commission = d.get("total_commission", 0.0)
+    trade.total_net_pnl = d.get("total_net_pnl", 0.0)
+    trade.created_at = _deserialize_datetime(d.get("created_at")) or datetime.now(timezone.utc)
+    trade.closed_at = _deserialize_datetime(d.get("closed_at"))
+    return trade
+
+
+def save_checkpoint(engine, htf_scheduler, bar_index, current_bar_ts):
+    """Save full engine state to checkpoint file (atomic write)."""
+    # HTF engine bars (max 20 per TF)
+    htf_bars = {}
+    for tf, bars in engine.htf_engine._bars.items():
+        htf_bars[tf] = [_serialize_htf_bar(b) for b in bars]
+
+    # Feature engine bars (last 500)
+    fe_bars = [_serialize_bar(b) for b in engine.feature_engine._bars]
+
+    # Executor state
+    trade_history = [_serialize_scale_out_trade(t) for t in engine.executor._trade_history]
+    active_trade = (
+        _serialize_scale_out_trade(engine.executor._active_trade)
+        if engine.executor._active_trade else None
+    )
+
+    # Risk engine state
+    rs = engine.risk_engine.state
+    risk_state = {
+        "starting_equity": rs.starting_equity,
+        "current_equity": rs.current_equity,
+        "peak_equity": rs.peak_equity,
+        "daily_starting_equity": rs.daily_starting_equity,
+        "daily_pnl": rs.daily_pnl,
+        "daily_trades": rs.daily_trades,
+        "daily_wins": rs.daily_wins,
+        "daily_losses": rs.daily_losses,
+        "current_drawdown_pct": rs.current_drawdown_pct,
+        "max_drawdown_pct": rs.max_drawdown_pct,
+        "consecutive_losses": rs.consecutive_losses,
+        "consecutive_wins": rs.consecutive_wins,
+        "open_contracts": rs.open_contracts,
+        "open_direction": rs.open_direction,
+        "unrealized_pnl": rs.unrealized_pnl,
+        "kill_switch_active": rs.kill_switch_active,
+        "kill_switch_reason": rs.kill_switch_reason,
+        "kill_switch_resume_at": _serialize_datetime(rs.kill_switch_resume_at),
+        "daily_limit_hit": rs.daily_limit_hit,
+        "is_overnight": rs.is_overnight,
+        "current_vix": rs.current_vix,
+    }
+
+    checkpoint = {
+        "version": 1,
+        "saved_at": datetime.now().isoformat(),
+        "bar_index": bar_index,
+        "current_bar_ts": _serialize_datetime(current_bar_ts),
+        # Engine counters
+        "bars_processed": engine._bars_processed,
+        "session_bar_count": engine._session_bar_count,
+        "current_trading_day": (
+            engine._current_trading_day.isoformat()
+            if engine._current_trading_day else None
+        ),
+        "daily_pnl": engine._daily_pnl,
+        "cumulative_pnl": engine._cumulative_pnl,
+        "kill_switch_active": engine._kill_switch_active,
+        "current_regime": engine._current_regime,
+        "entry_count": engine._entry_count,
+        "rejection_count": engine._rejection_count,
+        "signals_with_direction": engine._signals_with_direction,
+        "pending_entry": engine._pending_entry,
+        # HTF bias
+        "htf_bias": {
+            "consensus_direction": engine._htf_bias.consensus_direction,
+            "consensus_strength": engine._htf_bias.consensus_strength,
+            "htf_allows_long": engine._htf_bias.htf_allows_long,
+            "htf_allows_short": engine._htf_bias.htf_allows_short,
+            "tf_biases": engine._htf_bias.tf_biases,
+        } if engine._htf_bias else None,
+        # Trades
+        "trades": engine.trades,
+        # HTF engine
+        "htf_engine": {
+            "bars": htf_bars,
+            "biases": dict(engine.htf_engine._biases),
+            "total_updates": engine.htf_engine._total_updates,
+        },
+        # HTF scheduler
+        "htf_scheduler_indices": dict(htf_scheduler._indices),
+        # Feature engine
+        "feature_engine_bars": fe_bars,
+        "feature_engine_scalars": {
+            "cumulative_delta": engine.feature_engine._cumulative_delta,
+            "session_volume_price_sum": engine.feature_engine._session_volume_price_sum,
+            "session_volume_sum": engine.feature_engine._session_volume_sum,
+        },
+        # Risk engine
+        "risk_engine_state": risk_state,
+        # Executor
+        "executor_trade_history": trade_history,
+        "executor_active_trade": active_trade,
+    }
+
+    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+    tmp_path = CHECKPOINT_PATH + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(checkpoint, f, default=str)
+    os.replace(tmp_path, CHECKPOINT_PATH)
+
+    # Save partial trades incrementally
+    save_partial_trades(engine.trades)
+
+
+def save_partial_trades(trades):
+    """Save completed trades so far (survives crashes between checkpoints)."""
+    os.makedirs(os.path.dirname(PARTIAL_TRADES_PATH), exist_ok=True)
+    tmp_path = PARTIAL_TRADES_PATH + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump({
+            "trades": trades,
+            "count": len(trades),
+            "saved_at": datetime.now().isoformat(),
+        }, f, default=str)
+    os.replace(tmp_path, PARTIAL_TRADES_PATH)
+
+
+def load_checkpoint():
+    """Load checkpoint file if it exists. Returns dict or None."""
+    if not os.path.exists(CHECKPOINT_PATH):
+        return None
+    try:
+        with open(CHECKPOINT_PATH) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"  WARNING: Corrupt checkpoint file: {e}")
+        return None
+
+
+def restore_from_checkpoint(checkpoint, engine, htf_scheduler):
+    """Restore full engine state from checkpoint. Returns bar_index to resume from."""
+    bar_index = checkpoint["bar_index"]
+
+    # ── Restore HTF engine ──
+    htf_data = checkpoint["htf_engine"]
+    for tf, bar_dicts in htf_data["bars"].items():
+        engine.htf_engine._bars[tf] = [
+            HTFBar(
+                timestamp=datetime.fromisoformat(d["timestamp"]),
+                open=d["open"], high=d["high"],
+                low=d["low"], close=d["close"],
+                volume=d["volume"],
+            ) for d in bar_dicts
+        ]
+    engine.htf_engine._biases = htf_data.get("biases", {})
+    engine.htf_engine._total_updates = htf_data.get("total_updates", 0)
+
+    # ── Restore HTF bias ──
+    if checkpoint.get("htf_bias"):
+        hb = checkpoint["htf_bias"]
+        engine._htf_bias = HTFBiasResult(
+            consensus_direction=hb["consensus_direction"],
+            consensus_strength=hb["consensus_strength"],
+            htf_allows_long=hb["htf_allows_long"],
+            htf_allows_short=hb["htf_allows_short"],
+            tf_biases=hb.get("tf_biases", {}),
+        )
+
+    # ── Restore HTF scheduler indices ──
+    for tf, idx in checkpoint.get("htf_scheduler_indices", {}).items():
+        if tf in htf_scheduler._indices:
+            htf_scheduler._indices[tf] = idx
+
+    # ── Warm up feature engine from saved bars ──
+    fe_bars = checkpoint.get("feature_engine_bars", [])
+    print(f"  Warming up feature engine with {len(fe_bars)} saved bars...")
+    for bd in fe_bars:
+        b = Bar(
+            timestamp=datetime.fromisoformat(bd["timestamp"]),
+            open=bd["open"], high=bd["high"],
+            low=bd["low"], close=bd["close"],
+            volume=bd["volume"],
+            bid_volume=bd.get("bid_volume", 0),
+            ask_volume=bd.get("ask_volume", 0),
+            delta=bd.get("delta", 0),
+        )
+        engine.feature_engine.update(b)
+
+    # Overwrite session accumulators with saved values (warm-up corrupts them)
+    fe_scalars = checkpoint.get("feature_engine_scalars", {})
+    engine.feature_engine._cumulative_delta = fe_scalars.get("cumulative_delta", 0)
+    engine.feature_engine._session_volume_price_sum = fe_scalars.get(
+        "session_volume_price_sum", 0.0
+    )
+    engine.feature_engine._session_volume_sum = fe_scalars.get("session_volume_sum", 0)
+
+    # ── Restore engine counters and state ──
+    engine._bars_processed = checkpoint["bars_processed"]
+    engine._session_bar_count = checkpoint["session_bar_count"]
+    ctd = checkpoint.get("current_trading_day")
+    engine._current_trading_day = date.fromisoformat(ctd) if ctd else None
+    engine._daily_pnl = checkpoint["daily_pnl"]
+    engine._cumulative_pnl = checkpoint["cumulative_pnl"]
+    engine._kill_switch_active = checkpoint["kill_switch_active"]
+    engine._current_regime = checkpoint["current_regime"]
+    engine._entry_count = checkpoint["entry_count"]
+    engine._rejection_count = checkpoint["rejection_count"]
+    engine._signals_with_direction = checkpoint["signals_with_direction"]
+    engine._pending_entry = checkpoint.get("pending_entry")
+    engine.trades = checkpoint["trades"]
+
+    # ── Restore risk engine state ──
+    rs_data = checkpoint.get("risk_engine_state", {})
+    rs = engine.risk_engine.state
+    for key in [
+        "starting_equity", "current_equity", "peak_equity",
+        "daily_starting_equity", "daily_pnl", "daily_trades",
+        "daily_wins", "daily_losses", "current_drawdown_pct",
+        "max_drawdown_pct", "consecutive_losses", "consecutive_wins",
+        "open_contracts", "open_direction", "unrealized_pnl",
+        "kill_switch_active", "kill_switch_reason",
+        "daily_limit_hit", "is_overnight", "current_vix",
+    ]:
+        if key in rs_data:
+            setattr(rs, key, rs_data[key])
+    if rs_data.get("kill_switch_resume_at"):
+        rs.kill_switch_resume_at = datetime.fromisoformat(
+            rs_data["kill_switch_resume_at"]
+        )
+
+    # ── Restore executor trade history ──
+    engine.executor._trade_history = [
+        _deserialize_scale_out_trade(td)
+        for td in checkpoint.get("executor_trade_history", [])
+    ]
+    active_td = checkpoint.get("executor_active_trade")
+    if active_td:
+        engine.executor._active_trade = _deserialize_scale_out_trade(active_td)
+    else:
+        engine.executor._active_trade = None
+
+    return bar_index
+
+
+def delete_checkpoint():
+    """Remove checkpoint and partial trade files after successful completion."""
+    for path in [CHECKPOINT_PATH, PARTIAL_TRADES_PATH]:
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"  Cleaned up: {path}")
 
 
 # =====================================================================
@@ -1395,6 +1761,7 @@ async def run_backtest(
     htf_dir: str,
     output_path: str,
     summary_path: str,
+    resume: bool = False,
 ) -> Dict:
     """Execute the full causal replay backtest with comprehensive analysis."""
     wall_start = time_module.time()
@@ -1443,18 +1810,49 @@ async def run_backtest(
     engine = CausalReplayEngine(config)
     htf_scheduler = HTFScheduler(htf_data)
 
-    print("Engine initialized. Starting causal replay...")
-    print(f"  Processing {len(bars_2m):,} 2-min bars")
+    # ── Check for checkpoint resume ──
+    start_bar = 0
+    if resume:
+        checkpoint = load_checkpoint()
+        if checkpoint:
+            start_bar = restore_from_checkpoint(checkpoint, engine, htf_scheduler)
+            n_trades = engine._entry_count
+            pnl = engine._cumulative_pnl
+            total = len(bars_2m)
+            print(
+                f"  Resuming from bar {start_bar:,} / {total:,} "
+                f"({n_trades} trades, ${pnl:+,.2f} PnL)"
+            )
+        else:
+            print("  No checkpoint found. Starting fresh.")
+    else:
+        print("Engine initialized. Starting causal replay...")
+
+    print(f"  Processing {len(bars_2m):,} 2-min bars (starting at {start_bar:,})")
     print(f"  Progress every {PROGRESS_INTERVAL:,} bars")
+    print(f"  Checkpoints every {CHECKPOINT_INTERVAL:,} bars")
     print()
 
     # ── Process bar by bar ──
     replay_start = time_module.time()
-    for bar in bars_2m:
+    total_bars = len(bars_2m)
+    for i in range(start_bar, total_bars):
+        bar = bars_2m[i]
         await engine.process_bar(bar, htf_scheduler)
 
+        # Checkpoint at every CHECKPOINT_INTERVAL bars
+        if (engine._bars_processed % CHECKPOINT_INTERVAL == 0
+                and engine._bars_processed > 0):
+            save_checkpoint(engine, htf_scheduler, i + 1, bar["timestamp"])
+            print(
+                f"    [CHECKPOINT] Saved at bar {i + 1:,} / {total_bars:,} "
+                f"({engine._entry_count} trades, "
+                f"${engine._cumulative_pnl:+,.2f} PnL)"
+            )
+
+    bars_processed_this_run = total_bars - start_bar
     replay_elapsed = time_module.time() - replay_start
-    bars_per_sec = len(bars_2m) / replay_elapsed if replay_elapsed > 0 else 0
+    bars_per_sec = bars_processed_this_run / replay_elapsed if replay_elapsed > 0 else 0
 
     print()
     print(f"  Replay complete: {replay_elapsed:.1f}s ({bars_per_sec:,.0f} bars/sec)")
@@ -1562,6 +1960,9 @@ async def run_backtest(
     )
     print(f"  Summary saved to: {summary_path}")
 
+    # ── Clean up checkpoint on successful completion ──
+    delete_checkpoint()
+
     wall_elapsed = time_module.time() - wall_start
     print()
     print("=" * 72)
@@ -1594,6 +1995,10 @@ def main():
     parser.add_argument(
         "--run", action="store_true",
         help="Actually execute the backtest (Phase 2)"
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Automatically resume from checkpoint if one exists"
     )
     parser.add_argument(
         "--log-level", type=str, default="WARNING",
@@ -1669,7 +2074,27 @@ def main():
         print("  Run scripts/prepare_historical_data.py first.")
         sys.exit(1)
 
-    asyncio.run(run_backtest(data_path, htf_dir, output_path, summary_path))
+    # ── Checkpoint detection ──
+    do_resume = False
+    if os.path.exists(CHECKPOINT_PATH):
+        if args.resume:
+            do_resume = True
+            print("  --resume flag: will resume from checkpoint.")
+        else:
+            try:
+                response = input(
+                    f"  Checkpoint found ({CHECKPOINT_PATH}).\n"
+                    f"  Resume from checkpoint? [y/N] "
+                )
+                do_resume = response.strip().lower() in ("y", "yes")
+            except EOFError:
+                # Non-interactive — treat as fresh start
+                do_resume = False
+            if not do_resume:
+                print("  Starting fresh (checkpoint will be overwritten).")
+
+    asyncio.run(run_backtest(data_path, htf_dir, output_path, summary_path,
+                             resume=do_resume))
 
 
 if __name__ == "__main__":
