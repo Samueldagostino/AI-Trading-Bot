@@ -3,7 +3,7 @@ IBKR Live Pipeline Orchestrator
 ==================================
 Wires the complete vertical slice from market data to kill switch:
 
-  IBKRClient → CandleAggregator → candle_to_bar() → Bar
+  IBKRClient -> CandleAggregator -> candle_to_bar() -> Bar
                                                       ↓
                                                 process_bar()
                                                       ↓
@@ -19,8 +19,8 @@ Wires the complete vertical slice from market data to kill switch:
 This module does NOT modify signal generation logic.  The feature
 engine, signal aggregator, HTF engine, regime detector, risk engine,
 and sweep detector all run unchanged.  Only the execution path is
-adapted: instead of ScaleOutExecutor → Tradovate, we route through
-SignalBridge → IBKROrderExecutor → PositionManager.
+adapted: instead of ScaleOutExecutor -> Tradovate, we route through
+SignalBridge -> IBKROrderExecutor -> PositionManager.
 """
 
 import asyncio
@@ -85,7 +85,7 @@ class IBKRLivePipeline:
     Owns all components and manages their lifecycle:
       - IBKRClient + IBKRDataFeed (market data)
       - Feature / signal / risk engines (unchanged signal logic)
-      - SignalBridge (decision → order translation)
+      - SignalBridge (decision -> order translation)
       - IBKROrderExecutor (safety rails + order placement)
       - PositionManager (tracking + reconciliation + P&L)
     """
@@ -246,10 +246,10 @@ class IBKRLivePipeline:
         Process one bar through the complete pipeline.
 
         Signal logic is IDENTICAL to TradingOrchestrator.process_bar():
-          features → HTF bias → regime → sweeps → signals → HC filter → risk
+          features -> HTF bias -> regime -> sweeps -> signals -> HC filter -> risk
 
         Execution path is adapted for IBKR:
-          TradeDecision → SignalBridge → IBKROrderExecutor → PositionManager
+          TradeDecision -> SignalBridge -> IBKROrderExecutor -> PositionManager
         """
         if self._state != PipelineState.RUNNING:
             return None
@@ -428,7 +428,7 @@ class IBKRLivePipeline:
             timestamp=bar.timestamp,
         )
 
-        # Translate decision → order params
+        # Translate decision -> order params
         bridge_result = self._bridge.translate(decision)
         if not bridge_result.approved:
             logger.info(
@@ -532,7 +532,7 @@ class IBKRLivePipeline:
         """
         Close a tracked position immediately.
 
-        Updates PositionManager → feeds P&L to executor → checks
+        Updates PositionManager -> feeds P&L to executor -> checks
         kill switch.  If both legs closed, clears active group.
         """
         self._position_manager.close_position(

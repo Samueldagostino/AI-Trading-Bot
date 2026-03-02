@@ -198,9 +198,9 @@ def main():
     else:
         print("  STATUS: ISSUES FOUND — fix items marked [!!] above")
         if not claude_md.exists():
-            print(f"  → Copy CLAUDE.md to {root}/")
+            print(f"  -> Copy CLAUDE.md to {root}/")
         if not all_critical:
-            print("  → Missing critical files — check your project path")
+            print("  -> Missing critical files — check your project path")
     print("=" * 65)
 
 

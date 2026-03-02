@@ -9,14 +9,14 @@ Ingests NQ price data from multiple sources:
 TradingView Integration Notes:
 - TradingView does NOT have a public API for automated data export
 - WORKAROUND: Export chart data as CSV from TradingView manually
-  (Chart → ... menu → Export chart data)
+  (Chart -> ... menu -> Export chart data)
 - This module parses those CSV files for backtesting
 - For live trading, Tradovate WebSocket provides the data feed
 
 How to export from TradingView:
 1. Open NQ / MNQ chart in TradingView
 2. Set to 1-minute timeframe
-3. Click the "..." menu on the chart → "Export chart data"
+3. Click the "..." menu on the chart -> "Export chart data"
 4. Save CSV to data/tradingview/ directory
 5. This module reads it automatically
 """
@@ -233,7 +233,7 @@ class TradingViewImporter:
         
         logger.info(f"Imported {len(bars)} bars from {filepath}")
         if bars:
-            logger.info(f"  Date range: {bars[0].timestamp} → {bars[-1].timestamp}")
+            logger.info(f"  Date range: {bars[0].timestamp} -> {bars[-1].timestamp}")
             logger.info(f"  Price range: {min(b.low for b in bars):.2f} - {max(b.high for b in bars):.2f}")
 
         return bars
@@ -367,8 +367,8 @@ class DataPipeline:
     """
     Main data pipeline coordinating all data sources.
     
-    For backtesting: TradingView CSV → BarData → Feature Engine
-    For live trading: Tradovate WebSocket → BarData → Feature Engine
+    For backtesting: TradingView CSV -> BarData -> Feature Engine
+    For live trading: Tradovate WebSocket -> BarData -> Feature Engine
     """
 
     def __init__(self, config, db_manager=None):

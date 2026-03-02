@@ -241,20 +241,20 @@ class TestDrawdown:
         assert engine.current_drawdown_pct(50000) == 0.0
 
     def test_simple_drawdown(self):
-        # Win 100, lose 50 → peak=100, dd=50
+        # Win 100, lose 50 -> peak=100, dd=50
         trades = [_trade(100), _trade(-50)]
         engine = _engine(trades)
         # dd = 50 / 50000 * 100 = 0.1%
         assert engine.current_drawdown_pct(50000) == pytest.approx(0.1)
 
     def test_large_drawdown(self):
-        # Lose $1500 straight → dd = 1500/50000 = 3%
+        # Lose $1500 straight -> dd = 1500/50000 = 3%
         trades = [_trade(-500)] * 3
         engine = _engine(trades)
         assert engine.current_drawdown_pct(50000) == pytest.approx(3.0)
 
     def test_recovery_resets_peak(self):
-        # Win 100, lose 30, win 100 → peak=200, current=170, dd=30
+        # Win 100, lose 30, win 100 -> peak=200, current=170, dd=30
         trades = [_trade(100), _trade(-30), _trade(100)]
         engine = _engine(trades)
         # Peak was 100 after first trade, fell to 70 after loss = dd of 30
@@ -296,12 +296,12 @@ class TestC1C2Split:
 class TestAvgWinnerLoser:
 
     def test_avg_winner_pts(self):
-        # Three winners at $20 each → 20/2.0 = 10 pts
+        # Three winners at $20 each -> 20/2.0 = 10 pts
         engine = _engine(_winning_trades(3, pnl=20.0))
         assert engine.avg_winner_pts == pytest.approx(10.0)
 
     def test_avg_loser_pts(self):
-        # Two losers at -$30 each → 30/2.0 = 15 pts
+        # Two losers at -$30 each -> 30/2.0 = 15 pts
         engine = _engine(_losing_trades(2, pnl=-30.0))
         assert engine.avg_loser_pts == pytest.approx(15.0)
 
@@ -321,7 +321,7 @@ class TestAvgWinnerLoser:
 class TestWRZScore:
 
     def test_wr_z_score_matching(self):
-        """WR matching backtest → z ≈ 0."""
+        """WR matching backtest -> z ≈ 0."""
         # Backtest WR = 61.9%. Build trades with ~62% WR
         trades = _mixed_trades(62, 38)  # 62% WR
         engine = _engine(trades)
@@ -330,14 +330,14 @@ class TestWRZScore:
         assert abs(z) < 0.5
 
     def test_wr_z_score_much_worse(self):
-        """WR much worse → large negative z."""
+        """WR much worse -> large negative z."""
         trades = _mixed_trades(30, 70)  # 30% WR vs 61.9%
         engine = _engine(trades)
         z = engine.wr_z_score()
         assert z < -5.0  # Very significantly below
 
     def test_wr_z_score_much_better(self):
-        """WR much better → large positive z."""
+        """WR much better -> large positive z."""
         trades = _mixed_trades(90, 10)  # 90% WR vs 61.9%
         engine = _engine(trades)
         z = engine.wr_z_score()
@@ -360,7 +360,7 @@ class TestWRZScore:
 class TestPFZScore:
 
     def test_pf_z_score_matching(self):
-        """PF matching backtest → z ≈ 0."""
+        """PF matching backtest -> z ≈ 0."""
         # Build trades with PF ≈ 1.73
         # gross_profit / gross_loss = 1.73
         # e.g. 62 wins at $20 = $1240, 38 losses at $18.53 ≈ $704
@@ -371,7 +371,7 @@ class TestPFZScore:
         assert abs(z) < 1.0
 
     def test_pf_z_score_much_worse(self):
-        """PF << backtest → large negative z."""
+        """PF << backtest -> large negative z."""
         trades = _mixed_trades(30, 70)
         # PF = (30*20) / (70*15) = 600/1050 ≈ 0.57
         engine = _engine(trades)
@@ -396,7 +396,7 @@ class TestSignificance:
         assert engine.is_wr_significant() is True
 
     def test_not_significant_small_sample(self):
-        """Small sample → not significant even if different."""
+        """Small sample -> not significant even if different."""
         trades = _mixed_trades(3, 7)  # 30% WR but n=10
         engine = _engine(trades)
         # With n=10, SE is large so z won't exceed 1.96
@@ -408,7 +408,7 @@ class TestSignificance:
         assert engine2.is_wr_significant() is False
 
     def test_matching_not_significant(self):
-        """WR matching backtest → not significant."""
+        """WR matching backtest -> not significant."""
         trades = _mixed_trades(62, 38)
         engine = _engine(trades)
         assert engine.is_wr_significant() is False
@@ -421,7 +421,7 @@ class TestSignificance:
 class TestRedAlerts:
 
     def test_red_pf_below_threshold(self):
-        """PF < 0.8 after 50+ trades → RED."""
+        """PF < 0.8 after 50+ trades -> RED."""
         trades = _mixed_trades(20, 40)  # 33% WR, PF ~0.89
         # Actually PF = (20*20)/(40*15) = 400/600 = 0.67
         trades += _losing_trades(10)  # push to 50+
@@ -433,7 +433,7 @@ class TestRedAlerts:
         assert len(red_pf) == 1
 
     def test_red_wr_below_threshold(self):
-        """WR < 45% after 50+ trades → RED."""
+        """WR < 45% after 50+ trades -> RED."""
         trades = _mixed_trades(20, 30) + _losing_trades(10)
         engine = _engine(trades)
         # 20 wins / 60 total = 33.3%
@@ -444,8 +444,8 @@ class TestRedAlerts:
         assert len(red_wr) == 1
 
     def test_red_dd_above_3pct(self):
-        """Max DD > 3% → RED."""
-        trades = [_trade(-500)] * 4  # -$2000 → 4% DD
+        """Max DD > 3% -> RED."""
+        trades = [_trade(-500)] * 4  # -$2000 -> 4% DD
         engine = _engine(trades)
         assert engine.max_drawdown_pct(50000) > 3.0
         alerts = AlertEngine().evaluate(engine)
@@ -453,7 +453,7 @@ class TestRedAlerts:
         assert len(red_dd) == 1
 
     def test_red_consec_losses_10(self):
-        """10+ consecutive losses → RED."""
+        """10+ consecutive losses -> RED."""
         trades = _losing_trades(10)
         engine = _engine(trades)
         alerts = AlertEngine().evaluate(engine)
@@ -461,7 +461,7 @@ class TestRedAlerts:
         assert len(red_cl) == 1
 
     def test_red_daily_loss_exceeds_500(self):
-        """Daily loss > $500 → RED."""
+        """Daily loss > $500 -> RED."""
         today = "2026-03-01T14:00:00"
         trades = [_trade(-200, ts=today)] * 3  # -$600
         engine = _engine(trades)
@@ -487,9 +487,9 @@ class TestRedAlerts:
 class TestYellowAlerts:
 
     def test_yellow_pf_warning_range(self):
-        """PF between 0.8-1.2 after 30+ trades → YELLOW."""
+        """PF between 0.8-1.2 after 30+ trades -> YELLOW."""
         # Need PF between 0.8 and 1.2 with 30+ trades
-        # 18 wins at $20 = $360, 17 losses at $20 = $340 → PF = 1.06
+        # 18 wins at $20 = $360, 17 losses at $20 = $340 -> PF = 1.06
         trades = [_trade(20)] * 18 + [_trade(-20)] * 17
         engine = _engine(trades)
         assert 0.8 <= engine.profit_factor < 1.2
@@ -499,7 +499,7 @@ class TestYellowAlerts:
         assert len(yellow_pf) == 1
 
     def test_yellow_wr_warning_range(self):
-        """WR between 45-55% after 30+ trades → YELLOW."""
+        """WR between 45-55% after 30+ trades -> YELLOW."""
         trades = _mixed_trades(16, 19)  # 45.7% WR
         engine = _engine(trades)
         assert 45 <= engine.win_rate < 55
@@ -509,8 +509,8 @@ class TestYellowAlerts:
         assert len(yellow_wr) == 1
 
     def test_yellow_dd_above_2pct(self):
-        """DD > 2% (but < 3%) → YELLOW only."""
-        trades = [_trade(-400)] * 3  # -$1200 → 2.4%
+        """DD > 2% (but < 3%) -> YELLOW only."""
+        trades = [_trade(-400)] * 3  # -$1200 -> 2.4%
         engine = _engine(trades)
         dd = engine.max_drawdown_pct(50000)
         assert 2.0 < dd < 3.0
@@ -521,7 +521,7 @@ class TestYellowAlerts:
         assert len(red_dd) == 0
 
     def test_yellow_consec_losses_6(self):
-        """6-9 consecutive losses → YELLOW."""
+        """6-9 consecutive losses -> YELLOW."""
         trades = _losing_trades(7)
         engine = _engine(trades)
         alerts = AlertEngine().evaluate(engine)
@@ -532,7 +532,7 @@ class TestYellowAlerts:
 
     def test_no_yellow_if_red(self):
         """RED supersedes YELLOW for same category."""
-        trades = _losing_trades(12)  # 12 consec → RED, not YELLOW
+        trades = _losing_trades(12)  # 12 consec -> RED, not YELLOW
         engine = _engine(trades)
         alerts = AlertEngine().evaluate(engine)
         consec_alerts = [a for a in alerts if "CONSEC" in a.category]
@@ -547,7 +547,7 @@ class TestYellowAlerts:
 class TestGreenStatus:
 
     def test_green_healthy_stats(self):
-        """PF > 1.2, WR > 55%, DD < 1.5% → GREEN."""
+        """PF > 1.2, WR > 55%, DD < 1.5% -> GREEN."""
         # Interleave wins/losses to avoid consecutive loss streaks
         trades = []
         for i in range(50):
@@ -563,7 +563,7 @@ class TestGreenStatus:
         assert status == AlertLevel.GREEN
 
     def test_green_no_trades(self):
-        """No trades → GREEN (no data to alert on)."""
+        """No trades -> GREEN (no data to alert on)."""
         engine = _engine([])
         status = AlertEngine().overall_status(engine)
         assert status == AlertLevel.GREEN
@@ -576,8 +576,8 @@ class TestGreenStatus:
         assert status == AlertLevel.RED
 
     def test_overall_status_yellow(self):
-        """YELLOW alerts with no RED → YELLOW."""
-        trades = _losing_trades(7)  # 7 consec → YELLOW
+        """YELLOW alerts with no RED -> YELLOW."""
+        trades = _losing_trades(7)  # 7 consec -> YELLOW
         engine = _engine(trades)
         # Below 50 trades so PF/WR RED won't fire
         assert engine.total_trades < 50
@@ -862,7 +862,7 @@ class TestGenerateWeeklyReport:
             else:
                 trades.append(_trade_on("2026-03-02", 20))
         report = generate_weekly_report(trades, _baseline(), "2026-03-02")
-        # WR should differ from 61.9% baseline → non-zero Z
+        # WR should differ from 61.9% baseline -> non-zero Z
         assert report.wr_z_score != 0.0
         assert report.pf_z_score != 0.0
 
@@ -1213,7 +1213,7 @@ class TestWeeklyReportRendering:
 class TestFridayRTHClose:
 
     def test_friday_after_close(self):
-        """Friday 16:30 ET → True."""
+        """Friday 16:30 ET -> True."""
         from unittest.mock import patch
         friday_1630_et = datetime(2026, 3, 6, 21, 30, 0, tzinfo=timezone.utc)  # 16:30 ET = 21:30 UTC
         with patch("scripts.ibkr_monitor.datetime") as mock_dt:
@@ -1229,7 +1229,7 @@ class TestFridayRTHClose:
         assert et_time.hour >= 16
 
     def test_monday_not_friday(self):
-        """Monday at any time → False (not Friday)."""
+        """Monday at any time -> False (not Friday)."""
         monday = datetime(2026, 3, 2, 21, 0, 0, tzinfo=timezone.utc)
         from datetime import timedelta as td
         et_offset = td(hours=-5)

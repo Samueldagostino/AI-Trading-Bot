@@ -627,7 +627,7 @@ def compute_weekly_reports(
         return []
 
     # Find all unique weeks
-    weeks_seen: Dict[str, str] = {}  # monday → friday
+    weeks_seen: Dict[str, str] = {}  # monday -> friday
     for t in trades:
         if not t.timestamp:
             continue
@@ -816,7 +816,7 @@ def _render_weekly_report(
     lines.append("")
     lines.append(bar)
     lines.append(
-        f"  WEEKLY REPORT  {report.week_start} → {report.week_end}"
+        f"  WEEKLY REPORT  {report.week_start} -> {report.week_end}"
     )
     lines.append(bar)
 

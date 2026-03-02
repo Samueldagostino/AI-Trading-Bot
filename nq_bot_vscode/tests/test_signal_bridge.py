@@ -2,8 +2,8 @@
 Tests for SignalBridge — the signal-to-execution translation layer.
 
 Covers:
-  - Long signal → correct BUY-side OrderRequest with C1+C2
-  - Short signal → correct SELL-side OrderRequest with C1+C2
+  - Long signal -> correct BUY-side OrderRequest with C1+C2
+  - Short signal -> correct SELL-side OrderRequest with C1+C2
   - Stop/target price calculations match config
   - Signal metadata preserved on order audit trail
   - Rejected signals (below threshold) produce no orders
@@ -77,7 +77,7 @@ def _short_decision(**overrides) -> TradeDecision:
 
 
 # ═══════════════════════════════════════════════════════════════
-# LONG SIGNAL → BUY OrderRequest with C1+C2
+# LONG SIGNAL -> BUY OrderRequest with C1+C2
 # ═══════════════════════════════════════════════════════════════
 
 class TestLongSignal:
@@ -99,16 +99,16 @@ class TestLongSignal:
     def test_stop_loss_below_entry(self, bridge):
         """Long stop = entry - (ATR × atr_multiplier_stop)."""
         result = bridge.translate(_long_decision())
-        # ATR=10, multiplier=2.0 → stop distance = 20pts
+        # ATR=10, multiplier=2.0 -> stop distance = 20pts
         # Entry 21000 - 20 = 20980
         assert result.params.stop_loss == 20980.0
 
     def test_c1_target_above_entry(self, bridge):
         """Long target = entry + (ATR × atr_multiplier_target), with min R:R."""
         result = bridge.translate(_long_decision())
-        # ATR=10, target multiplier=1.5 → raw target distance = 15pts
-        # Stop distance = 20pts, min R:R = 1.5 → min target = 20*1.5 = 30pts
-        # 30 > 15, so R:R enforcement kicks in → target distance = 30pts
+        # ATR=10, target multiplier=1.5 -> raw target distance = 15pts
+        # Stop distance = 20pts, min R:R = 1.5 -> min target = 20*1.5 = 30pts
+        # 30 > 15, so R:R enforcement kicks in -> target distance = 30pts
         # Entry 21000 + 30 = 21030
         assert result.params.c1_take_profit == 21030.0
 
@@ -124,7 +124,7 @@ class TestLongSignal:
 
 
 # ═══════════════════════════════════════════════════════════════
-# SHORT SIGNAL → SELL OrderRequest with C1+C2
+# SHORT SIGNAL -> SELL OrderRequest with C1+C2
 # ═══════════════════════════════════════════════════════════════
 
 class TestShortSignal:
@@ -148,7 +148,7 @@ class TestShortSignal:
     def test_c1_target_below_entry(self, bridge):
         """Short target = entry - target distance."""
         result = bridge.translate(_short_decision())
-        # Same R:R enforcement → target distance = 30pts
+        # Same R:R enforcement -> target distance = 30pts
         # Entry 21000 - 30 = 20970
         assert result.params.c1_take_profit == 20970.0
 
@@ -184,14 +184,14 @@ class TestStopTargetCalculation:
         bridge = SignalBridge(config)
         decision = _long_decision(atr=10.0)
         result = bridge.translate(decision)
-        # Stop dist = 10, target dist = 30, R:R = 3.0 > 1.5 → no override
+        # Stop dist = 10, target dist = 30, R:R = 3.0 > 1.5 -> no override
         assert result.params.c1_take_profit == 21030.0
 
     def test_min_rr_ratio_enforced(self, bridge, risk_config):
         """If raw R:R < min_rr_ratio, target is bumped up."""
         # Default: stop mult=2.0, target mult=1.5
         # Raw R:R = 1.5/2.0 = 0.75 < min 1.5
-        # → target_dist = stop_dist * 1.5 = 20 * 1.5 = 30
+        # -> target_dist = stop_dist * 1.5 = 20 * 1.5 = 30
         decision = _long_decision(atr=10.0)
         result = bridge.translate(decision)
         assert result.metadata["rr_ratio"] == 1.5
@@ -203,15 +203,15 @@ class TestStopTargetCalculation:
 
     def test_target_distance_in_metadata(self, bridge):
         result = bridge.translate(_long_decision(atr=10.0))
-        # R:R enforced → 30pts
+        # R:R enforced -> 30pts
         assert result.metadata["target_distance_pts"] == 30.0
 
     def test_prices_rounded_to_2dp(self, bridge):
         decision = _long_decision(atr=7.33)
         result = bridge.translate(decision)
         # Stop dist = 7.33 * 2.0 = 14.66
-        # Target dist = 7.33 * 1.5 = 10.995 → 11.0 rounded
-        # R:R = 11.0 / 14.66 = 0.75 < 1.5 → enforced: 14.66 * 1.5 = 21.99
+        # Target dist = 7.33 * 1.5 = 10.995 -> 11.0 rounded
+        # R:R = 11.0 / 14.66 = 0.75 < 1.5 -> enforced: 14.66 * 1.5 = 21.99
         assert result.params.stop_loss == round(21000.0 - 14.66, 2)
         assert result.params.c1_take_profit == round(21000.0 + 21.99, 2)
 
@@ -226,13 +226,13 @@ class TestStopTargetCalculation:
     def test_short_stop_above_entry(self, bridge):
         decision = _short_decision(entry_price=21500.0, atr=8.0)
         result = bridge.translate(decision)
-        # Stop dist = 16pts → stop at 21516
+        # Stop dist = 16pts -> stop at 21516
         assert result.params.stop_loss == 21516.0
 
     def test_short_target_below_entry(self, bridge):
         decision = _short_decision(entry_price=21500.0, atr=8.0)
         result = bridge.translate(decision)
-        # Target enforced: 16 * 1.5 = 24pts → target at 21476
+        # Target enforced: 16 * 1.5 = 24pts -> target at 21476
         assert result.params.c1_take_profit == 21476.0
 
     def test_config_values_match_defaults(self, risk_config):
@@ -356,7 +356,7 @@ class TestRejectedSignals:
         assert result.approved is True
 
     def test_stop_distance_exceeds_max(self, bridge):
-        """ATR so large that stop distance > 30pts → rejected."""
+        """ATR so large that stop distance > 30pts -> rejected."""
         result = bridge.translate(_long_decision(atr=20.0))
         # stop_dist = 20 * 2.0 = 40pts > 30
         assert result.approved is False

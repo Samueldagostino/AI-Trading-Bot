@@ -264,7 +264,7 @@ class CandleAggregator:
     def _get_window_start(ts: datetime) -> datetime:
         """
         Compute the 2-minute window start for a given timestamp.
-        E.g. 10:03:47 → 10:02:00, 10:04:01 → 10:04:00.
+        E.g. 10:03:47 -> 10:02:00, 10:04:01 -> 10:04:00.
         """
         floored_minute = ts.minute - (ts.minute % 2)
         return ts.replace(minute=floored_minute, second=0, microsecond=0)
@@ -350,7 +350,7 @@ class CandleAggregator:
             missed = int(gap / CANDLE_INTERVAL_SECONDS)
             self._consecutive_gaps += missed
             logger.warning(
-                "Candle gap: %d missed windows (%s → %s, %.0fs gap)",
+                "Candle gap: %d missed windows (%s -> %s, %.0fs gap)",
                 missed,
                 self._last_candle_time.isoformat(),
                 current_time.isoformat(),
@@ -958,7 +958,7 @@ class IBKRClient:
             self._session = None
             return False
 
-        logger.info("Contract resolved: %s %s → conid %d",
+        logger.info("Contract resolved: %s %s -> conid %d",
                      self._contract.symbol, self._contract.expiry,
                      self._contract.conid)
 
@@ -1094,49 +1094,72 @@ class IBKRClient:
         """
         Resolve the continuous front-month futures contract.
 
-        1. Search via /iserver/secdef/search
-        2. Get contract details
-        3. Select front-month (nearest expiry)
+        1. Search via /iserver/secdef/search (POST body: {"symbol": "..."} only)
+        2. Find the FUT section in the response and parse available months
+        3. Determine front-month from the months string (e.g. "MAR26;JUN26;...")
+        4. Get specific contract details via /iserver/contract/info
+
+        Expected response format:
+        [{"conid": "362687422", "companyHeader": "...", "symbol": "MNQ",
+          "sections": [{"secType": "FUT", "months": "MAR26;JUN26;...",
+                        "exchange": "CME"}]}]
         """
-        # Step 1: Search for the symbol
+        # Step 1: Search for the symbol — ONLY send {"symbol": ...}
+        # The /iserver/secdef/search endpoint returns 500 if extra fields
+        # (secType, exchange, name, etc.) are included in the POST body.
         search_data = await self._post(
             "/iserver/secdef/search",
-            {"symbol": symbol, "secType": "FUT", "name": symbol}
+            {"symbol": symbol}
         )
 
         if not search_data or not isinstance(search_data, list):
             logger.error("Contract search returned no results for %s", symbol)
             return None
 
-        # Find the futures entry
+        # Step 2: Find the entry whose sections contain secType "FUT"
         futures_entry = None
+        fut_section = None
         for entry in search_data:
-            if entry.get("secType") == "FUT" or "FUT" in str(entry.get("sections", [])):
-                futures_entry = entry
+            for section in entry.get("sections", []):
+                if isinstance(section, dict) and section.get("secType") == "FUT":
+                    futures_entry = entry
+                    fut_section = section
+                    break
+            if futures_entry:
                 break
 
         if not futures_entry:
             # Fallback: use first result
             futures_entry = search_data[0]
+            fut_section = None
 
         conid = futures_entry.get("conid", 0)
-        sections = futures_entry.get("sections", [])
+        # conid may be returned as a string from the API
+        if isinstance(conid, str):
+            try:
+                conid = int(conid)
+            except (ValueError, TypeError):
+                conid = 0
 
-        # If sections contain futures months, get them
-        if sections:
-            for section in sections:
-                if isinstance(section, dict) and section.get("secType") == "FUT":
-                    months = section.get("months", "")
-                    exchange = section.get("exchange", "")
-                    break
-            else:
-                months = ""
-                exchange = futures_entry.get("exchange", "")
-        else:
-            months = ""
-            exchange = futures_entry.get("exchange", "")
+        exchange = ""
+        months = ""
+        if fut_section:
+            months = fut_section.get("months", "")
+            exchange = fut_section.get("exchange", "")
 
-        # Step 2: Get specific contract details via secdef/info
+        # Step 3: Parse front-month from the months string (e.g. "MAR26;JUN26;SEP26")
+        front_month = ""
+        if months:
+            month_list = [m.strip() for m in months.split(";") if m.strip()]
+            if month_list:
+                # The first month in the list is the front-month (nearest expiry)
+                front_month = month_list[0]
+                logger.info(
+                    "Contract search: %s has %d expiries, front-month: %s",
+                    symbol, len(month_list), front_month,
+                )
+
+        # Step 4: Get specific contract details via /iserver/contract/info
         if conid:
             info = await self._get(
                 "/iserver/contract/info",
@@ -1147,18 +1170,17 @@ class IBKRClient:
                     conid=conid,
                     symbol=info.get("symbol", symbol),
                     exchange=info.get("exchange", exchange),
-                    expiry=info.get("maturity_date", ""),
+                    expiry=info.get("maturity_date", front_month),
                     description=info.get("company_name", ""),
                 )
 
-        # Step 3: If no direct conid, try to get front month from secdef/info
-        # Use the futures_entry conid as-is (may be the front-month already)
+        # Fallback: build ContractInfo from the search result directly
         if conid:
             return ContractInfo(
                 conid=conid,
                 symbol=futures_entry.get("symbol", symbol),
                 exchange=exchange,
-                expiry=futures_entry.get("maturity_date", ""),
+                expiry=front_month,
                 description=futures_entry.get("companyHeader", ""),
             )
 
@@ -1178,7 +1200,7 @@ class IBKRClient:
 
         if new_contract.conid != self._contract.conid:
             logger.info(
-                "CONTRACT ROLLOVER detected: %s (conid %d) → %s (conid %d)",
+                "CONTRACT ROLLOVER detected: %s (conid %d) -> %s (conid %d)",
                 self._contract.expiry, self._contract.conid,
                 new_contract.expiry, new_contract.conid,
             )
@@ -1328,7 +1350,7 @@ class IBKRClient:
                 if resp.status == 200:
                     return await resp.json()
                 elif resp.status == 401:
-                    logger.warning("GET %s → 401 Unauthorized (session expired)", endpoint)
+                    logger.warning("GET %s -> 401 Unauthorized (session expired)", endpoint)
                     self._session_valid = False
                     return None
                 else:
@@ -1354,7 +1376,7 @@ class IBKRClient:
                 if resp.status == 200:
                     return await resp.json()
                 elif resp.status == 401:
-                    logger.warning("POST %s → 401 Unauthorized", endpoint)
+                    logger.warning("POST %s -> 401 Unauthorized", endpoint)
                     self._session_valid = False
                     return None
                 else:

@@ -4,10 +4,10 @@ IBKR Live Trading Runner
 Entry point for IBKR Client Portal Gateway paper/live trading.
 
 Pipeline (uses IBKRLivePipeline — no logic duplicated):
-  IBKRClient → CandleAggregator → candle_to_bar() → Bar
-    → Feature Engine → Signal Aggregator → HC Filter → Risk Engine
-      → SignalBridge → IBKROrderExecutor → PositionManager
-        → Reconciliation loop (30s) → Kill switch if mismatch
+  IBKRClient -> CandleAggregator -> candle_to_bar() -> Bar
+    -> Feature Engine -> Signal Aggregator -> HC Filter -> Risk Engine
+      -> SignalBridge -> IBKROrderExecutor -> PositionManager
+        -> Reconciliation loop (30s) -> Kill switch if mismatch
 
 Startup sequence:
   1. Load .env, validate required IBKR env vars
@@ -218,7 +218,7 @@ class IBKRLiveRunner:
     # ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Full startup sequence: validate → connect → warmup → run."""
+        """Full startup sequence: validate -> connect -> warmup -> run."""
         self._print_banner()
 
         # Build pipeline
@@ -358,7 +358,7 @@ class IBKRLiveRunner:
     ) -> None:
         """Handle RTH ↔ ETH transitions."""
         logger.info(
-            "SESSION TRANSITION: %s → %s", old.value, new.value
+            "SESSION TRANSITION: %s -> %s", old.value, new.value
         )
         self._log_decision("session_transition", {
             "from": old.value,
@@ -521,19 +521,19 @@ class IBKRLiveRunner:
         t = h + m / 60.0
 
         if 9.5 <= t < 16.0:
-            # Currently RTH → next boundary is RTH close at 16:00
+            # Currently RTH -> next boundary is RTH close at 16:00
             target = et_now.replace(
                 hour=16, minute=0, second=0, microsecond=0
             )
             label = "RTH close"
         elif t < 9.5:
-            # Before RTH open → next boundary is RTH open at 09:30
+            # Before RTH open -> next boundary is RTH open at 09:30
             target = et_now.replace(
                 hour=9, minute=30, second=0, microsecond=0
             )
             label = "RTH open"
         else:
-            # After 16:00 (ETH evening) → next boundary is RTH open tomorrow
+            # After 16:00 (ETH evening) -> next boundary is RTH open tomorrow
             target = (et_now + timedelta(days=1)).replace(
                 hour=9, minute=30, second=0, microsecond=0
             )

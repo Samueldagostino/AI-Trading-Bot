@@ -10,7 +10,7 @@ Architecture:
   Phase 1 — Run the full backtest ONCE, intercepting every trade entry
             and caching all 2m bar data from entry forward.
   Phase 2 — For each experiment config, replay exits using cached data.
-            No feature computation needed → ~1000x faster.
+            No feature computation needed -> ~1000x faster.
 
 Experiments:
   A — Vary C1 target ratio: 1.0x, 1.25x, 1.5x (current), 1.75x, 2.0x, 2.5x stop
@@ -156,7 +156,7 @@ def filter_to_months(tf_bars: Dict[str, List[BarData]], target_months: set) -> D
 
 
 def build_2m_index(bars_2m: List[BarData]) -> Dict[datetime, int]:
-    """Build timestamp → index lookup for 2m bars."""
+    """Build timestamp -> index lookup for 2m bars."""
     return {b.timestamp: i for i, b in enumerate(bars_2m)}
 
 
@@ -651,7 +651,7 @@ def replay_trade_pure_runner(cap: TradeCapture) -> Optional[ReplayResult]:
                 c1_exit_reason = c2_exit_reason = "stop"
                 break
 
-            # Check if 1x stop in profit → move to BE and start running
+            # Check if 1x stop in profit -> move to BE and start running
             if direction == "long":
                 pts_profit = price - entry
             else:
@@ -757,8 +757,8 @@ def replay_trade_pure_runner(cap: TradeCapture) -> Optional[ReplayResult]:
 def replay_trade_be_step(cap: TradeCapture) -> Optional[ReplayResult]:
     """
     Replay with breakeven-step C1 exit:
-    - At 1.0x stop in profit → move C1 stop to breakeven
-    - At 2.0x stop in profit → exit C1 at market
+    - At 1.0x stop in profit -> move C1 stop to breakeven
+    - At 2.0x stop in profit -> exit C1 at market
     """
     direction = cap.direction
     entry = cap.entry_price
@@ -824,7 +824,7 @@ def replay_trade_be_step(cap: TradeCapture) -> Optional[ReplayResult]:
             else:
                 pts_profit = entry - price
 
-            # Step 1: At 1.0x → move C1 to BE
+            # Step 1: At 1.0x -> move C1 to BE
             if pts_profit >= stop_dist * 1.0:
                 if direction == "long":
                     be_stop = entry + C2_BE_BUFFER
@@ -837,7 +837,7 @@ def replay_trade_be_step(cap: TradeCapture) -> Optional[ReplayResult]:
                         c1_stop = round(be_stop, 2)
                         c2_stop = round(be_stop, 2)
 
-            # Step 2: At 2.0x → exit C1 at market
+            # Step 2: At 2.0x -> exit C1 at market
             if pts_profit >= stop_dist * 2.0:
                 c1_exit_price = price
                 c1_exit_reason = "be_step_2x"
@@ -1333,7 +1333,7 @@ async def main():
         fn = lambda cap, r=ratio: replay_trade_standard(cap, r)
         r = run_experiment(captures, fn, label)
         all_results[f"A_{ratio}x"] = r
-        print(f"  {label:<16} → {r['trades']}t  PF {r['pf']:.2f}  "
+        print(f"  {label:<16} -> {r['trades']}t  PF {r['pf']:.2f}  "
               f"C1 ${r['c1_pnl']:+,.0f}  C2 ${r['c2_pnl']:+,.0f}  "
               f"Total ${r['total_pnl']:+,.0f}")
     print()
@@ -1346,7 +1346,7 @@ async def main():
         fn = lambda cap, b=bars: replay_trade_time_exit(cap, b)
         r = run_experiment(captures, fn, label)
         all_results[f"B_{bars}bars"] = r
-        print(f"  {label:<16} → {r['trades']}t  PF {r['pf']:.2f}  "
+        print(f"  {label:<16} -> {r['trades']}t  PF {r['pf']:.2f}  "
               f"C1 ${r['c1_pnl']:+,.0f}  C2 ${r['c2_pnl']:+,.0f}  "
               f"Total ${r['total_pnl']:+,.0f}")
     print()
@@ -1357,7 +1357,7 @@ async def main():
     fn = lambda cap: replay_trade_pure_runner(cap)
     r = run_experiment(captures, fn, "C: Pure Runner")
     all_results["C_pure_runner"] = r
-    print(f"  Pure Runner     → {r['trades']}t  PF {r['pf']:.2f}  "
+    print(f"  Pure Runner     -> {r['trades']}t  PF {r['pf']:.2f}  "
           f"C1 ${r['c1_pnl']:+,.0f}  C2 ${r['c2_pnl']:+,.0f}  "
           f"Total ${r['total_pnl']:+,.0f}")
     print()
@@ -1368,7 +1368,7 @@ async def main():
     fn = lambda cap: replay_trade_standard(cap, 0.5)
     r = run_experiment(captures, fn, "D: 0.5x scalp")
     all_results["D_scalp_0.5x"] = r
-    print(f"  0.5x scalp      → {r['trades']}t  PF {r['pf']:.2f}  "
+    print(f"  0.5x scalp      -> {r['trades']}t  PF {r['pf']:.2f}  "
           f"C1 ${r['c1_pnl']:+,.0f}  C2 ${r['c2_pnl']:+,.0f}  "
           f"Total ${r['total_pnl']:+,.0f}")
     print()
@@ -1379,7 +1379,7 @@ async def main():
     fn = lambda cap: replay_trade_be_step(cap)
     r = run_experiment(captures, fn, "E: BE Step")
     all_results["E_be_step"] = r
-    print(f"  BE Step         → {r['trades']}t  PF {r['pf']:.2f}  "
+    print(f"  BE Step         -> {r['trades']}t  PF {r['pf']:.2f}  "
           f"C1 ${r['c1_pnl']:+,.0f}  C2 ${r['c2_pnl']:+,.0f}  "
           f"Total ${r['total_pnl']:+,.0f}")
     print()

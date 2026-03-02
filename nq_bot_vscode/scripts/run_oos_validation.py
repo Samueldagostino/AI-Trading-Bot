@@ -451,7 +451,7 @@ async def main():
     for tf in sorted(tf_bars.keys()):
         bars = tf_bars[tf]
         print(f"  {tf:>4s}: {len(bars):>7,} bars  "
-              f"({bars[0].timestamp.strftime('%Y-%m-%d')} → "
+              f"({bars[0].timestamp.strftime('%Y-%m-%d')} -> "
               f"{bars[-1].timestamp.strftime('%Y-%m-%d')})")
 
     # Segment by month

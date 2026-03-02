@@ -9,18 +9,18 @@ THE STRATEGY:
           Once unrealized profit >= 3.0pts, activate a 2.5pt trailing stop
           from the high-water mark. Fallback: exit at market after 12 bars
           if trailing never activates.
-  C2:     Runner → stop to breakeven+1 after C1 exits, then trail
+  C2:     Runner -> stop to breakeven+1 after C1 exits, then trail
 
 LIFECYCLE:
-  1. SIGNAL  → Risk approved → Enter 2 MNQ
-  2. PHASE_1 → Both contracts open, initial stop on both, C1 trailing armed
-  3. C1_EXIT → Trailing stop hit (or 12-bar fallback) → close C1, C2 stop → BE+1
-  4. RUNNING → C2 trailing with ATR-based or fixed trail
-  5. C2_EXIT → C2 hits trailing stop, time stop, or max target
-  6. DONE    → Record PnL, update risk engine
+  1. SIGNAL  -> Risk approved -> Enter 2 MNQ
+  2. PHASE_1 -> Both contracts open, initial stop on both, C1 trailing armed
+  3. C1_EXIT -> Trailing stop hit (or 12-bar fallback) -> close C1, C2 stop -> BE+1
+  4. RUNNING -> C2 trailing with ATR-based or fixed trail
+  5. C2_EXIT -> C2 hits trailing stop, time stop, or max target
+  6. DONE    -> Record PnL, update risk engine
 
 Win-win math ($2/point MNQ):
-  C1 trails 5pts profit → $10
+  C1 trails 5pts profit -> $10
   C2 at breakeven+1 = $2
   Total minimum win: $12
   C1 trails 10pts + C2 runs 80pts = $20 + $160 = $180

@@ -4,9 +4,9 @@ Single-Week Replay: Feb 23-27, 2026
 Replays one week of FirstRate 1-minute MNQ data through the FULL
 validated pipeline:
 
-  NQFeatureEngine → HTFBiasEngine → RegimeDetector → SweepDetector
-  → SignalAggregator → HC Filter (≥0.75) → HTF Gate (≥0.3)
-  → RiskEngine (stop ≤30pts) → ScaleOutExecutor (2-contract, Variant C)
+  NQFeatureEngine -> HTFBiasEngine -> RegimeDetector -> SweepDetector
+  -> SignalAggregator -> HC Filter (≥0.75) -> HTF Gate (≥0.3)
+  -> RiskEngine (stop ≤30pts) -> ScaleOutExecutor (2-contract, Variant C)
 
 Uses the REAL modules from the codebase — no stubs, no reimplementation.
 
@@ -101,14 +101,14 @@ async def run_week_replay() -> Dict:
     for tf in sorted(tf_bars.keys()):
         bars = tf_bars[tf]
         print(f"  {tf:>4s}: {len(bars):>7,} bars  "
-              f"({bars[0].timestamp.strftime('%Y-%m-%d')} → "
+              f"({bars[0].timestamp.strftime('%Y-%m-%d')} -> "
               f"{bars[-1].timestamp.strftime('%Y-%m-%d')})")
 
     # ── Filter to replay window ──
     tf_bars = filter_by_date(tf_bars, REPLAY_START, REPLAY_END)
 
     if EXEC_TF not in tf_bars:
-        print(f"\nERROR: No {EXEC_TF} data in {REPLAY_START} → {REPLAY_END}")
+        print(f"\nERROR: No {EXEC_TF} data in {REPLAY_START} -> {REPLAY_END}")
         sys.exit(1)
 
     exec_count = len(tf_bars.get(EXEC_TF, []))
@@ -116,7 +116,7 @@ async def run_week_replay() -> Dict:
     actual_start = exec_bars[0].timestamp.strftime("%Y-%m-%d")
     actual_end = exec_bars[-1].timestamp.strftime("%Y-%m-%d")
 
-    print(f"\nReplay window: {actual_start} → {actual_end}")
+    print(f"\nReplay window: {actual_start} -> {actual_end}")
     print(f"Execution bars ({EXEC_TF}): {exec_count:,}")
 
     # Collect days present
@@ -279,8 +279,8 @@ async def run_week_replay() -> Dict:
     # ── Build comprehensive results ──
     results = {
         "replay_window": {
-            "requested": f"{REPLAY_START} → 2026-02-27",
-            "actual": f"{actual_start} → {actual_end}",
+            "requested": f"{REPLAY_START} -> 2026-02-27",
+            "actual": f"{actual_start} -> {actual_end}",
             "days_available": len(days_present),
             "days": days_present,
         },

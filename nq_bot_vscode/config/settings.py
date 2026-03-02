@@ -2,7 +2,7 @@
 NQ Trading Bot — Master Configuration
 ======================================
 CONFIGURED FOR:
-- Broker: Tradovate (paper → live)
+- Broker: Tradovate (paper -> live)
 - Instrument: MNQ (Micro Nasdaq-100)
 - Strategy: 2-contract scale-out
 - Account: $50,000
@@ -71,7 +71,7 @@ class DatabaseConfig:
 
 @dataclass
 class DiscordConfig:
-    """MikesTrades server → #alerts channel."""
+    """MikesTrades server -> #alerts channel."""
     token: str = os.getenv("DISCORD_TOKEN", "")
     channel_ids: list = field(default_factory=lambda: 
         [x.strip() for x in os.getenv("DISCORD_CHANNEL_IDS", "").split(",") if x.strip()]
@@ -148,9 +148,9 @@ class ScaleOutConfig:
     Contract 2: Runner, stop to breakeven+1 after C1 exits, then trail
 
     Win-win architecture:
-      Best:  C1 trails a big move + C2 runs big  → $40+ + $200 = $240+
-      Good:  C1 trails small move + C2 at BE     → $10  + $2   = $12
-      Worst: Both at initial stop                → Controlled loss (~$60-80)
+      Best:  C1 trails a big move + C2 runs big  -> $40+ + $200 = $240+
+      Good:  C1 trails small move + C2 at BE     -> $10  + $2   = $12
+      Worst: Both at initial stop                -> Controlled loss (~$60-80)
     """
     total_contracts: int = 2
 

@@ -8,7 +8,7 @@ enforcement.
 Responsibilities:
   1. Internal position ledger (entry price, size, side, tags, order IDs)
   2. Reconciliation loop: every 30s, query IBKR portfolio and compare
-  3. Mismatch → CRITICAL log + HALT (no auto-correction, human intervenes)
+  3. Mismatch -> CRITICAL log + HALT (no auto-correction, human intervenes)
   4. Realized P&L per trade and cumulative daily P&L
   5. Partial fill tracking (C1 fills but C2 doesn't)
   6. Immediate state update on position close (no waiting for recon cycle)

@@ -2,13 +2,13 @@
 Tests for IBKRLivePipeline — full vertical-slice integration.
 
 Covers:
-  - Bar → signal evaluation → bridge → executor → position manager
-  - No signal → no orders
-  - Bridge rejection → no orders
-  - Executor halt → pipeline stops processing
+  - Bar -> signal evaluation -> bridge -> executor -> position manager
+  - No signal -> no orders
+  - Bridge rejection -> no orders
+  - Executor halt -> pipeline stops processing
   - Fill registration with PositionManager
   - Partial fill (C1 fills, C2 rejected)
-  - Position close → P&L feeds to executor
+  - Position close -> P&L feeds to executor
   - Group fully closed clears active trade
   - Pipeline lifecycle (state transitions)
   - Status reporting
@@ -141,7 +141,7 @@ def _make_rejected_record(
 # ═══════════════════════════════════════════════════════════════
 
 class TestPipelineWiring:
-    """Full path: signal fires → bridge approves → executor fills → PM tracks."""
+    """Full path: signal fires -> bridge approves -> executor fills -> PM tracks."""
 
     @pytest.mark.asyncio
     async def test_approved_signal_places_order(
@@ -223,7 +223,7 @@ class TestPipelineWiring:
     async def test_no_signal_no_order(
         self, client, executor, position_manager
     ):
-        """No signal → nothing happens."""
+        """No signal -> nothing happens."""
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.RUNNING
         pipeline._executor = executor
@@ -325,7 +325,7 @@ class TestBridgeRejection:
 
 
 # ═══════════════════════════════════════════════════════════════
-# EXECUTOR HALT → PIPELINE STOPS
+# EXECUTOR HALT -> PIPELINE STOPS
 # ═══════════════════════════════════════════════════════════════
 
 class TestHaltPropagation:
@@ -363,7 +363,7 @@ class TestHaltPropagation:
 # ═══════════════════════════════════════════════════════════════
 
 class TestPartialFill:
-    """C1 fills but C2 rejected → partial state tracked."""
+    """C1 fills but C2 rejected -> partial state tracked."""
 
     @pytest.mark.asyncio
     async def test_c2_rejection_tracked(
@@ -445,7 +445,7 @@ class TestPartialFill:
 
 
 # ═══════════════════════════════════════════════════════════════
-# POSITION CLOSE → P&L FLOW
+# POSITION CLOSE -> P&L FLOW
 # ═══════════════════════════════════════════════════════════════
 
 class TestPositionClose:
