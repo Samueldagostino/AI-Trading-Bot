@@ -709,6 +709,9 @@ class CausalReplayEngine:
         self._rejection_count: int = 0
         self._signals_with_direction: int = 0  # Total directional signals (before HC)
 
+        # ── Shadow signal capture (for post-run simulation) ──
+        self._shadow_signals: List[Dict] = []
+
         # ── Sim time for executor patch ──
         self._current_bar_ts: Optional[datetime] = None
 
@@ -912,6 +915,30 @@ class CausalReplayEngine:
 
         return result
 
+    def _record_shadow_signal(
+        self, bar: Dict, features, direction: str, score: float,
+        stop_distance: Optional[float], rejection_reason: str, gate: int,
+    ) -> None:
+        """Record a rejected signal for post-run shadow-trade simulation."""
+        # Estimate stop if not available or invalid
+        if stop_distance is None or not math.isfinite(stop_distance) or stop_distance <= 0:
+            est = features.atr_14 * self.config.risk.atr_multiplier_stop
+            stop_distance = est if (math.isfinite(est) and est > 0) else 10.0
+
+        atr_val = features.atr_14 if math.isfinite(features.atr_14) else 0.0
+        score_val = score if math.isfinite(score) else 0.0
+
+        self._shadow_signals.append({
+            "bar_index": self._bars_processed - 1,
+            "timestamp": bar["timestamp"].isoformat(),
+            "direction": direction.upper(),
+            "score": round(score_val, 4),
+            "stop_distance": round(stop_distance, 2),
+            "atr": round(atr_val, 4),
+            "rejection_reason": rejection_reason,
+            "rejected_at_gate": gate,
+        })
+
     async def _generate_signal(
         self, bar: Dict, features, htf_bias, exec_bar: Bar
     ) -> None:
@@ -1002,6 +1029,14 @@ class CausalReplayEngine:
             sweep_stop_override = abs(bar["close"] - sweep_signal.stop_price)
 
         if entry_direction is None:
+            # Capture HTF rejection if aggregator returned a blocked signal
+            if (signal is not None and not signal.should_trade
+                    and "HTF" in (signal.rejection_reason or "")):
+                dir_str = ("LONG" if signal.direction == SignalDirection.LONG
+                           else "SHORT")
+                self._record_shadow_signal(
+                    bar, features, dir_str, signal.combined_score, None,
+                    "HTF gate block", 1)
             return
 
         # Count as a directional signal (regardless of HC outcome)
@@ -1010,11 +1045,17 @@ class CausalReplayEngine:
         # ── NaN Guard ──
         if not math.isfinite(entry_score):
             logger.debug("NaN entry_score — blocking")
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, None,
+                "NaN score guard", 2)
             self._rejection_count += 1
             return
 
         # ── HC Gate 1: Score ──
         if entry_score < HIGH_CONVICTION_MIN_SCORE:
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, None,
+                "HC score below 0.75", 3)
             self._rejection_count += 1
             return
 
@@ -1034,22 +1075,34 @@ class CausalReplayEngine:
         # ── NaN Guard on stop ──
         if not math.isfinite(raw_stop):
             logger.debug("NaN stop distance — blocking")
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, None,
+                "NaN stop distance", 4)
             self._rejection_count += 1
             return
 
         # ── HC Gate 2: Stop Distance ──
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, raw_stop,
+                "Max stop exceeded", 5)
             self._rejection_count += 1
             return
 
         # ── Min R:R Check ──
         target_distance = features.atr_14 * self.config.risk.atr_multiplier_target
         if raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, raw_stop,
+                "Min R:R failed", 6)
             self._rejection_count += 1
             return
 
         # ── Regime gate ──
         if regime_adj["size_multiplier"] == 0:
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, raw_stop,
+                "Regime gate block", 7)
             self._rejection_count += 1
             return
 
@@ -1057,6 +1110,9 @@ class CausalReplayEngine:
         if risk_assessment.decision not in (
             RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE
         ):
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, raw_stop,
+                "Risk decision rejected", 8)
             self._rejection_count += 1
             return
 
@@ -1074,6 +1130,208 @@ class CausalReplayEngine:
             "signal_timestamp": bar["timestamp"].isoformat(),
             "htf_direction": htf_dir,
             "htf_strength": round(htf_str, 3),
+        }
+
+    # ── Shadow-Trade Simulation (runs AFTER main replay loop) ────────
+
+    def _simulate_shadow_trades(self, bars_2m: List[Dict]) -> Dict:
+        """Simulate what blocked signals WOULD have done if traded.
+
+        Runs AFTER the main replay loop completes. Read-only simulation
+        that never touches self.trades or actual trade logic.
+        """
+        if not self._shadow_signals:
+            return {
+                "total_shadow_signals": 0,
+                "by_gate": {},
+                "gate_value_ranking": [],
+            }
+
+        total_bars = len(bars_2m)
+        num_contracts = 2
+        commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * num_contracts  # $5.16
+
+        shadow_results = []
+
+        for shadow in self._shadow_signals:
+            bar_idx = shadow["bar_index"]
+            entry_idx = bar_idx + 1
+
+            # Edge case: entry bar out of bounds
+            if entry_idx >= total_bars:
+                continue
+
+            entry_bar = bars_2m[entry_idx]
+
+            # NaN guard on entry bar
+            if (not math.isfinite(entry_bar["open"])
+                    or not math.isfinite(entry_bar["high"])
+                    or not math.isfinite(entry_bar["low"])):
+                continue
+
+            # Direction-aware slippage (same as real logic)
+            slippage = get_slippage(entry_bar["timestamp"])
+            if shadow["direction"] == "LONG":
+                entry_price = entry_bar["open"] + slippage
+            else:
+                entry_price = entry_bar["open"] - slippage
+
+            stop_dist = shadow["stop_distance"]
+            target_dist = stop_dist * 1.5
+
+            # Guard against zero/negative stop
+            if stop_dist <= 0:
+                continue
+
+            mfe = 0.0
+            mae = 0.0
+            outcome = "TIMEOUT"
+            final_price = entry_price
+
+            max_walk_bars = 120  # 4 hours at 2-min bars
+            walk_end = min(entry_idx + 1 + max_walk_bars, total_bars)
+
+            for j in range(entry_idx + 1, walk_end):
+                walk_bar = bars_2m[j]
+
+                # NaN guard on walk bar
+                if (not math.isfinite(walk_bar["high"])
+                        or not math.isfinite(walk_bar["low"])
+                        or not math.isfinite(walk_bar["close"])):
+                    continue
+
+                if shadow["direction"] == "LONG":
+                    favorable = walk_bar["high"] - entry_price
+                    adverse = entry_price - walk_bar["low"]
+                else:
+                    favorable = entry_price - walk_bar["low"]
+                    adverse = walk_bar["high"] - entry_price
+
+                mfe = max(mfe, favorable)
+                mae = max(mae, adverse)
+                final_price = walk_bar["close"]
+
+                # Stop hit first (conservative: check stop before target)
+                if mae >= stop_dist:
+                    outcome = "LOSS"
+                    break
+                # Target hit
+                if mfe >= target_dist:
+                    outcome = "WIN"
+                    break
+
+            # Compute shadow PnL
+            if outcome == "WIN":
+                shadow_pnl = (target_dist * POINT_VALUE * num_contracts) - commission_rt
+            elif outcome == "LOSS":
+                shadow_pnl = -(stop_dist * POINT_VALUE * num_contracts) - commission_rt
+            else:  # TIMEOUT — mark-to-market at bar 120
+                if shadow["direction"] == "LONG":
+                    mtm_points = final_price - entry_price
+                else:
+                    mtm_points = entry_price - final_price
+                shadow_pnl = (mtm_points * POINT_VALUE * num_contracts) - commission_rt
+
+            shadow_results.append({
+                "bar_index": bar_idx,
+                "direction": shadow["direction"],
+                "score": shadow["score"],
+                "rejection_reason": shadow["rejection_reason"],
+                "rejected_at_gate": shadow["rejected_at_gate"],
+                "entry_price": round(entry_price, 2),
+                "stop_distance": stop_dist,
+                "outcome": outcome,
+                "mfe": round(mfe, 2),
+                "mae": round(mae, 2),
+                "shadow_pnl": round(shadow_pnl, 2),
+            })
+
+        return self._build_shadow_analysis(shadow_results)
+
+    def _build_shadow_analysis(self, shadow_results: List[Dict]) -> Dict:
+        """Aggregate shadow trade results by rejection gate."""
+        by_gate: Dict[str, Dict] = {}
+
+        for r in shadow_results:
+            gate = r["rejection_reason"]
+            if gate not in by_gate:
+                by_gate[gate] = {
+                    "count": 0, "shadow_wins": 0, "shadow_losses": 0,
+                    "shadow_timeouts": 0, "shadow_total_pnl": 0.0,
+                    "gross_wins": 0.0, "gross_losses": 0.0,
+                    "total_mfe": 0.0, "total_mae": 0.0, "total_score": 0.0,
+                }
+
+            g = by_gate[gate]
+            g["count"] += 1
+            g["total_score"] += r["score"]
+            g["total_mfe"] += r["mfe"]
+            g["total_mae"] += r["mae"]
+            g["shadow_total_pnl"] += r["shadow_pnl"]
+
+            # For profit factor: track gross wins/losses (before commission)
+            commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 2
+            gross = r["shadow_pnl"] + commission_rt
+
+            if r["outcome"] == "WIN":
+                g["shadow_wins"] += 1
+                g["gross_wins"] += gross
+            elif r["outcome"] == "LOSS":
+                g["shadow_losses"] += 1
+                g["gross_losses"] += abs(gross)
+            else:
+                g["shadow_timeouts"] += 1
+                if gross > 0:
+                    g["gross_wins"] += gross
+                else:
+                    g["gross_losses"] += abs(gross)
+
+        # Build per-gate stats
+        gate_analysis = {}
+        for gate_name, g in by_gate.items():
+            count = g["count"]
+            win_rate = g["shadow_wins"] / count * 100 if count > 0 else 0
+            pf = (
+                g["gross_wins"] / g["gross_losses"]
+                if g["gross_losses"] > 0 else float("inf")
+            )
+
+            gate_analysis[gate_name] = {
+                "count": count,
+                "shadow_wins": g["shadow_wins"],
+                "shadow_losses": g["shadow_losses"],
+                "shadow_timeouts": g["shadow_timeouts"],
+                "shadow_total_pnl": round(g["shadow_total_pnl"], 2),
+                "shadow_win_rate": round(win_rate, 1),
+                "shadow_profit_factor": (
+                    round(pf, 2) if pf != float("inf") else "inf"
+                ),
+                "avg_mfe_points": (
+                    round(g["total_mfe"] / count, 2) if count > 0 else 0
+                ),
+                "avg_mae_points": (
+                    round(g["total_mae"] / count, 2) if count > 0 else 0
+                ),
+                "avg_score": (
+                    round(g["total_score"] / count, 4) if count > 0 else 0
+                ),
+            }
+
+        # Gate value ranking (sorted by shadow_pnl ascending = most negative first)
+        ranking = []
+        for gate_name, g in gate_analysis.items():
+            ranking.append({
+                "gate": gate_name,
+                "shadow_pnl": g["shadow_total_pnl"],
+                "count": g["count"],
+                "verdict": "PROTECTING" if g["shadow_total_pnl"] < 0 else "COSTING",
+            })
+        ranking.sort(key=lambda x: x["shadow_pnl"])
+
+        return {
+            "total_shadow_signals": len(self._shadow_signals),
+            "by_gate": gate_analysis,
+            "gate_value_ranking": ranking,
         }
 
     async def process_bar(self, bar: Dict, htf_scheduler: HTFScheduler) -> None:
@@ -1752,6 +2010,40 @@ def generate_summary_report(
         f.write("\n".join(lines))
 
 
+def print_shadow_summary(shadow_analysis: Dict) -> None:
+    """Print shadow-trade analysis to console."""
+    print()
+    print("=" * 72)
+    print("  SHADOW-TRADE ANALYSIS (Gate Value Assessment)")
+    print("=" * 72)
+    total = shadow_analysis.get("total_shadow_signals", 0)
+    print(f"  Total signals rejected: {total:,}")
+    print()
+
+    ranking = shadow_analysis.get("gate_value_ranking", [])
+    if not ranking:
+        print("  No shadow signals to analyze.")
+        print()
+        return
+
+    print("  Gate Value Ranking (most valuable first):")
+    for i, entry in enumerate(ranking, 1):
+        if entry["verdict"] == "PROTECTING":
+            verdict_str = "PROTECTING EDGE"
+        else:
+            verdict_str = "COSTING EDGE"
+        print(
+            f"    {i}. {entry['gate']:<25} | "
+            f"{entry['count']:>5} blocked | "
+            f"Shadow PnL: ${entry['shadow_pnl']:>+10,.2f} | "
+            f"{verdict_str}"
+        )
+    print()
+    print("  Gates marked COSTING EDGE are candidates for loosening.")
+    print("  Gates marked PROTECTING EDGE are confirmed valuable.")
+    print()
+
+
 # =====================================================================
 #  MAIN RUNNER
 # =====================================================================
@@ -1858,12 +2150,19 @@ async def run_backtest(
     print(f"  Replay complete: {replay_elapsed:.1f}s ({bars_per_sec:,.0f} bars/sec)")
     print()
 
+    # ── Shadow-trade simulation (runs AFTER replay completes) ──
+    print("Running shadow-trade simulation...")
+    shadow_analysis = engine._simulate_shadow_trades(bars_2m)
+    print(f"  Shadow signals captured: {len(engine._shadow_signals):,}")
+    print()
+
     # ── Build complete trade records ──
     print("Building analysis...")
     complete_trades = build_complete_trades(engine.trades)
 
     # ── Compute all analysis ──
     aggregate = compute_aggregate_metrics(complete_trades, engine)
+    aggregate["shadow_signals_captured"] = len(engine._shadow_signals)
     yearly = compute_yearly_breakdown(complete_trades)
     monthly, monthly_meta = compute_monthly_series(complete_trades)
     walk_forward = compute_walk_forward(complete_trades, window_months=6)
@@ -1906,6 +2205,9 @@ async def run_backtest(
         print(f"  [{status}] {check_name}: {check['description']}")
     print()
 
+    # ── Shadow-trade summary ──
+    print_shadow_summary(shadow_analysis)
+
     # ── Save trades JSON ──
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -1938,6 +2240,7 @@ async def run_backtest(
         "walk_forward": walk_forward,
         "regime": regime,
         "verification": verification,
+        "shadow_analysis": shadow_analysis,
         "trades": engine.trades,
     }
 
