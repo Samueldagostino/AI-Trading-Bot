@@ -167,9 +167,8 @@ class IBKRLivePipeline:
                 logger.error("Failed to connect to IBKR Gateway")
                 return False
 
-            # 2. Resolve contract
-            contract = await self._client.resolve_front_month()
-            if not contract:
+            # 2. Verify contract was resolved during connect()
+            if not self._client.contract:
                 self._state = PipelineState.ERROR
                 logger.error("Failed to resolve MNQ contract")
                 return False

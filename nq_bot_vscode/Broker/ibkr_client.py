@@ -958,7 +958,7 @@ class IBKRClient:
             self._session = None
             return False
 
-        logger.info("Contract resolved: %s %s -> conid %d",
+        logger.info("Contract resolved: %s %s -> conid %s",
                      self._contract.symbol, self._contract.expiry,
                      self._contract.conid)
 
@@ -1159,22 +1159,9 @@ class IBKRClient:
                     symbol, len(month_list), front_month,
                 )
 
-        # Step 4: Get specific contract details via /iserver/contract/info
-        if conid:
-            info = await self._get(
-                "/iserver/contract/info",
-                params={"conid": conid}
-            )
-            if info:
-                return ContractInfo(
-                    conid=conid,
-                    symbol=info.get("symbol", symbol),
-                    exchange=info.get("exchange", exchange),
-                    expiry=info.get("maturity_date", front_month),
-                    description=info.get("company_name", ""),
-                )
-
-        # Fallback: build ContractInfo from the search result directly
+        # Step 4: Build ContractInfo from search result data directly.
+        # Note: /iserver/contract/info returns 404 on Client Portal Gateway;
+        # the search result already contains everything we need.
         if conid:
             return ContractInfo(
                 conid=conid,
