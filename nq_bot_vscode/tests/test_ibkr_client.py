@@ -136,24 +136,16 @@ class TestContractResolution:
             }
         ]
 
-        contract_info_response = {
-            "conid": 654321,
-            "symbol": "MNQH6",
-            "exchange": "CME",
-            "maturity_date": "20260320",
-            "company_name": "Micro E-mini Nasdaq-100 Mar26",
-        }
-
         client._session = MagicMock()
         client._post = AsyncMock(return_value=search_response)
-        client._get = AsyncMock(return_value=contract_info_response)
 
         result = await client._resolve_front_month("MNQ")
 
         assert result is not None
         assert result.conid == 654321
-        assert result.symbol == "MNQH6"
-        assert result.expiry == "20260320"
+        assert result.symbol == "MNQ"
+        assert result.expiry == "MAR2026"
+        assert result.exchange == "CME"
 
     @pytest.mark.asyncio
     async def test_resolve_front_month_no_results(self, client):
