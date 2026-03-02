@@ -66,7 +66,14 @@ def _engine(trades: list = None) -> StatsEngine:
     return engine
 
 
-def _trade(pnl: float, c1: float = 0, c2: float = 0, ts: str = "2026-03-01T14:00:00") -> TradeRecord:
+def _today_ts() -> str:
+    """Return today's date at 14:00 UTC as a timestamp string for daily-PnL tests."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT14:00:00")
+
+
+def _trade(pnl: float, c1: float = 0, c2: float = 0, ts: str = None) -> TradeRecord:
+    if ts is None:
+        ts = _today_ts()
     return TradeRecord(
         timestamp=ts,
         direction="long" if pnl >= 0 else "short",
@@ -462,7 +469,7 @@ class TestRedAlerts:
 
     def test_red_daily_loss_exceeds_500(self):
         """Daily loss > $500 -> RED."""
-        today = "2026-03-01T14:00:00"
+        today = _today_ts()
         trades = [_trade(-200, ts=today)] * 3  # -$600
         engine = _engine(trades)
         alerts = AlertEngine().evaluate(engine)
