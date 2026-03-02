@@ -45,3 +45,8 @@ docs/viz_data_full.json
 
 # Log directories
 logs/
+
+# TradingView raw data exports
+data/tradingview/*.txt
+data/tradingview/*.csv
+*.txt
