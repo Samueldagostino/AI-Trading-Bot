@@ -42,6 +42,15 @@ HTF_STALENESS_LIMITS: dict = {
     "1D":  2880,  # 2x bar period (48h — accounts for weekends gracefully)
 }
 
+# ── UNIVERSAL CONFIRMATION LAYER (UCL) ───────────────────────────
+UCL_WATCH_SCORE_MIN: float = 0.60
+UCL_WATCH_SCORE_MAX: float = 0.84
+UCL_IMMEDIATE_SCORE_MIN: float = 0.85
+UCL_CONFIRMATION_BOOST: float = 0.10
+UCL_FVG_BOOST: float = 0.05
+UCL_FAST_CONFIRM_BOOST: float = 0.05
+UCL_HTF_ALIGN_BOOST: float = 0.05
+
 # ── TIMEFRAMES ────────────────────────────────────────────────────
 HTF_TIMEFRAMES: frozenset = frozenset({"1D", "4H", "1H", "30m", "15m", "5m"})
 EXECUTION_TIMEFRAMES: frozenset = frozenset({"2m", "3m", "1m"})

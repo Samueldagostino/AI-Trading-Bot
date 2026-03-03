@@ -27,12 +27,15 @@ from config.constants import (
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
     HTF_STRENGTH_GATE,
+    UCL_WATCH_SCORE_MIN, UCL_WATCH_SCORE_MAX, UCL_IMMEDIATE_SCORE_MIN,
 )
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
 from signals.aggregator import SignalAggregator, SignalDirection
 from signals.liquidity_sweep import LiquiditySweepDetector, SweepSignal
+from signals.fvg_detector import FVGDetector
+from signals.watch_state import WatchStateManager, WatchState, ConfirmedSignal
 from risk.engine import RiskEngine, RiskDecision
 from risk.regime_detector import RegimeDetector
 from execution.scale_out_executor import ScaleOutExecutor
@@ -98,6 +101,11 @@ class TradingOrchestrator:
         # Liquidity Sweep Detector — additive signal source
         self.sweep_detector = LiquiditySweepDetector()
         self._sweep_enabled = True  # Can be toggled for A/B testing
+
+        # UCL — Universal Confirmation Layer (Phase 1)
+        self._fvg_detector = FVGDetector()
+        self._watch_manager = WatchStateManager()
+        self._ucl_enabled = True  # Can be toggled for A/B testing
 
         # Execution - scale-out is the primary executor
         self.executor = ScaleOutExecutor(config)
@@ -245,6 +253,14 @@ class TradingOrchestrator:
                 is_rth=is_rth,
             )
 
+        # === 3c. FVG DETECTOR (UCL — always runs) ===
+        if self._ucl_enabled:
+            self._fvg_detector.update(
+                bar=bar,
+                bar_index=self._bars_processed,
+                trend_direction=features.trend_direction,
+            )
+
         # === 4. MANAGE ACTIVE POSITION ===
         if self.executor.has_active_trade:
             result = await self.executor.update(bar.close, bar.timestamp)
@@ -338,6 +354,15 @@ class TradingOrchestrator:
                 "gate": gate,
             }
 
+        # === 5b. UCL — EVALUATE ACTIVE WATCH STATES (runs every bar) ===
+        ucl_confirmed: List[ConfirmedSignal] = []
+        if self._ucl_enabled:
+            ucl_confirmed = self._watch_manager.update(
+                bar=bar,
+                fvg_detector=self._fvg_detector,
+                htf_bias=htf_bias,
+            )
+
         if entry_direction is None:
             # Gate 1: HTF-blocked signal
             if (signal is not None and not signal.should_trade
@@ -345,17 +370,76 @@ class TradingOrchestrator:
                 dir_str = "LONG" if signal.direction == SignalDirection.LONG else "SHORT"
                 _set_rejection(dir_str, signal.combined_score, None,
                                features.atr_14, "HTF gate block", 1)
-            return action_result
+            # Even with no new signal, a confirmed watch may fire
+            if not ucl_confirmed:
+                return action_result
+            # Fall through to process confirmed signal below
 
-        if not math.isfinite(entry_score):
+        if entry_direction is not None and not math.isfinite(entry_score):
             # Gate 2: NaN score guard
             logger.error("HC REJECT: entry_score is NaN/Inf — blocking trade")
             _set_rejection(entry_direction, entry_score, None,
                            features.atr_14, "NaN score guard", 2)
             return None
 
+        # === 5c. UCL — ROUTE SIGNAL BY SCORE ===
+        # If a new signal exists but scores 0.60-0.84 → watch state (Phase 1: sweep only)
+        if (entry_direction is not None and
+                self._ucl_enabled and
+                UCL_WATCH_SCORE_MIN <= entry_score <= UCL_WATCH_SCORE_MAX and
+                entry_source == "sweep" and sweep_signal is not None):
+            # Create sweep watch state
+            sweep_dir = "LONG" if entry_direction == "long" else "SHORT"
+            sweep_low = sweep_signal.stop_price
+            if sweep_dir == "LONG":
+                invalidation = sweep_low - 10.0
+            else:
+                invalidation = sweep_low + 10.0
+
+            watch = WatchState(
+                setup_type="sweep",
+                direction=sweep_dir,
+                trigger_bar=self._bars_processed,
+                trigger_price=bar.close,
+                key_level=sweep_signal.swept_levels[0] if hasattr(sweep_signal, 'swept_levels') and sweep_signal.swept_levels else bar.close,
+                invalidation_price=invalidation,
+                expiry_bars=60,
+                confirmation_conditions=["RECLAIM", "FVG_FORM", "FVG_TAP"],
+                metadata={
+                    "sweep_low": sweep_low,
+                    "sweep_depth": getattr(sweep_signal, 'sweep_depth_pts', 0),
+                    "levels_swept": getattr(sweep_signal, 'swept_levels', []),
+                },
+                base_score=entry_score,
+                created_at=bar.timestamp,
+            )
+            self._watch_manager.add_watch(watch)
+            logger.debug(
+                f"UCL: sweep signal routed to watch state | "
+                f"{sweep_dir} score={entry_score:.3f}"
+            )
+            # Don't reject — signal is now in watch state
+            if not ucl_confirmed:
+                return None
+            # Fall through to process any confirmed signal
+
+        # === 5d. UCL — PROCESS CONFIRMED SIGNALS ===
+        # A confirmed watch state re-enters the pipeline with boosted score
+        if ucl_confirmed and not (entry_direction is not None and entry_score >= UCL_IMMEDIATE_SCORE_MIN):
+            cs = ucl_confirmed[0]  # Process first confirmed signal
+            entry_direction = "long" if cs.direction == "LONG" else "short"
+            entry_score = cs.boosted_score
+            entry_source = f"ucl_confirmed_{cs.setup_type}"
+            # Use structural stop from metadata if available
+            if cs.metadata.get("sweep_low"):
+                sweep_stop_override = abs(bar.close - cs.metadata["sweep_low"])
+            logger.info(
+                f"UCL ENTRY: {entry_direction} via {cs.setup_type} | "
+                f"boosted={cs.boosted_score:.3f} | bars={cs.bars_to_confirm}"
+            )
+
         # -- HIGH-CONVICTION GATE 1: Signal Score --
-        if entry_score < HIGH_CONVICTION_MIN_SCORE:
+        if entry_direction is not None and entry_score < HIGH_CONVICTION_MIN_SCORE:
             logger.debug(
                 f"HC REJECT: score {entry_score:.3f} "
                 f"< {HIGH_CONVICTION_MIN_SCORE} (need higher conviction)"
@@ -363,6 +447,9 @@ class TradingOrchestrator:
             _set_rejection(entry_direction, entry_score, None,
                            features.atr_14, "HC score below 0.75", 3)
             return None
+
+        if entry_direction is None:
+            return action_result
 
         # === 6. RISK CHECK ===
         risk_assessment = self.risk_engine.evaluate_trade(
@@ -710,6 +797,8 @@ class TradingOrchestrator:
             } if trade else None,
             "broker_connected": self.broker_client.is_connected if self.broker_client else False,
             "sweep_detector": self.sweep_detector.get_stats() if self._sweep_enabled else None,
+            "ucl_watch_state": self._watch_manager.get_stats() if self._ucl_enabled else None,
+            "ucl_fvg_detector": self._fvg_detector.get_stats() if self._ucl_enabled else None,
         }
 
 
