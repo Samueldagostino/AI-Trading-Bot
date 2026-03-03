@@ -444,12 +444,20 @@ class TradingOrchestrator:
             return action_result
 
         # === 6. RISK CHECK ===
+        # Compute structural stop distance from signal chain
+        structural_stop_dist = None
+        if signal and hasattr(signal, 'structural_stop_price') and signal.structural_stop_price is not None:
+            structural_stop_dist = abs(bar.close - signal.structural_stop_price)
+            if structural_stop_dist <= 0:
+                structural_stop_dist = None
+
         risk_assessment = self.risk_engine.evaluate_trade(
             direction=entry_direction,
             entry_price=bar.close,
             atr=features.atr_14,
             vix=features.vix_level or 0,
             current_time=bar.timestamp,
+            structural_stop_distance=structural_stop_dist,
         )
 
         # For sweep/UCL entries, use the override stop if tighter

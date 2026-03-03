@@ -59,6 +59,9 @@ class AggregatedSignal:
     should_trade: bool
     rejection_reason: str = ""
 
+    # Structural stop price (tightest from contributing signals)
+    structural_stop_price: Optional[float] = None
+
 
 class SignalAggregator:
     """
@@ -233,6 +236,19 @@ class SignalAggregator:
                 )
                 self._htf_blocked_count += 1
 
+        # Find tightest structural stop from contributing signals
+        structural_stops = [
+            s.metadata.get("structural_stop_price")
+            for s in aligned_signals
+            if s.metadata.get("structural_stop_price") is not None
+        ]
+        tightest_structural = None
+        if structural_stops:
+            if direction == SignalDirection.LONG:
+                tightest_structural = max(structural_stops)  # Highest = closest to entry
+            else:
+                tightest_structural = min(structural_stops)  # Lowest = closest to entry
+
         signal = AggregatedSignal(
             timestamp=current_time,
             direction=direction,
@@ -244,6 +260,7 @@ class SignalAggregator:
             num_signals_aligned=len(aligned_signals),
             should_trade=should_trade,
             rejection_reason=rejection_reason,
+            structural_stop_price=tightest_structural,
         )
 
         self._signal_history.append(signal)
@@ -274,7 +291,8 @@ class SignalAggregator:
                 strength=0.75,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "OB", "type": "bullish"},
+                metadata={"feature": "OB", "type": "bullish",
+                          "structural_stop_price": snapshot.structural_stop_long},
             ))
 
         if snapshot.near_bearish_ob:
@@ -284,7 +302,8 @@ class SignalAggregator:
                 strength=0.75,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "OB", "type": "bearish"},
+                metadata={"feature": "OB", "type": "bearish",
+                          "structural_stop_price": snapshot.structural_stop_short},
             ))
 
         # --- Fair Value Gap ---
@@ -295,7 +314,8 @@ class SignalAggregator:
                 strength=0.70,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "FVG", "type": "bullish"},
+                metadata={"feature": "FVG", "type": "bullish",
+                          "structural_stop_price": snapshot.structural_stop_long},
             ))
 
         if snapshot.inside_bearish_fvg:
@@ -305,7 +325,8 @@ class SignalAggregator:
                 strength=0.70,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "FVG", "type": "bearish"},
+                metadata={"feature": "FVG", "type": "bearish",
+                          "structural_stop_price": snapshot.structural_stop_short},
             ))
 
         # --- Liquidity Sweeps ---
@@ -317,7 +338,8 @@ class SignalAggregator:
                 strength=0.80,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "sweep", "type": "buy_side"},
+                metadata={"feature": "sweep", "type": "buy_side",
+                          "structural_stop_price": snapshot.structural_stop_short},
             ))
 
         # Sell-side sweep (swept lows) = bullish signal (smart money bought)
@@ -328,7 +350,8 @@ class SignalAggregator:
                 strength=0.80,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "sweep", "type": "sell_side"},
+                metadata={"feature": "sweep", "type": "sell_side",
+                          "structural_stop_price": snapshot.structural_stop_long},
             ))
 
         # --- VWAP ---
