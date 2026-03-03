@@ -23,6 +23,7 @@ How to export from TradingView:
 
 import csv
 import logging
+import math
 import os
 import re
 from datetime import datetime, timezone, timedelta
@@ -314,6 +315,11 @@ class TradingViewImporter:
                 volume = int(float(vol_str))
             except (ValueError, TypeError):
                 volume = 0
+
+        # NaN/Inf guard — reject corrupted price data
+        if not (math.isfinite(open_price) and math.isfinite(high) and
+                math.isfinite(low) and math.isfinite(close)):
+            return None
 
         # Basic sanity checks
         if high < low or open_price <= 0:

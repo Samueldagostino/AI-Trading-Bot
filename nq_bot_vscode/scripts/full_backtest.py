@@ -63,6 +63,7 @@ from config.settings import BotConfig, RiskConfig, ScaleOutConfig
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
+    HTF_STRENGTH_GATE,
 )
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -1841,7 +1842,7 @@ def generate_summary_report(
     lines.append("  Configuration:")
     lines.append(f"    HC min score:       {HIGH_CONVICTION_MIN_SCORE}")
     lines.append(f"    HC max stop:        {HIGH_CONVICTION_MAX_STOP_PTS} pts")
-    lines.append(f"    HTF gate:           {HTFBiasEngine.STRENGTH_GATE} (Config D)")
+    lines.append(f"    HTF gate:           {HTF_STRENGTH_GATE} (Config D)")
     lines.append(f"    Slippage RTH:       {SLIPPAGE_RTH_PTS} pts/fill")
     lines.append(f"    Slippage ETH:       {SLIPPAGE_ETH_PTS} pts/fill")
     lines.append(f"    Commission:         ${COMMISSION_PER_CONTRACT_PER_SIDE}/contract/side")
@@ -2222,7 +2223,7 @@ async def run_backtest(
         "config": {
             "hc_min_score": HIGH_CONVICTION_MIN_SCORE,
             "hc_max_stop_pts": HIGH_CONVICTION_MAX_STOP_PTS,
-            "htf_gate": HTFBiasEngine.STRENGTH_GATE,
+            "htf_gate": HTF_STRENGTH_GATE,
             "slippage_rth": SLIPPAGE_RTH_PTS,
             "slippage_eth": SLIPPAGE_ETH_PTS,
             "commission_per_contract_per_side": COMMISSION_PER_CONTRACT_PER_SIDE,
@@ -2329,7 +2330,7 @@ def main():
         print()
         print("  All imports successful:")
         print(f"    NQFeatureEngine:        OK")
-        print(f"    HTFBiasEngine:          OK (gate={HTFBiasEngine.STRENGTH_GATE})")
+        print(f"    HTFBiasEngine:          OK (gate={HTF_STRENGTH_GATE})")
         print(f"    SignalAggregator:       OK")
         print(f"    LiquiditySweepDetector: OK")
         print(f"    RiskEngine:             OK")
@@ -2340,7 +2341,7 @@ def main():
         print("  Engine configuration:")
         print(f"    HC min score:       {HIGH_CONVICTION_MIN_SCORE}")
         print(f"    HC max stop:        {HIGH_CONVICTION_MAX_STOP_PTS} pts")
-        print(f"    HTF gate:           {HTFBiasEngine.STRENGTH_GATE} (Config D)")
+        print(f"    HTF gate:           {HTF_STRENGTH_GATE} (Config D)")
         print(f"    Slippage RTH:       {SLIPPAGE_RTH_PTS} pts/fill")
         print(f"    Slippage ETH:       {SLIPPAGE_ETH_PTS} pts/fill")
         print(f"    Commission:         ${COMMISSION_PER_CONTRACT_PER_SIDE}/contract/side (round-trip charged)")

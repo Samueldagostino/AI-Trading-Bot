@@ -26,6 +26,7 @@ from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
+    HTF_STRENGTH_GATE,
 )
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
@@ -49,14 +50,14 @@ logger = logging.getLogger(__name__)
 MIN_RR_RATIO = 1.5  # Minimum risk/reward ratio for entry
 
 # ── CONFIG D GATE ASSERTION ───────────────────────────────────────────
-# The HTF strength gate MUST be 0.3 (Config D, validated Feb 2026).
-# gate=0.7 silently degrades PF from 1.29 to 0.79.  Fail fast.
+# Both HTFBiasEngine.STRENGTH_GATE and HTF_STRENGTH_GATE now source from
+# config/constants.py (single source of truth).  This assertion catches
+# drift if someone redefines the class attribute directly.
 # ──────────────────────────────────────────────────────────────────────
-_EXPECTED_HTF_GATE = 0.3
-assert HTFBiasEngine.STRENGTH_GATE == _EXPECTED_HTF_GATE, (
+assert HTFBiasEngine.STRENGTH_GATE == HTF_STRENGTH_GATE, (
     f"HTF gate drift detected! "
     f"HTFBiasEngine.STRENGTH_GATE={HTFBiasEngine.STRENGTH_GATE}, "
-    f"expected {_EXPECTED_HTF_GATE} (Config D). "
+    f"expected {HTF_STRENGTH_GATE} (Config D, from config/constants.py). "
     f"Do NOT change without full backtest validation."
 )
 
@@ -135,7 +136,7 @@ class TradingOrchestrator:
         logger.info(f"  Daily Limit:  {self.config.risk.max_daily_loss_pct}%")
         logger.info(f"  Kill Switch:  {self.config.risk.max_total_drawdown_pct}% drawdown")
         logger.info(f"  HTF Engine:   {', '.join(sorted(HTF_TIMEFRAMES))}")
-        logger.info(f"  HTF Gate:     {HTFBiasEngine.STRENGTH_GATE} (Config D)")
+        logger.info(f"  HTF Gate:     {HTF_STRENGTH_GATE} (Config D)")
         logger.info(f"  Exec TF:      {self._execution_tf}")
         logger.info(f"  Sweep Det:    {'ENABLED' if self._sweep_enabled else 'DISABLED'} "
                      f"(min score {SWEEP_MIN_SCORE}, confluence +{SWEEP_CONFLUENCE_BONUS})")

@@ -64,12 +64,14 @@ C1 exits via **trail-from-profit** (Variant C): once unrealized profit >= 3.0pts
 ### Constants Location
 
 ```python
-# config/constants.py — SINGLE SOURCE OF TRUTH for HC constants
+# config/constants.py — SINGLE SOURCE OF TRUTH for all policy constants
 # All modules import from here. Do NOT redefine locally.
 HIGH_CONVICTION_MIN_SCORE = 0.75
 HIGH_CONVICTION_MAX_STOP_PTS = 30.0
 SWEEP_MIN_SCORE = 0.70           # Sweep must score >= 0.70 to be eligible
 SWEEP_CONFLUENCE_BONUS = 0.05    # Boost when signal + sweep fire together
+HTF_STRENGTH_GATE = 0.3          # Config D — do NOT change without backtest
+HTF_STALENESS_LIMITS = {...}     # Per-TF staleness limits (minutes)
 
 # config/settings.py — ScaleOutConfig
 c1_profit_threshold_pts = 3.0   # Activate trailing once profit >= this
