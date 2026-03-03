@@ -383,7 +383,7 @@ class TradingOrchestrator:
             return None
 
         # === 5c. UCL — ROUTE SIGNAL BY SCORE ===
-        # If a new signal exists but scores 0.60-0.84 → watch state (Phase 1: sweep only)
+        # If a new signal exists but scores 0.60-0.74 → watch state (Phase 1: sweep only)
         if (entry_direction is not None and
                 self._ucl_enabled and
                 UCL_WATCH_SCORE_MIN <= entry_score <= UCL_WATCH_SCORE_MAX and
