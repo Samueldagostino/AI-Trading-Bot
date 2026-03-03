@@ -42,10 +42,12 @@ HTF_STALENESS_LIMITS: dict = {
     "1D":  2880,  # 2x bar period (48h — accounts for weekends gracefully)
 }
 
-# ── UNIVERSAL CONFIRMATION LAYER (UCL) ───────────────────────────
-UCL_WATCH_SCORE_MIN: float = 0.60
-UCL_WATCH_SCORE_MAX: float = 0.74
-UCL_IMMEDIATE_SCORE_MIN: float = 0.75
+# ── UNIVERSAL CONFIRMATION LAYER (UCL) v2 ────────────────────────
+# v2 removes weak-signal rescue (0.60-0.74 → net negative, PF 0.54).
+# Instead: FVG confluence boosts strong signals, and wide-stop sweeps
+# (score >= 0.75, stop > 30pt) get converted to tight-stop entries
+# via post-sweep confirmation.
+UCL_FVG_CONFLUENCE_BOOST: float = 0.05   # score boost when entry is near active FVG
 UCL_CONFIRMATION_BOOST: float = 0.10
 UCL_FVG_BOOST: float = 0.05
 UCL_FAST_CONFIRM_BOOST: float = 0.05

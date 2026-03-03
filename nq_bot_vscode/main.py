@@ -27,7 +27,7 @@ from config.constants import (
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
     HTF_STRENGTH_GATE,
-    UCL_WATCH_SCORE_MIN, UCL_WATCH_SCORE_MAX, UCL_IMMEDIATE_SCORE_MIN,
+    UCL_FVG_CONFLUENCE_BOOST,
 )
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
@@ -382,59 +382,51 @@ class TradingOrchestrator:
                            features.atr_14, "NaN score guard", 2)
             return None
 
-        # === 5c. UCL — ROUTE SIGNAL BY SCORE ===
-        # If a new signal exists but scores 0.60-0.74 → watch state (Phase 1: sweep only)
-        if (entry_direction is not None and
-                self._ucl_enabled and
-                UCL_WATCH_SCORE_MIN <= entry_score <= UCL_WATCH_SCORE_MAX and
-                entry_source == "sweep" and sweep_signal is not None):
-            # Create sweep watch state
-            sweep_dir = "LONG" if entry_direction == "long" else "SHORT"
-            sweep_low = sweep_signal.stop_price
-            if sweep_dir == "LONG":
-                invalidation = sweep_low - 10.0
-            else:
-                invalidation = sweep_low + 10.0
+        # === 5c. UCL v2 — FVG CONFLUENCE SCORE BOOST ===
+        # Before the HC gate, boost score if entry is near an active FVG
+        if entry_direction is not None and self._ucl_enabled:
+            fvg_direction = "bullish" if entry_direction == "long" else "bearish"
+            active_fvgs = self._fvg_detector.get_active_fvgs(fvg_direction)
+            fvg_confluence = False
+            for fvg in active_fvgs:
+                if fvg.status in ("UNFILLED", "PARTIALLY_FILLED"):
+                    # Check if current price is inside this FVG zone
+                    if fvg.fvg_low <= bar.close <= fvg.fvg_high:
+                        fvg_confluence = True
+                        break
+                    # Also check if entry would be within 10pts of FVG
+                    distance_to_fvg = min(
+                        abs(bar.close - fvg.fvg_low),
+                        abs(bar.close - fvg.fvg_high))
+                    if distance_to_fvg <= 10.0:
+                        fvg_confluence = True
+                        break
+            if fvg_confluence:
+                old_score = entry_score
+                entry_score += UCL_FVG_CONFLUENCE_BOOST
+                logger.info(
+                    f"FVG confluence: +{UCL_FVG_CONFLUENCE_BOOST} boost, "
+                    f"score {old_score:.3f} → {entry_score:.3f}"
+                )
 
-            watch = WatchState(
-                setup_type="sweep",
-                direction=sweep_dir,
-                trigger_bar=self._bars_processed,
-                trigger_price=bar.close,
-                key_level=float(sweep_signal.entry_price),
-                invalidation_price=invalidation,
-                expiry_bars=60,
-                confirmation_conditions=["RECLAIM", "FVG_FORM", "FVG_TAP"],
-                metadata={
-                    "sweep_low": sweep_low,
-                    "sweep_depth": getattr(sweep_signal, 'sweep_depth_pts', 0),
-                    "levels_swept": getattr(sweep_signal, 'swept_levels', []),
-                },
-                base_score=entry_score,
-                created_at=bar.timestamp,
-            )
-            self._watch_manager.add_watch(watch)
-            logger.debug(
-                f"UCL: sweep signal routed to watch state | "
-                f"{sweep_dir} score={entry_score:.3f}"
-            )
-            # Don't reject — signal is now in watch state
-            if not ucl_confirmed:
-                return None
-            # Fall through to process any confirmed signal
-
-        # === 5d. UCL — PROCESS CONFIRMED SIGNALS ===
-        # A confirmed watch state re-enters the pipeline with boosted score
-        if ucl_confirmed and not (entry_direction is not None and entry_score >= UCL_IMMEDIATE_SCORE_MIN):
+        # === 5d. UCL v2 — PROCESS CONFIRMED SIGNALS ===
+        # A confirmed wide-stop watch re-enters the pipeline with boosted score + tight stop
+        if ucl_confirmed and entry_direction is None:
             cs = ucl_confirmed[0]  # Process first confirmed signal
             entry_direction = "long" if cs.direction == "LONG" else "short"
             entry_score = cs.boosted_score
             entry_source = f"ucl_confirmed_{cs.setup_type}"
-            # Use structural stop from metadata if available
-            if cs.metadata.get("sweep_low"):
+            # Use tight confirmed stop from watch metadata
+            if cs.stop_distance > 0:
+                sweep_stop_override = cs.stop_distance
+            elif cs.metadata.get("confirmed_stop_distance"):
+                sweep_stop_override = cs.metadata["confirmed_stop_distance"]
+            elif cs.metadata.get("sweep_low"):
                 sweep_stop_override = abs(bar.close - cs.metadata["sweep_low"])
             logger.info(
-                f"UCL ENTRY: {entry_direction} via {cs.setup_type} | "
+                f"UCL wide-stop conversion: {entry_direction} via {cs.setup_type} | "
+                f"original stop {cs.metadata.get('original_stop', '?')}pt → "
+                f"confirmed stop {sweep_stop_override or '?'}pt | "
                 f"boosted={cs.boosted_score:.3f} | bars={cs.bars_to_confirm}"
             )
 
@@ -460,9 +452,13 @@ class TradingOrchestrator:
             current_time=bar.timestamp,
         )
 
-        # For sweep-only entries, use sweep's tighter stop if available
+        # For sweep/UCL entries, use the override stop if tighter
         raw_stop = risk_assessment.suggested_stop_distance
         if sweep_stop_override is not None and sweep_stop_override < raw_stop:
+            raw_stop = sweep_stop_override
+        # For UCL confirmed entries, always use the confirmed stop
+        if (entry_source and entry_source.startswith("ucl_confirmed_")
+                and sweep_stop_override is not None):
             raw_stop = sweep_stop_override
 
         if not math.isfinite(raw_stop):
@@ -474,6 +470,23 @@ class TradingOrchestrator:
 
         # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+            # UCL v2: route wide-stop sweeps to watch state for post-sweep confirmation
+            if (self._ucl_enabled and entry_source == "sweep"
+                    and entry_direction is not None):
+                self._create_wide_stop_watch(
+                    direction="LONG" if entry_direction == "long" else "SHORT",
+                    score=entry_score,
+                    sweep_low=bar.low,
+                    sweep_high=bar.high,
+                    original_stop=raw_stop,
+                    bar_index=self._bars_processed,
+                    current_bar=bar,
+                )
+                _set_rejection(entry_direction, entry_score, raw_stop,
+                               features.atr_14,
+                               "Max stop exceeded — routed to UCL watch", 5)
+                return None
+
             logger.debug(
                 f"HC REJECT: stop {raw_stop:.1f} pts "
                 f"> {HIGH_CONVICTION_MAX_STOP_PTS} (too wide, wait for tighter entry)"
@@ -541,6 +554,50 @@ class TradingOrchestrator:
                            features.atr_14, "Risk decision rejected", 8)
 
         return action_result
+
+    def _create_wide_stop_watch(self, direction, score, sweep_low,
+                               sweep_high, original_stop, bar_index, current_bar):
+        """Create UCL watch for wide-stop sweep that needs confirmation.
+
+        Wide-stop sweeps (score >= 0.75, stop > 30pt) are routed here instead
+        of being blocked.  Post-sweep confirmation produces a tighter stop
+        from the confirmation level.
+        """
+        if direction == "LONG":
+            key_level = sweep_low       # swept level
+            invalidation = sweep_low - 15.0  # wider invalidation for HTF setups
+            stop_on_confirm = sweep_low - 5.0  # tight stop below sweep low
+        else:
+            key_level = sweep_high
+            invalidation = sweep_high + 15.0
+            stop_on_confirm = sweep_high + 5.0
+
+        watch = WatchState(
+            setup_type="wide_stop_sweep",
+            direction=direction,
+            trigger_bar=bar_index,
+            trigger_price=current_bar.close,
+            key_level=key_level,
+            invalidation_price=invalidation,
+            expiry_bars=90,  # wider window for HTF setups
+            confirmation_conditions=["RECLAIM", "FVG_FORM", "FVG_TAP"],
+            metadata={
+                "original_score": score,
+                "original_stop": original_stop,
+                "confirmed_stop_distance": abs(current_bar.close - stop_on_confirm),
+                "sweep_low": sweep_low,
+                "sweep_high": sweep_high,
+            },
+            base_score=score,
+            created_at=current_bar.timestamp,
+        )
+        self._watch_manager.add_watch(watch)
+        logger.info(
+            f"UCL wide-stop watch created: {direction} | "
+            f"score={score:.3f} | original_stop={original_stop:.1f}pt | "
+            f"confirmed_stop={abs(current_bar.close - stop_on_confirm):.1f}pt | "
+            f"key_level={key_level:.2f}"
+        )
 
     def _get_last_price(self) -> float:
         if hasattr(self, '_last_bar') and self._last_bar:

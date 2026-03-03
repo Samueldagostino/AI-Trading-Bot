@@ -1,12 +1,12 @@
 """
-Watch State Manager — Universal Confirmation Layer
+Watch State Manager — Universal Confirmation Layer v2
 =====================================================
-Manages watch states for signals that don't immediately pass the HC gate
-(score 0.60–0.84). Each watch state waits for market structure to confirm
-the setup before re-entering the pipeline with a boosted score.
+UCL v2 manages watch states for wide-stop sweep signals that score >= 0.75
+but get blocked by the 30pt max stop gate.  Post-sweep confirmation produces
+a tighter stop from the confirmation level.
 
 Lifecycle:
-  Signal fires (score 0.60-0.84)
+  Signal fires (score >= 0.75, stop > 30pt, sweep source)
       |
   WatchStateManager.add_watch()
       |
@@ -15,7 +15,7 @@ Lifecycle:
       |                  evaluate confirmations -> update confirmations_met
       |
       +-- ALL confirmations met --> emit ConfirmedSignal
-      |                            --> HC gate (boosted score)
+      |                            --> HC gate (boosted score, tight stop)
       |
       +-- Expired / Invalidated --> silently removed, logged
 """
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 class WatchState:
     """A signal awaiting market confirmation."""
     watch_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    setup_type: str = ""              # "sweep" | "break_retest" | "ob_reaction" | "fvg_tap"
+    setup_type: str = ""              # "sweep" | "wide_stop_sweep" | "break_retest" | "ob_reaction" | "fvg_tap"
     direction: str = ""               # "LONG" | "SHORT"
     trigger_bar: int = 0              # bar index when the signal fired
     trigger_price: float = 0.0        # price at signal time
@@ -74,6 +74,7 @@ class ConfirmedSignal:
     trigger_price: float
     confirmation_price: float          # current price at confirmation
     key_level: float
+    stop_distance: float = 0.0        # tight post-confirmation stop (from metadata)
     metadata: Dict = field(default_factory=dict)
     confirmations: Dict[str, bool] = field(default_factory=dict)
     has_fvg_confluence: bool = False
@@ -193,6 +194,9 @@ class WatchStateManager:
                     watch, has_fvg, htf_aligned
                 )
 
+                # Use tight confirmed stop from metadata if available
+                confirmed_stop = watch.metadata.get("confirmed_stop_distance", 0.0)
+
                 signal = ConfirmedSignal(
                     watch_id=watch.watch_id,
                     setup_type=watch.setup_type,
@@ -203,6 +207,7 @@ class WatchStateManager:
                     trigger_price=watch.trigger_price,
                     confirmation_price=bar.close,
                     key_level=watch.key_level,
+                    stop_distance=confirmed_stop,
                     metadata=watch.metadata,
                     confirmations=dict(watch.confirmations_met),
                     has_fvg_confluence=has_fvg,
@@ -258,7 +263,7 @@ class WatchStateManager:
     # ================================================================
     def _evaluate_conditions(self, watch: WatchState, bar, fvg_detector) -> None:
         """Evaluate all unmet confirmation conditions for a watch."""
-        if watch.setup_type == "sweep":
+        if watch.setup_type in ("sweep", "wide_stop_sweep"):
             self._evaluate_sweep_conditions(watch, bar, fvg_detector)
         elif watch.setup_type == "fvg_tap":
             self._evaluate_fvg_tap_conditions(watch, bar)
@@ -381,7 +386,7 @@ class WatchStateManager:
 
     def _has_fvg_confluence(self, watch: WatchState, fvg_detector) -> bool:
         """Check if there's FVG confluence at the confirmation point."""
-        if watch.setup_type == "sweep":
+        if watch.setup_type in ("sweep", "wide_stop_sweep"):
             # For sweeps, FVG_FORM already implies confluence
             return watch.confirmations_met.get("FVG_FORM", False)
         elif watch.setup_type == "fvg_tap":

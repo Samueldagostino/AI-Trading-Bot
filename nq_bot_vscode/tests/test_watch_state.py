@@ -585,3 +585,144 @@ class TestConstants:
         assert UCL_FVG_BOOST == 0.05
         assert UCL_FAST_CONFIRM_BOOST == 0.05
         assert UCL_HTF_ALIGN_BOOST == 0.05
+
+
+# ================================================================
+# WIDE-STOP SWEEP TESTS (UCL v2)
+# ================================================================
+def make_wide_stop_watch(direction="LONG", score=0.78, key_level=95.0,
+                         invalidation=80.0, expiry=90, trigger_bar=0):
+    """Helper: create a wide_stop_sweep-type watch state."""
+    return WatchState(
+        setup_type="wide_stop_sweep",
+        direction=direction,
+        trigger_bar=trigger_bar,
+        trigger_price=100.0,
+        key_level=key_level,
+        invalidation_price=invalidation,
+        expiry_bars=expiry,
+        confirmation_conditions=["RECLAIM", "FVG_FORM", "FVG_TAP"],
+        metadata={
+            "original_score": score,
+            "original_stop": 45.0,
+            "confirmed_stop_distance": 15.0,
+            "sweep_low": 95.0,
+            "sweep_high": 105.0,
+        },
+        base_score=score,
+        created_at=ts(0),
+    )
+
+
+class TestWideStopSweep:
+    """Tests for wide_stop_sweep setup type (UCL v2)."""
+
+    def test_wide_stop_watch_added(self):
+        mgr = WatchStateManager()
+        watch = make_wide_stop_watch()
+        result = mgr.add_watch(watch)
+        assert result is True
+        w = mgr.get_active_watches()[0]
+        assert w.setup_type == "wide_stop_sweep"
+
+    def test_wide_stop_uses_sweep_conditions(self):
+        """wide_stop_sweep uses same RECLAIM/FVG_FORM/FVG_TAP conditions."""
+        mgr = WatchStateManager()
+        watch = make_wide_stop_watch(direction="LONG", key_level=95.0, invalidation=75.0)
+        mgr.add_watch(watch)
+        detector = FVGDetector()
+
+        # Reclaim: close above key_level=95
+        bar = make_bar(0, 94, 97, 93, 96)
+        mgr.update(bar, detector)
+        w = mgr.get_active_watches()[0]
+        assert w.confirmations_met["RECLAIM"] is True
+
+    def test_wide_stop_full_confirmation(self):
+        """Full wide_stop_sweep path: RECLAIM -> FVG_FORM -> FVG_TAP."""
+        mgr = WatchStateManager()
+        watch = make_wide_stop_watch(
+            direction="LONG", key_level=95.0, invalidation=75.0,
+            score=0.80, trigger_bar=0,
+        )
+        mgr.add_watch(watch)
+        detector = FVGDetector()
+
+        # Bar 1: reclaim (close above 95)
+        confirmed = mgr.update(make_bar(1, 94, 97, 93, 96), detector)
+        assert len(confirmed) == 0
+
+        # Create bullish FVG in detector at 98-101
+        detector.update(make_bar(2, 96, 98, 95, 97), 2, "up")
+        detector.update(make_bar(3, 98, 104, 97, 103), 3, "up")
+        detector.update(make_bar(4, 103, 106, 101, 105), 4, "up")
+
+        # Bar 5: FVG_FORM check
+        confirmed = mgr.update(make_bar(5, 105, 107, 104, 106), detector)
+        assert len(confirmed) == 0
+
+        # Bar 6: FVG_TAP — price returns to FVG zone, holds
+        w = mgr.get_active_watches()[0]
+        fvg_low = w.metadata.get("confirmed_fvg_low", 0)
+        assert fvg_low > 0
+        confirmed = mgr.update(
+            make_bar(6, 102, 102, fvg_low, fvg_low + 1), detector
+        )
+        assert len(confirmed) == 1
+
+        cs = confirmed[0]
+        assert cs.setup_type == "wide_stop_sweep"
+        assert cs.direction == "LONG"
+        assert cs.base_score == 0.80
+        assert cs.boosted_score > cs.base_score
+        assert cs.stop_distance == 15.0  # from metadata["confirmed_stop_distance"]
+
+    def test_wide_stop_90_bar_expiry(self):
+        """wide_stop_sweep uses 90 bar expiry."""
+        mgr = WatchStateManager()
+        watch = make_wide_stop_watch(expiry=90)
+        mgr.add_watch(watch)
+        detector = FVGDetector()
+
+        # Process 89 bars — should still be active
+        for i in range(89):
+            bar = MockBar(
+                timestamp=datetime(2026, 3, 1, 10 + i // 60, i % 60, tzinfo=timezone.utc),
+                open=90, high=91, low=89, close=90,
+            )
+            mgr.update(bar, detector)
+        assert len(mgr.get_active_watches()) == 1
+
+        # Bar 90 — should expire
+        bar90 = MockBar(
+            timestamp=datetime(2026, 3, 1, 11, 29, tzinfo=timezone.utc),
+            open=90, high=91, low=89, close=90,
+        )
+        mgr.update(bar90, detector)
+        assert len(mgr.get_active_watches()) == 0
+
+    def test_wide_stop_confirmed_stop_in_metadata(self):
+        """ConfirmedSignal should carry confirmed_stop_distance from metadata."""
+        mgr = WatchStateManager()
+        watch = make_wide_stop_watch(
+            direction="LONG", key_level=95.0, invalidation=75.0,
+            score=0.78, trigger_bar=0,
+        )
+        mgr.add_watch(watch)
+        detector = FVGDetector()
+
+        # Quick confirmation
+        mgr.update(make_bar(1, 94, 97, 93, 96), detector)  # reclaim
+        detector.update(make_bar(2, 96, 98, 95, 97), 2, "up")
+        detector.update(make_bar(3, 98, 104, 97, 103), 3, "up")
+        detector.update(make_bar(4, 103, 106, 101, 105), 4, "up")
+        mgr.update(make_bar(5, 105, 107, 104, 106), detector)  # FVG_FORM
+        w = mgr.get_active_watches()[0]
+        fvg_low = w.metadata["confirmed_fvg_low"]
+        confirmed = mgr.update(
+            make_bar(6, 102, 102, fvg_low, fvg_low + 1), detector
+        )
+
+        cs = confirmed[0]
+        assert cs.stop_distance == 15.0
+        assert cs.metadata["original_stop"] == 45.0
