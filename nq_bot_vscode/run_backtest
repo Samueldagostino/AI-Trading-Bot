@@ -200,10 +200,12 @@ def main():
     args = parser.parse_args()
 
     if args.no_hc:
+        import config.constants as _c
         import main as _m
+        _c.HIGH_CONVICTION_MIN_SCORE = 0.0
+        _c.HIGH_CONVICTION_MAX_STOP_PTS = 9999.0
         _m.HIGH_CONVICTION_MIN_SCORE = 0.0
         _m.HIGH_CONVICTION_MAX_STOP_PTS = 9999.0
-        _m.HIGH_CONVICTION_TP1_RR_RATIO = 0.0  # 0 -> executor uses config default
 
     logging.basicConfig(
         level=logging.INFO,

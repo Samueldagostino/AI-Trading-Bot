@@ -22,6 +22,11 @@ from typing import Optional, Dict, List
 from zoneinfo import ZoneInfo
 
 from config.settings import BotConfig, CONFIG
+from config.constants import (
+    HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
+    HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
+)
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -39,38 +44,9 @@ from data_pipeline.pipeline import (
 logger = logging.getLogger(__name__)
 
 
-# Which timeframes are "higher" (feed the HTF bias engine)
-# vs "execution" (feed the feature engine for entries)
-HTF_TIMEFRAMES = {"1D", "4H", "1H", "30m", "15m", "5m"}
-EXECUTION_TIMEFRAMES = {"2m", "3m", "1m"}
 
-# ── HIGH-CONVICTION FILTER ──────────────────────────────────────────
-# Derived from backtest forensics + C1 exit research (Feb 2026).
-# Only the intersection of tight stops + strong signals showed
-# durable edge.
-#
-#   Rule 1 – Min signal score >= 0.75   (eliminates low-conviction noise)
-#   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
-#
-# C1 exit: Trail-from-profit (Variant C, validated Feb 2026).
-# Once unrealized profit >= 3.0pts, activate 2.5pt trailing stop
-# from HWM. Fallback: market exit at bar 12 if trailing never
-# activates. (See ScaleOutConfig for params.)
-#
-# These are HARD gates. If a setup doesn't meet both, we skip it
-# and wait. The bot's job is survival, not activity.
-# ─────────────────────────────────────────────────────────────────────
-HIGH_CONVICTION_MIN_SCORE = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS = 30.0
-
-# ── LIQUIDITY SWEEP DETECTOR ───────────────────────────────────
-# Additive signal source: detects institutional sweeps of key levels
-# (PDH/PDL, session H/L, PWH/PWL, VWAP, round numbers).
-# Does NOT replace existing signals. Runs alongside them.
-#   - Sweep score >= 0.7: eligible for HC filter independently
-#   - If sweep + existing signal fire together: HC score boosted +0.05
-SWEEP_MIN_SCORE = 0.70
-SWEEP_CONFLUENCE_BONUS = 0.05
+# All HC constants imported from config.constants (single source of truth)
+MIN_RR_RATIO = 1.5  # Minimum risk/reward ratio for entry
 
 # ── CONFIG D GATE ASSERTION ───────────────────────────────────────────
 # The HTF strength gate MUST be 0.3 (Config D, validated Feb 2026).
@@ -134,6 +110,9 @@ class TradingOrchestrator:
         self._htf_bars_processed = 0
         self._current_regime = "unknown"
         self._execution_tf = "2m"     # Default execution timeframe
+
+        # Shadow-trade rejection capture (set by ReplaySimulator)
+        self._last_rejection = None   # Populated at each rejection point
 
     # ================================================================
     # INITIALIZATION
@@ -223,6 +202,7 @@ class TradingOrchestrator:
 
         self._bars_processed += 1
         self._last_bar = bar
+        self._last_rejection = None  # Clear previous rejection
         action_result = None
 
         # === 1. FEATURES (execution TF) ===
@@ -346,88 +326,131 @@ class TradingOrchestrator:
                 f"Stop: {sweep_stop_override:.1f}pts"
             )
 
-        if entry_direction is not None:
-            # -- NaN GUARD: NaN comparisons always return False, bypassing gates --
-            if not math.isfinite(entry_score):
-                logger.error("HC REJECT: entry_score is NaN/Inf — blocking trade")
-                return None
+        # ── Shadow rejection helper ──────────────────────────────────
+        def _set_rejection(direction, score, stop_dist, atr, reason, gate):
+            self._last_rejection = {
+                "direction": direction.upper() if direction else "UNKNOWN",
+                "score": score,
+                "stop_distance": stop_dist,
+                "atr": atr,
+                "rejection_reason": reason,
+                "gate": gate,
+            }
 
-            # -- HIGH-CONVICTION GATE 1: Signal Score --
-            if entry_score < HIGH_CONVICTION_MIN_SCORE:
-                logger.debug(
-                    f"HC REJECT: score {entry_score:.3f} "
-                    f"< {HIGH_CONVICTION_MIN_SCORE} (need higher conviction)"
-                )
-                return None
+        if entry_direction is None:
+            # Gate 1: HTF-blocked signal
+            if (signal is not None and not signal.should_trade
+                    and "HTF" in (signal.rejection_reason or "")):
+                dir_str = "LONG" if signal.direction == SignalDirection.LONG else "SHORT"
+                _set_rejection(dir_str, signal.combined_score, None,
+                               features.atr_14, "HTF gate block", 1)
+            return action_result
 
-            # === 6. RISK CHECK ===
-            risk_assessment = self.risk_engine.evaluate_trade(
+        if not math.isfinite(entry_score):
+            # Gate 2: NaN score guard
+            logger.error("HC REJECT: entry_score is NaN/Inf — blocking trade")
+            _set_rejection(entry_direction, entry_score, None,
+                           features.atr_14, "NaN score guard", 2)
+            return None
+
+        # -- HIGH-CONVICTION GATE 1: Signal Score --
+        if entry_score < HIGH_CONVICTION_MIN_SCORE:
+            logger.debug(
+                f"HC REJECT: score {entry_score:.3f} "
+                f"< {HIGH_CONVICTION_MIN_SCORE} (need higher conviction)"
+            )
+            _set_rejection(entry_direction, entry_score, None,
+                           features.atr_14, "HC score below 0.75", 3)
+            return None
+
+        # === 6. RISK CHECK ===
+        risk_assessment = self.risk_engine.evaluate_trade(
+            direction=entry_direction,
+            entry_price=bar.close,
+            atr=features.atr_14,
+            vix=features.vix_level or 0,
+            current_time=bar.timestamp,
+        )
+
+        # For sweep-only entries, use sweep's tighter stop if available
+        raw_stop = risk_assessment.suggested_stop_distance
+        if sweep_stop_override is not None and sweep_stop_override < raw_stop:
+            raw_stop = sweep_stop_override
+
+        if not math.isfinite(raw_stop):
+            # Gate 4: NaN stop distance
+            logger.error("HC REJECT: stop distance is NaN/Inf — blocking trade")
+            _set_rejection(entry_direction, entry_score, None,
+                           features.atr_14, "NaN stop distance", 4)
+            return None
+
+        # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
+        if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+            logger.debug(
+                f"HC REJECT: stop {raw_stop:.1f} pts "
+                f"> {HIGH_CONVICTION_MAX_STOP_PTS} (too wide, wait for tighter entry)"
+            )
+            _set_rejection(entry_direction, entry_score, raw_stop,
+                           features.atr_14, "Max stop exceeded", 5)
+            return None
+
+        # -- Min R:R Check --
+        target_distance = features.atr_14 * self.config.risk.atr_multiplier_target
+        if raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
+            logger.debug(
+                f"HC REJECT: R:R {target_distance / raw_stop:.2f} "
+                f"< {MIN_RR_RATIO} (unfavorable risk/reward)"
+            )
+            _set_rejection(entry_direction, entry_score, raw_stop,
+                           features.atr_14, "Min R:R failed", 6)
+            return None
+
+        # Regime gate
+        if regime_adj["size_multiplier"] == 0:
+            logger.debug(f"Regime {self._current_regime} blocks new trades")
+            _set_rejection(entry_direction, entry_score, raw_stop,
+                           features.atr_14, "Regime gate block", 7)
+            return None
+
+        if risk_assessment.decision in (RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE):
+            # === 7. ENTER SCALE-OUT TRADE ===
+            # C1 exits via trail-from-profit (Variant C).
+            # No fixed TP1 target — managed by ScaleOutExecutor.
+            trade = await self.executor.enter_trade(
                 direction=entry_direction,
                 entry_price=bar.close,
+                stop_distance=raw_stop,
                 atr=features.atr_14,
-                vix=features.vix_level or 0,
-                current_time=bar.timestamp,
+                signal_score=entry_score,
+                regime=self._current_regime,
             )
 
-            # For sweep-only entries, use sweep's tighter stop if available
-            raw_stop = risk_assessment.suggested_stop_distance
-            if sweep_stop_override is not None and sweep_stop_override < raw_stop:
-                raw_stop = sweep_stop_override
-
-            if not math.isfinite(raw_stop):
-                logger.error("HC REJECT: stop distance is NaN/Inf — blocking trade")
-                return None
-
-            # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
-            if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
-                logger.debug(
-                    f"HC REJECT: stop {raw_stop:.1f} pts "
-                    f"> {HIGH_CONVICTION_MAX_STOP_PTS} (too wide, wait for tighter entry)"
-                )
-                return None
-
-            # Regime gate
-            if regime_adj["size_multiplier"] == 0:
-                logger.debug(f"Regime {self._current_regime} blocks new trades")
-                return None
-
-            if risk_assessment.decision in (RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE):
-                # === 7. ENTER SCALE-OUT TRADE ===
-                # C1 exits via trail-from-profit (Variant C).
-                # No fixed TP1 target — managed by ScaleOutExecutor.
-                trade = await self.executor.enter_trade(
-                    direction=entry_direction,
-                    entry_price=bar.close,
-                    stop_distance=raw_stop,
-                    atr=features.atr_14,
-                    signal_score=entry_score,
-                    regime=self._current_regime,
-                )
-
-                if trade:
-                    htf_dir = htf_bias.consensus_direction if htf_bias else "n/a"
-                    htf_str = htf_bias.consensus_strength if htf_bias else 0.0
-                    action_result = {
-                        "action": "entry",
-                        "timestamp": bar.timestamp.isoformat(),
-                        "direction": entry_direction,
-                        "contracts": 2,
-                        "entry_price": trade.entry_price,
-                        "stop": trade.initial_stop,
-                        "c1_exit_rule": f"trail_from_+{self.config.scale_out.c1_profit_threshold_pts}pts",
-                        "signal_score": entry_score,
-                        "signal_source": entry_source,
-                        "regime": self._current_regime,
-                        "htf_bias": htf_dir,
-                        "htf_strength": round(htf_str, 3),
-                    }
-                    # Attach sweep metadata if applicable
-                    if entry_source in ("sweep", "confluence") and sweep_signal:
-                        action_result["sweep_levels"] = sweep_signal.swept_levels
-                        action_result["sweep_score"] = sweep_signal.score
-                        action_result["sweep_depth_pts"] = sweep_signal.sweep_depth_pts
-            else:
-                logger.debug(f"Risk rejected: {risk_assessment.reason}")
+            if trade:
+                htf_dir = htf_bias.consensus_direction if htf_bias else "n/a"
+                htf_str = htf_bias.consensus_strength if htf_bias else 0.0
+                action_result = {
+                    "action": "entry",
+                    "timestamp": bar.timestamp.isoformat(),
+                    "direction": entry_direction,
+                    "contracts": 2,
+                    "entry_price": trade.entry_price,
+                    "stop": trade.initial_stop,
+                    "c1_exit_rule": f"trail_from_+{self.config.scale_out.c1_profit_threshold_pts}pts",
+                    "signal_score": entry_score,
+                    "signal_source": entry_source,
+                    "regime": self._current_regime,
+                    "htf_bias": htf_dir,
+                    "htf_strength": round(htf_str, 3),
+                }
+                # Attach sweep metadata if applicable
+                if entry_source in ("sweep", "confluence") and sweep_signal:
+                    action_result["sweep_levels"] = sweep_signal.swept_levels
+                    action_result["sweep_score"] = sweep_signal.score
+                    action_result["sweep_depth_pts"] = sweep_signal.sweep_depth_pts
+        else:
+            logger.debug(f"Risk rejected: {risk_assessment.reason}")
+            _set_rejection(entry_direction, entry_score, raw_stop,
+                           features.atr_14, "Risk decision rejected", 8)
 
         return action_result
 

@@ -19,13 +19,10 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
-from execution.orchestrator import (
-    IBKRLivePipeline,
-    PipelineState,
-    HIGH_CONVICTION_MIN_SCORE,
-    HIGH_CONVICTION_MAX_STOP_PTS,
-    SWEEP_MIN_SCORE,
-    SWEEP_CONFLUENCE_BONUS,
+from execution.orchestrator import IBKRLivePipeline, PipelineState
+from config.constants import (
+    HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
 )
 from execution.signal_bridge import TradeDecision, BridgeResult, ScaleOutParams
 from Broker.order_executor import (

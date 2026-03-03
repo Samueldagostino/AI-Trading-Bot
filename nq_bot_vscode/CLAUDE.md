@@ -64,7 +64,8 @@ C1 exits via **trail-from-profit** (Variant C): once unrealized profit >= 3.0pts
 ### Constants Location
 
 ```python
-# main.py — module-level constants (lines ~60-70)
+# config/constants.py — SINGLE SOURCE OF TRUTH for HC constants
+# All modules import from here. Do NOT redefine locally.
 HIGH_CONVICTION_MIN_SCORE = 0.75
 HIGH_CONVICTION_MAX_STOP_PTS = 30.0
 SWEEP_MIN_SCORE = 0.70           # Sweep must score >= 0.70 to be eligible
@@ -133,6 +134,7 @@ nq-trading-bot/                    # Root — CLAUDE.md goes here
 ├── CLAUDE.md                      # THIS FILE — project brain
 ├── main.py                        # Orchestrator — HC filter lives here
 ├── config/
+│   ├── constants.py               # HC constants — SINGLE SOURCE OF TRUTH
 │   └── settings.py                # All dataclass configs (BotConfig, RiskConfig, etc.)
 ├── features/
 │   ├── engine.py                  # NQFeatureEngine — OB, FVG, sweeps, VWAP, delta
@@ -388,6 +390,16 @@ Config D + Variant C (Trail from Profit) + Sweep Detector + Calibrated Slippage 
 | RotatingFileHandler on all log files | HIGH | Logs capped at ~60 MB per runner |
 | Pinned `requirements.txt` | HIGH | Reproducible installs for financial system |
 | Windows shutdown compatibility | HIGH | Cross-platform Ctrl+C with 30s timeout |
+
+### Hardening Fixes Applied (MEDIUM — Post-Audit)
+
+| Fix | Audit ID | Impact |
+|-----|----------|--------|
+| HC constants in `config/constants.py` — single source of truth | P1-M1 | Eliminates drift between main.py, orchestrator.py, full_backtest.py |
+| HTF data staleness detection | P1-M4 | Stale TFs downgraded to neutral + warning logged |
+| Position state persistence to disk | P2-M7 | `logs/position_state.json` — atomic write, crash recovery via `load_state()` |
+| Candle aggregator duplicate/out-of-order detection | P2-M3/M4 | Replayed ticks dropped, duplicate candles skipped |
+| JSONL decision/trade logs with daily rotation | P3-M1 | Replaces load-rewrite pattern — bounded growth |
 
 ### Working
 - HC filter (2 gates: score >= 0.75, stop <= 30pts) fully operational

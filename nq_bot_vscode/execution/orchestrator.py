@@ -45,20 +45,12 @@ from Broker.position_manager import PositionManager
 from execution.signal_bridge import SignalBridge, TradeDecision
 
 from config.settings import BotConfig, CONFIG
+from config.constants import (
+    HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS, HTF_TIMEFRAMES,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# ═══════════════════════════════════════════════════════════════
-# CONSTANTS — frozen, match main.py
-# ═══════════════════════════════════════════════════════════════
-HTF_TIMEFRAMES = {"1D", "4H", "1H", "30m", "15m", "5m"}
-
-HIGH_CONVICTION_MIN_SCORE = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS = 30.0
-
-SWEEP_MIN_SCORE = 0.70
-SWEEP_CONFLUENCE_BONUS = 0.05
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -111,10 +111,12 @@ class TradovatePaperConnector:
         self._on_position_update: Optional[Callable] = None
         self._on_connection_lost: Optional[Callable] = None
 
-        # Trade log
+        # Trade log — JSONL with daily rotation (replaces load-rewrite pattern)
         self._trade_log: List[Dict] = []
         _LOGS_DIR.mkdir(parents=True, exist_ok=True)
         self._trade_log_path = str(_LOGS_DIR / "paper_trades.json")
+        from monitoring.json_logger import JSONLineLogger
+        self._trade_jl = JSONLineLogger(str(_LOGS_DIR), "paper_trades")
 
         # Connection monitor task
         self._monitor_task: Optional[asyncio.Task] = None
@@ -541,25 +543,13 @@ class TradovatePaperConnector:
             self._flush_trade_log()
 
     def _flush_trade_log(self) -> None:
-        """Write trade log to disk."""
+        """Write trade log to disk via JSONL logger (append-only, daily rotation)."""
         if not self._trade_log:
             return
-
-        try:
-            # Read existing log
-            existing = []
-            if os.path.exists(self._trade_log_path):
-                with open(self._trade_log_path, "r") as f:
-                    existing = json.load(f)
-
-            existing.extend(self._trade_log)
-
-            with open(self._trade_log_path, "w") as f:
-                json.dump(existing, f, indent=2, default=str)
-
-            self._trade_log.clear()
-        except Exception as e:
-            logger.error(f"Failed to write trade log: {e}")
+        for entry in self._trade_log:
+            self._trade_jl.log(entry)
+        self._trade_jl.flush()
+        self._trade_log.clear()
 
     # ================================================================
     # STATUS

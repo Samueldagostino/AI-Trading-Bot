@@ -77,6 +77,10 @@ LOGS_DIR = project_dir / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 DECISION_LOG_PATH = str(LOGS_DIR / "paper_decisions.json")
 
+# ── New JSONL logger (replaces load-rewrite pattern) ──
+from monitoring.json_logger import JSONLineLogger
+_decision_jl = JSONLineLogger(str(LOGS_DIR), "paper_decisions")
+
 # OOS baseline for comparison (Config D + C1 Time Exit, Sep 2025 – Feb 2026)
 OOS_EXPECTANCY = 15.34    # $/trade from 6-month OOS
 OOS_WIN_RATE = 68.1       # % from 6-month OOS
@@ -376,20 +380,13 @@ class PaperTradingRunner:
             self._flush_decisions()
 
     def _flush_decisions(self) -> None:
-        """Write decisions to disk."""
+        """Write decisions to disk via JSONL logger (append-only, daily rotation)."""
         if not self._decisions:
             return
-        try:
-            existing = []
-            if os.path.exists(DECISION_LOG_PATH):
-                with open(DECISION_LOG_PATH, "r") as f:
-                    existing = json.load(f)
-            existing.extend(self._decisions)
-            with open(DECISION_LOG_PATH, "w") as f:
-                json.dump(existing, f, indent=2, default=str)
-            self._decisions.clear()
-        except Exception as e:
-            logger.error(f"Failed to write decision log: {e}")
+        for entry in self._decisions:
+            _decision_jl.log(entry)
+        _decision_jl.flush()
+        self._decisions.clear()
 
     # ================================================================
     # SHUTDOWN
