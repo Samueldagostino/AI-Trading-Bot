@@ -186,10 +186,13 @@ class CandleAggregator:
 
         # Tracking
         self._last_candle_time: Optional[datetime] = None
+        self._last_tick_time: Optional[datetime] = None
         self._consecutive_gaps: int = 0
         self._candles_emitted: int = 0
         self._candles_rejected: int = 0
         self._ticks_processed: int = 0
+        self._ticks_out_of_order: int = 0
+        self._duplicate_candles_skipped: int = 0
 
     def on_candle(self, callback: Callable) -> None:
         """Register callback for completed candles."""
@@ -211,6 +214,22 @@ class CandleAggregator:
             return None
 
         self._ticks_processed += 1
+
+        # Out-of-order detection: reject ticks older than the last
+        # emitted candle (prevents replay corruption on reconnect)
+        if (self._last_candle_time is not None
+                and timestamp < self._last_candle_time):
+            self._ticks_out_of_order += 1
+            if self._ticks_out_of_order <= 5:
+                logger.warning(
+                    "Out-of-order tick dropped: tick=%s < last_candle=%s",
+                    timestamp.isoformat(), self._last_candle_time.isoformat(),
+                )
+            return None
+
+        # Track last tick time for diagnostics
+        self._last_tick_time = timestamp
+
         window_start = self._get_window_start(timestamp)
 
         # First tick ever — start the first window
@@ -238,7 +257,11 @@ class CandleAggregator:
         return self._close_current_candle()
 
     def reset(self) -> None:
-        """Reset aggregator state (e.g. on reconnect)."""
+        """Reset aggregator state (e.g. on reconnect).
+
+        Note: _last_candle_time is preserved intentionally so that
+        duplicate/out-of-order detection still works across reconnects.
+        """
         self._current_open = 0.0
         self._current_high = -math.inf
         self._current_low = math.inf
@@ -254,6 +277,8 @@ class CandleAggregator:
             "candles_rejected": self._candles_rejected,
             "ticks_processed": self._ticks_processed,
             "consecutive_gaps": self._consecutive_gaps,
+            "ticks_out_of_order": self._ticks_out_of_order,
+            "duplicate_candles_skipped": self._duplicate_candles_skipped,
         }
 
     # ----------------------------------------------------------------
@@ -299,6 +324,17 @@ class CandleAggregator:
             "tick_count": self._current_tick_count,
             "session_type": get_session_type(self._current_window_start),
         }
+
+        # --- Duplicate timestamp detection ---
+        if (self._last_candle_time is not None
+                and candle["timestamp"] <= self._last_candle_time):
+            self._duplicate_candles_skipped += 1
+            logger.warning(
+                "Duplicate candle timestamp skipped: %s (last=%s)",
+                candle["timestamp"].isoformat(),
+                self._last_candle_time.isoformat(),
+            )
+            return None
 
         # --- Data quality checks ---
         rejection_reason = self._validate_candle(candle)

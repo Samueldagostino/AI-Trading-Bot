@@ -60,6 +60,10 @@ if str(PROJECT_DIR) not in sys.path:
 
 # ── Import REAL modules ─────────────────────────────────────────
 from config.settings import BotConfig, RiskConfig, ScaleOutConfig
+from config.constants import (
+    HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
+)
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
 from signals.aggregator import SignalAggregator, SignalDirection
@@ -72,11 +76,6 @@ logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
 
-# ── Hard Constants (match main.py) ──────────────────────────────
-HIGH_CONVICTION_MIN_SCORE = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS = 30.0
-SWEEP_MIN_SCORE = 0.70
-SWEEP_CONFLUENCE_BONUS = 0.05
 MIN_RR_RATIO = 1.5
 
 # ── Slippage & Commission Model ─────────────────────────────────

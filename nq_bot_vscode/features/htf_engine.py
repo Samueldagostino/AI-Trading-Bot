@@ -9,7 +9,7 @@ a directional bias used to filter trades on the execution timeframe.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,18 @@ class HTFBiasEngine:
     WINDOW = 20  # bars per timeframe to retain
     STRENGTH_GATE = 0.3  # Config D validated threshold — do NOT change without backtest
 
+    # Maximum age (in minutes) before a TF's bars are considered stale.
+    # Keyed by timeframe label. If no bar arrives within this window,
+    # that TF's bias is downgraded to "neutral" and a warning is logged.
+    _STALENESS_LIMITS: Dict[str, int] = {
+        "5m":  15,    # 3x bar period
+        "15m": 45,    # 3x bar period
+        "30m": 90,    # 3x bar period
+        "1H":  180,   # 3x bar period
+        "4H":  720,   # 3x bar period
+        "1D":  2880,  # 2x bar period (48h — accounts for weekends gracefully)
+    }
+
     def __init__(self, config=None, timeframes: List[str] = None):
         self.config = config
         self.timeframes = timeframes or ["5m", "15m", "30m", "1H", "4H", "1D"]
@@ -56,6 +68,8 @@ class HTFBiasEngine:
         self._biases: Dict[str, str] = {}
         self._last_result: Optional[HTFBiasResult] = None
         self._total_updates = 0
+        self._last_update_time: Dict[str, datetime] = {}
+        self._stale_warned: set = set()
 
     def update_bar(self, timeframe: str, bar: HTFBar) -> None:
         """Ingest a new HTF bar and recompute bias for that TF."""
@@ -65,18 +79,31 @@ class HTFBiasEngine:
         if len(self._bars[timeframe]) > self.WINDOW:
             self._bars[timeframe] = self._bars[timeframe][-self.WINDOW:]
         self._biases[timeframe] = self._compute_tf_bias(timeframe)
+        self._last_update_time[timeframe] = bar.timestamp
         self._total_updates += 1
 
     def get_bias(self, timestamp: datetime = None) -> HTFBiasResult:
-        """Return current multi-TF consensus."""
+        """Return current multi-TF consensus.
+
+        Stale timeframes (no bar update within the staleness limit)
+        are downgraded to "neutral" so they don't contribute a
+        directional vote.  A warning is logged once per stale TF.
+        """
+        stale_tfs = self._check_staleness(timestamp) if timestamp else set()
+
         bullish = 0
         bearish = 0
         total = 0
+        effective_biases: Dict[str, str] = {}
         for tf, bias in self._biases.items():
+            if tf in stale_tfs:
+                effective_biases[tf] = "neutral"
+            else:
+                effective_biases[tf] = bias
             total += 1
-            if bias == "bullish":
+            if effective_biases[tf] == "bullish":
                 bullish += 1
-            elif bias == "bearish":
+            elif effective_biases[tf] == "bearish":
                 bearish += 1
 
         if total == 0:
@@ -96,10 +123,42 @@ class HTFBiasEngine:
             htf_allows_long=(direction != "bearish" or strength < self.STRENGTH_GATE),
             htf_allows_short=(direction != "bullish" or strength < self.STRENGTH_GATE),
             timestamp=timestamp,
-            tf_biases=dict(self._biases),
+            tf_biases=effective_biases,
         )
         self._last_result = result
         return result
+
+    def _check_staleness(self, now: datetime) -> set:
+        """Return set of timeframe labels whose last bar is stale."""
+        stale = set()
+        for tf in self.timeframes:
+            last = self._last_update_time.get(tf)
+            if last is None:
+                continue  # Never received data — handled by "no bars" path
+            limit_minutes = self._STALENESS_LIMITS.get(tf, 180)
+            # Make both timestamps offset-aware for comparison
+            if now.tzinfo is None:
+                now_aware = now.replace(tzinfo=timezone.utc)
+            else:
+                now_aware = now
+            if last.tzinfo is None:
+                last_aware = last.replace(tzinfo=timezone.utc)
+            else:
+                last_aware = last
+            age = now_aware - last_aware
+            if age > timedelta(minutes=limit_minutes):
+                if tf not in self._stale_warned:
+                    logger.warning(
+                        "HTF staleness: %s last bar is %.1f min old "
+                        "(limit %d min) — bias downgraded to neutral",
+                        tf, age.total_seconds() / 60, limit_minutes,
+                    )
+                    self._stale_warned.add(tf)
+                stale.add(tf)
+            else:
+                # Clear warning flag so it can warn again next time it goes stale
+                self._stale_warned.discard(tf)
+        return stale
 
     def _compute_tf_bias(self, timeframe: str) -> str:
         """Simple trend: compare latest close to open of lookback window."""
@@ -126,7 +185,11 @@ class HTFBiasEngine:
         for tf in self.timeframes:
             count = len(self._bars.get(tf, []))
             bias = self._biases.get(tf, "n/a")
-            lines.append(f"  {tf:>4s}: {count:>4d} bars | bias={bias}")
+            last = self._last_update_time.get(tf)
+            age_str = ""
+            if last is not None:
+                age_str = f" | last={last.strftime('%H:%M')}"
+            lines.append(f"  {tf:>4s}: {count:>4d} bars | bias={bias}{age_str}")
         if self._last_result:
             r = self._last_result
             lines.append(f"  Consensus: {r.consensus_direction} ({r.consensus_strength:.2f})")

@@ -135,33 +135,26 @@ def validate_env() -> Dict[str, str]:
 # ═══════════════════════════════════════════════════════════════
 
 class JSONLogger:
-    """Append-only JSON logger that writes one entry per event."""
+    """Append-only JSONL logger with daily rotation.
+
+    Wraps monitoring.json_logger.JSONLineLogger for backward compatibility.
+    Files are written as JSONL (one JSON object per line) instead of the
+    old load-rewrite pattern, preventing unbounded memory/disk growth.
+    """
 
     def __init__(self, path: Path):
-        self._path = path
-        self._buffer: List[dict] = []
-        self._flush_interval = 10
+        from monitoring.json_logger import JSONLineLogger
+        self._jl = JSONLineLogger(
+            directory=str(path.parent),
+            prefix=path.stem,
+            buffer_size=10,
+        )
 
     def log(self, entry: dict) -> None:
-        entry["logged_at"] = datetime.now(timezone.utc).isoformat()
-        self._buffer.append(entry)
-        if len(self._buffer) >= self._flush_interval:
-            self.flush()
+        self._jl.log(entry)
 
     def flush(self) -> None:
-        if not self._buffer:
-            return
-        try:
-            existing = []
-            if self._path.exists():
-                with open(self._path, "r") as f:
-                    existing = json.load(f)
-            existing.extend(self._buffer)
-            with open(self._path, "w") as f:
-                json.dump(existing, f, indent=2, default=str)
-            self._buffer.clear()
-        except Exception as e:
-            logger.error("Failed to write %s: %s", self._path.name, e)
+        self._jl.flush()
 
 
 # ═══════════════════════════════════════════════════════════════

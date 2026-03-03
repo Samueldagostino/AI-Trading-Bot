@@ -20,6 +20,7 @@ from pathlib import Path
 CRITICAL_FILES = [
     "main.py",
     "config/settings.py",
+    "config/constants.py",
     "execution/scale_out_executor.py",
     "risk/engine.py",
     "signals/aggregator.py",
@@ -92,12 +93,12 @@ def check_file(root: Path, rel_path: str) -> dict:
 
 
 def check_hc_filter(root: Path) -> dict:
-    """Verify HC filter constants exist in main.py."""
-    main_path = root / "main.py"
-    if not main_path.exists():
-        return {"found": False, "error": "main.py not found"}
-    
-    source = main_path.read_text()
+    """Verify HC filter constants exist in config/constants.py (canonical source)."""
+    constants_path = root / "config" / "constants.py"
+    if not constants_path.exists():
+        return {"found": False, "error": "config/constants.py not found"}
+
+    source = constants_path.read_text()
     found = {}
     for const in HC_CONSTANTS:
         found[const] = const in source

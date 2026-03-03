@@ -22,6 +22,11 @@ from typing import Optional, Dict, List
 from zoneinfo import ZoneInfo
 
 from config.settings import BotConfig, CONFIG
+from config.constants import (
+    HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
+    HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
+)
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -39,38 +44,8 @@ from data_pipeline.pipeline import (
 logger = logging.getLogger(__name__)
 
 
-# Which timeframes are "higher" (feed the HTF bias engine)
-# vs "execution" (feed the feature engine for entries)
-HTF_TIMEFRAMES = {"1D", "4H", "1H", "30m", "15m", "5m"}
-EXECUTION_TIMEFRAMES = {"2m", "3m", "1m"}
 
-# ── HIGH-CONVICTION FILTER ──────────────────────────────────────────
-# Derived from backtest forensics + C1 exit research (Feb 2026).
-# Only the intersection of tight stops + strong signals showed
-# durable edge.
-#
-#   Rule 1 – Min signal score >= 0.75   (eliminates low-conviction noise)
-#   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
-#
-# C1 exit: Trail-from-profit (Variant C, validated Feb 2026).
-# Once unrealized profit >= 3.0pts, activate 2.5pt trailing stop
-# from HWM. Fallback: market exit at bar 12 if trailing never
-# activates. (See ScaleOutConfig for params.)
-#
-# These are HARD gates. If a setup doesn't meet both, we skip it
-# and wait. The bot's job is survival, not activity.
-# ─────────────────────────────────────────────────────────────────────
-HIGH_CONVICTION_MIN_SCORE = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS = 30.0
-
-# ── LIQUIDITY SWEEP DETECTOR ───────────────────────────────────
-# Additive signal source: detects institutional sweeps of key levels
-# (PDH/PDL, session H/L, PWH/PWL, VWAP, round numbers).
-# Does NOT replace existing signals. Runs alongside them.
-#   - Sweep score >= 0.7: eligible for HC filter independently
-#   - If sweep + existing signal fire together: HC score boosted +0.05
-SWEEP_MIN_SCORE = 0.70
-SWEEP_CONFLUENCE_BONUS = 0.05
+# All HC constants imported from config.constants (single source of truth)
 
 # ── CONFIG D GATE ASSERTION ───────────────────────────────────────────
 # The HTF strength gate MUST be 0.3 (Config D, validated Feb 2026).
