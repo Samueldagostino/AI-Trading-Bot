@@ -23,6 +23,25 @@ HIGH_CONVICTION_MAX_STOP_PTS: float = 30.0
 SWEEP_MIN_SCORE: float = 0.70
 SWEEP_CONFLUENCE_BONUS: float = 0.05
 
+# ── HTF BIAS ENGINE ────────────────────────────────────────────────
+#   Config D threshold, validated Feb 2026.
+#   gate=0.7 silently degrades PF from 1.29 to 0.79.  Do NOT change
+#   without full backtest validation across 6-month OOS window.
+HTF_STRENGTH_GATE: float = 0.3
+
+# ── HTF STALENESS LIMITS ──────────────────────────────────────────
+#   Maximum age (minutes) before a TF's bars are considered stale.
+#   If no bar arrives within this window, that TF's bias is downgraded
+#   to "neutral" and a warning is logged.
+HTF_STALENESS_LIMITS: dict = {
+    "5m":  15,    # 3x bar period
+    "15m": 45,    # 3x bar period
+    "30m": 90,    # 3x bar period
+    "1H":  180,   # 3x bar period
+    "4H":  720,   # 3x bar period
+    "1D":  2880,  # 2x bar period (48h — accounts for weekends gracefully)
+}
+
 # ── TIMEFRAMES ────────────────────────────────────────────────────
 HTF_TIMEFRAMES: frozenset = frozenset({"1D", "4H", "1H", "30m", "15m", "5m"})
 EXECUTION_TIMEFRAMES: frozenset = frozenset({"2m", "3m", "1m"})

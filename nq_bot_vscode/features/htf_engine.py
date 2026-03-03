@@ -8,9 +8,12 @@ a directional bias used to filter trades on the execution timeframe.
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
+
+from config.constants import HTF_STRENGTH_GATE, HTF_STALENESS_LIMITS
 
 logger = logging.getLogger(__name__)
 
@@ -47,19 +50,8 @@ class HTFBiasEngine:
     """
 
     WINDOW = 20  # bars per timeframe to retain
-    STRENGTH_GATE = 0.3  # Config D validated threshold — do NOT change without backtest
-
-    # Maximum age (in minutes) before a TF's bars are considered stale.
-    # Keyed by timeframe label. If no bar arrives within this window,
-    # that TF's bias is downgraded to "neutral" and a warning is logged.
-    _STALENESS_LIMITS: Dict[str, int] = {
-        "5m":  15,    # 3x bar period
-        "15m": 45,    # 3x bar period
-        "30m": 90,    # 3x bar period
-        "1H":  180,   # 3x bar period
-        "4H":  720,   # 3x bar period
-        "1D":  2880,  # 2x bar period (48h — accounts for weekends gracefully)
-    }
+    STRENGTH_GATE = HTF_STRENGTH_GATE  # Imported from config/constants.py — single source of truth
+    _STALENESS_LIMITS = HTF_STALENESS_LIMITS  # Imported from config/constants.py
 
     def __init__(self, config=None, timeframes: List[str] = None):
         self.config = config
@@ -88,8 +80,26 @@ class HTFBiasEngine:
         Stale timeframes (no bar update within the staleness limit)
         are downgraded to "neutral" so they don't contribute a
         directional vote.  A warning is logged once per stale TF.
+
+        Args:
+            timestamp: Current time for staleness checks.  Required for
+                       live trading.  May be None only during initial
+                       warmup when no bars have been processed yet.
+
+        Raises:
+            ValueError: If timestamp is None and bars have been ingested
+                        (staleness check would be silently skipped).
         """
-        stale_tfs = self._check_staleness(timestamp) if timestamp else set()
+        if timestamp is None:
+            if self._total_updates > 0:
+                raise ValueError(
+                    "get_bias() called without timestamp after bars have been "
+                    "ingested — staleness check would be silently skipped.  "
+                    "Pass the current bar timestamp."
+                )
+            stale_tfs = set()
+        else:
+            stale_tfs = self._check_staleness(timestamp)
 
         bullish = 0
         bearish = 0
@@ -169,9 +179,13 @@ class HTFBiasEngine:
         recent = bars[-lookback:]
         net = recent[-1].close - recent[0].open
         avg_range = sum(b.high - b.low for b in recent) / lookback
-        if avg_range == 0:
+        if avg_range == 0 or not math.isfinite(avg_range):
+            return "neutral"
+        if not math.isfinite(net):
             return "neutral"
         ratio = net / avg_range
+        if not math.isfinite(ratio):
+            return "neutral"
         if ratio > 0.5:
             return "bullish"
         elif ratio < -0.5:

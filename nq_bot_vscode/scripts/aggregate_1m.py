@@ -34,6 +34,7 @@ Output:
 
 import argparse
 import csv
+import math
 import os
 import sys
 from datetime import datetime, timezone, timedelta
@@ -249,6 +250,11 @@ def load_1m_bars(filepath: str) -> List[Dict]:
                 c = float(row[close_idx])
                 v = int(float(row[vol_idx])) if vol_idx < len(row) else 0
 
+                # NaN/Inf guard — reject corrupted price data
+                if not (math.isfinite(o) and math.isfinite(h) and
+                        math.isfinite(lo) and math.isfinite(c)):
+                    continue
+
                 if h < lo or o <= 0:
                     continue
 
@@ -265,6 +271,27 @@ def load_1m_bars(filepath: str) -> List[Dict]:
 
     # Sort chronologically
     bars.sort(key=lambda b: b["timestamp"])
+
+    # Detect and remove duplicates + log out-of-order stats
+    if bars:
+        original_count = len(bars)
+        deduped = [bars[0]]
+        out_of_order = 0
+        for i in range(1, len(bars)):
+            if bars[i]["timestamp"] == deduped[-1]["timestamp"]:
+                continue  # Skip duplicate timestamp
+            if bars[i]["timestamp"] < deduped[-1]["timestamp"]:
+                out_of_order += 1
+            deduped.append(bars[i])
+        dup_count = original_count - len(deduped)
+        if dup_count > 0:
+            print(f"  WARNING: {dup_count} duplicate timestamps removed "
+                  f"({dup_count / original_count * 100:.2f}% of rows)")
+        if out_of_order > 0:
+            print(f"  WARNING: {out_of_order} out-of-order timestamps detected "
+                  f"(resolved by sort)")
+        bars = deduped
+
     return bars
 
 
