@@ -401,7 +401,7 @@ class TradingOrchestrator:
                 direction=sweep_dir,
                 trigger_bar=self._bars_processed,
                 trigger_price=bar.close,
-                key_level=sweep_signal.swept_levels[0] if hasattr(sweep_signal, 'swept_levels') and sweep_signal.swept_levels else bar.close,
+                key_level=float(sweep_signal.entry_price),
                 invalidation_price=invalidation,
                 expiry_bars=60,
                 confirmation_conditions=["RECLAIM", "FVG_FORM", "FVG_TAP"],
