@@ -91,7 +91,7 @@ class DryRunDataGenerator:
     No IBKR connection required.
     """
 
-    def __init__(self, base_price: float = 20000.0):
+    def __init__(self, base_price: float = 24500.0):
         self._price = base_price
         self._bar_count = 0
 
@@ -99,7 +99,7 @@ class DryRunDataGenerator:
         """Generate a single synthetic 2-minute bar."""
         # Random walk with slight mean reversion
         move = random.gauss(0, 8.0)  # ~8pt std dev per 2m bar (MNQ-like)
-        mean_revert = (20000.0 - self._price) * 0.001
+        mean_revert = (24500.0 - self._price) * 0.001
         self._price += move + mean_revert
 
         open_price = self._price
