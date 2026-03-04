@@ -653,6 +653,7 @@ class ReplaySimulator:
         c1_variant: str = "C",
         quiet: bool = False,
         sweep_enabled: bool = True,
+        modifiers_enabled: bool = True,
     ):
         # Default validate mode to the OOS window
         if validate and not start_date:
@@ -668,6 +669,7 @@ class ReplaySimulator:
         self.c1_variant = c1_variant
         self.quiet = quiet  # suppress verbose output in compare-all mode
         self.sweep_enabled = sweep_enabled
+        self.modifiers_enabled = modifiers_enabled
 
         self.state = ReplayState()
         self.bot: Optional[TradingOrchestrator] = None
@@ -770,6 +772,7 @@ class ReplaySimulator:
         CONFIG.execution.paper_trading = True
         self.bot = TradingOrchestrator(CONFIG)
         self.bot._sweep_enabled = self.sweep_enabled
+        self.bot._modifiers_enabled = self.modifiers_enabled
         await self.bot.initialize(skip_db=True)
 
         # ── Patch executor with dynamic slippage ──
@@ -2425,6 +2428,10 @@ async def async_main():
         "--no-sweep", action="store_true",
         help="Disable the liquidity sweep detector"
     )
+    parser.add_argument(
+        "--no-modifiers", action="store_true",
+        help="Disable institutional modifiers (overnight bias + FOMC drift)"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -2451,6 +2458,7 @@ async def async_main():
         data_dir=args.data_dir,
         c1_variant=args.c1_variant,
         sweep_enabled=not args.no_sweep,
+        modifiers_enabled=not args.no_modifiers,
     )
 
     await sim.run()

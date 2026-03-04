@@ -36,6 +36,7 @@ from signals.aggregator import SignalAggregator, SignalDirection
 from signals.liquidity_sweep import LiquiditySweepDetector, SweepSignal
 from signals.fvg_detector import FVGDetector
 from signals.watch_state import WatchStateManager, WatchState, ConfirmedSignal
+from signals.institutional_modifiers import InstitutionalModifierEngine
 from risk.engine import RiskEngine, RiskDecision
 from risk.regime_detector import RegimeDetector
 from execution.scale_out_executor import ScaleOutExecutor
@@ -106,6 +107,10 @@ class TradingOrchestrator:
         self._fvg_detector = FVGDetector()
         self._watch_manager = WatchStateManager()
         self._ucl_enabled = True  # Can be toggled for A/B testing
+
+        # Institutional Modifier Layer — Phase 1
+        self._institutional_engine = InstitutionalModifierEngine()
+        self._modifiers_enabled = True  # Can be toggled for A/B testing
 
         # Execution - scale-out is the primary executor
         self.executor = ScaleOutExecutor(config)
@@ -213,6 +218,10 @@ class TradingOrchestrator:
         self._last_bar = bar
         self._last_rejection = None  # Clear previous rejection
         action_result = None
+
+        # === 0. INSTITUTIONAL MODIFIER STATE UPDATE (every bar) ===
+        if self._modifiers_enabled:
+            self._institutional_engine.update_bar(bar)
 
         # === 1. FEATURES (execution TF) ===
         features = self.feature_engine.update(bar)
@@ -522,6 +531,41 @@ class TradingOrchestrator:
             return None
 
         if risk_assessment.decision in (RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE):
+            # === 6b. INSTITUTIONAL MODIFIERS ===
+            # Applied AFTER all gates pass, BEFORE trade execution.
+            # Adjusts position size, stop width, C2 runner trail.
+            modifier_result = None
+            atr_for_entry = features.atr_14
+            if self._modifiers_enabled:
+                htf_dir = htf_bias.consensus_direction if htf_bias else None
+                modifier_result = self._institutional_engine.calculate(
+                    current_time=bar.timestamp,
+                    htf_bias_direction=htf_dir,
+                )
+                if modifier_result.stand_aside:
+                    logger.info(
+                        f"INSTITUTIONAL STAND-ASIDE: {modifier_result.stand_aside_reason}"
+                    )
+                    _set_rejection(entry_direction, entry_score, raw_stop,
+                                   features.atr_14, "Institutional stand-aside", 9)
+                    return None
+
+                # Apply multipliers
+                raw_stop *= modifier_result.stop_multiplier
+                atr_for_entry = features.atr_14 * modifier_result.runner_multiplier
+
+                if (modifier_result.position_multiplier != 1.0
+                        or modifier_result.stop_multiplier != 1.0
+                        or modifier_result.runner_multiplier != 1.0):
+                    logger.info(
+                        f"INSTITUTIONAL MODIFIERS: "
+                        f"pos={modifier_result.position_multiplier:.2f}x "
+                        f"stop={modifier_result.stop_multiplier:.2f}x "
+                        f"runner={modifier_result.runner_multiplier:.2f}x | "
+                        f"overnight={modifier_result.details.get('overnight', {}).get('classification', 'n/a')} "
+                        f"fomc={modifier_result.details.get('fomc', {}).get('window', 'n/a')}"
+                    )
+
             # === 7. ENTER SCALE-OUT TRADE ===
             # C1 exits via trail-from-profit (Variant C).
             # No fixed TP1 target — managed by ScaleOutExecutor.
@@ -529,7 +573,7 @@ class TradingOrchestrator:
                 direction=entry_direction,
                 entry_price=bar.close,
                 stop_distance=raw_stop,
-                atr=features.atr_14,
+                atr=atr_for_entry,
                 signal_score=entry_score,
                 regime=self._current_regime,
             )
@@ -551,6 +595,15 @@ class TradingOrchestrator:
                     "htf_bias": htf_dir,
                     "htf_strength": round(htf_str, 3),
                 }
+                # Attach institutional modifier metadata
+                if modifier_result is not None:
+                    action_result["inst_position_mult"] = modifier_result.position_multiplier
+                    action_result["inst_stop_mult"] = modifier_result.stop_multiplier
+                    action_result["inst_runner_mult"] = modifier_result.runner_multiplier
+                    action_result["inst_overnight"] = modifier_result.details.get(
+                        "overnight", {}).get("classification", "n/a")
+                    action_result["inst_fomc_window"] = modifier_result.details.get(
+                        "fomc", {}).get("window", "n/a")
                 # Attach sweep metadata if applicable
                 if entry_source in ("sweep", "confluence") and sweep_signal:
                     action_result["sweep_levels"] = sweep_signal.swept_levels
@@ -864,6 +917,7 @@ class TradingOrchestrator:
             "sweep_detector": self.sweep_detector.get_stats() if self._sweep_enabled else None,
             "ucl_watch_state": self._watch_manager.get_stats() if self._ucl_enabled else None,
             "ucl_fvg_detector": self._fvg_detector.get_stats() if self._ucl_enabled else None,
+            "institutional_modifiers": self._modifiers_enabled,
         }
 
 
