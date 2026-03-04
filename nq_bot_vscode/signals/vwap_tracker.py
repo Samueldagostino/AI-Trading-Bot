@@ -73,6 +73,11 @@ class VWAPTracker:
         vol = bar.volume if bar.volume > 0 else 1
         typical_price = (bar.high + bar.low + bar.close) / 3.0
 
+        # Guard: skip NaN/Inf prices to prevent permanent accumulator corruption
+        import math as _math
+        if not _math.isfinite(typical_price):
+            return
+
         self._cumulative_pv += typical_price * vol
         self._cumulative_vol += vol
 

@@ -635,9 +635,10 @@ class PositionManager:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = path.with_suffix(".tmp")
             tmp_path.write_text(json.dumps(state, indent=2))
-            tmp_path.rename(path)
+            import os
+            os.replace(str(tmp_path), str(path))
         except OSError as e:
-            logger.error("Failed to save position state: %s", e)
+            logger.critical("Failed to save position state: %s", e)
 
     def load_state(self) -> bool:
         """Restore open positions from disk after a crash restart.

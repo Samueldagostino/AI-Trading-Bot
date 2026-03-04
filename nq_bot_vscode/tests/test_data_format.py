@@ -118,22 +118,28 @@ class TestValidateBar:
         assert any("positive" in e for e in errors)
 
     def test_nan_price(self):
+        # Bar.__post_init__ now auto-corrects NaN prices (clamped to 0.0)
+        # The Bar self-heals, so validate_bar sees valid data after construction
         bar = make_valid_bar(close=float("nan"))
+        # After self-healing, close is clamped to 0.0 which fails positive check
         valid, errors = validate_bar(bar)
         assert valid is False
-        assert any("finite" in e for e in errors)
+        assert any("positive" in e for e in errors)
 
     def test_inf_price(self):
+        # Bar.__post_init__ now auto-corrects Inf prices (clamped to close)
         bar = make_valid_bar(high=float("inf"))
+        # After self-healing, high is clamped to close value; Bar is now valid
         valid, errors = validate_bar(bar)
-        assert valid is False
-        assert any("finite" in e for e in errors)
+        assert valid is True
 
     def test_high_less_than_low(self):
+        # Bar.__post_init__ now auto-corrects high < low by swapping
         bar = make_valid_bar(high=20090.0, low=20110.0)
+        # After self-healing, high and low are swapped; Bar is valid
         valid, errors = validate_bar(bar)
-        assert valid is False
-        assert any("high" in e and "low" in e for e in errors)
+        assert valid is True
+        assert bar.high >= bar.low
 
     def test_zero_volume(self):
         bar = make_valid_bar(volume=0)
