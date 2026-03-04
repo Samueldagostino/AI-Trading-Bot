@@ -75,6 +75,7 @@ from features.engine import Bar
 from main import TradingOrchestrator, HTF_TIMEFRAMES
 from execution.safety_rails import SafetyRails, SafetyRailsConfig
 from scripts.paper_trading_monitor import PaperTradingMonitor
+from scripts.live_dashboard import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +183,10 @@ class PaperLiveRunner:
         self._bars_processed = 0
         self._trades_executed = 0
         self._last_dashboard_time: float = 0.0
+
+        # Dashboard state: circular candle buffer (last 200 bars)
+        self._candle_buffer: list = []
+        self._candle_buffer_max = 200
 
     # ──────────────────────────────────────────────────────────
     # STARTUP
@@ -369,6 +374,136 @@ class PaperLiveRunner:
 
         # Periodic monitor update
         self._monitor.update()
+
+        # Append candle to buffer for dashboard
+        self._append_candle(bar)
+
+        # Write dashboard state files (lightweight, atomic)
+        self._write_dashboard_state(bar)
+
+    # ──────────────────────────────────────────────────────────
+    # DASHBOARD STATE FILES
+    # ──────────────────────────────────────────────────────────
+
+    def _append_candle(self, bar: Bar) -> None:
+        """Append bar to circular candle buffer."""
+        candle = {
+            "time": bar.timestamp.isoformat(),
+            "o": round(bar.open, 2),
+            "h": round(bar.high, 2),
+            "l": round(bar.low, 2),
+            "c": round(bar.close, 2),
+            "vol": bar.volume,
+        }
+        self._candle_buffer.append(candle)
+        if len(self._candle_buffer) > self._candle_buffer_max:
+            self._candle_buffer = self._candle_buffer[-self._candle_buffer_max:]
+
+    def _write_dashboard_state(self, bar: Bar) -> None:
+        """Write state files for the live dashboard (atomic writes)."""
+        try:
+            # Candle buffer
+            atomic_write_json(
+                LOGS_DIR / "candle_buffer.json",
+                self._candle_buffer,
+            )
+
+            # Active trades
+            active = []
+            if self._bot and self._bot.executor.has_active_trade:
+                exc = self._bot.executor
+                trade_state = exc.get_state() if hasattr(exc, 'get_state') else {}
+                active.append({
+                    "id": trade_state.get("trade_id", "T1"),
+                    "dir": trade_state.get("direction", ""),
+                    "ep": trade_state.get("entry_price", 0),
+                    "contracts": trade_state.get("contracts", 2),
+                    "entry_time": trade_state.get("entry_time", ""),
+                    "unrealized_pnl": trade_state.get("unrealized_pnl",
+                        self._calc_unrealized_pnl(trade_state, bar.close)),
+                    "modifier": trade_state.get("modifier", 1.0),
+                })
+            atomic_write_json(LOGS_DIR / "active_trades.json", active)
+
+            # Modifier state
+            mod_state = self._get_modifier_state()
+            atomic_write_json(LOGS_DIR / "modifier_state.json", mod_state)
+
+            # Safety state
+            safety_state = self._get_safety_state()
+            atomic_write_json(LOGS_DIR / "safety_state.json", safety_state)
+
+        except Exception as e:
+            logger.debug("Dashboard state write error: %s", e)
+
+    def _calc_unrealized_pnl(self, trade_state: dict, current_price: float) -> float:
+        """Calculate unrealized PnL for an active trade."""
+        ep = trade_state.get("entry_price", 0)
+        direction = trade_state.get("direction", "")
+        contracts = trade_state.get("contracts", 2)
+        if not ep or not direction:
+            return 0.0
+        # MNQ = $5 per point per contract
+        pts = (current_price - ep) if direction == "long" else (ep - current_price)
+        return round(pts * 5.0 * contracts, 2)
+
+    def _get_modifier_state(self) -> dict:
+        """Get current modifier values from the institutional engine."""
+        default = {
+            "overnight": {"value": 1.0, "reason": "No data"},
+            "fomc": {"value": 1.0, "reason": "No data"},
+            "gamma": {"value": 1.0, "reason": "No data"},
+            "har_rv": {"value": 1.0, "reason": "No data"},
+            "total": 1.0,
+        }
+        if not self._bot or not hasattr(self._bot, '_institutional_engine'):
+            return default
+
+        engine = self._bot._institutional_engine
+        if not hasattr(engine, '_last_result') or engine._last_result is None:
+            return default
+
+        result = engine._last_result
+        details = result.details if hasattr(result, 'details') else {}
+        overnight = details.get("overnight", {})
+        fomc = details.get("fomc", {})
+        gamma = details.get("gamma", {})
+        vol = details.get("volatility", {})
+
+        return {
+            "overnight": {
+                "value": overnight.get("position_multiplier", 1.0),
+                "reason": overnight.get("classification", "neutral"),
+            },
+            "fomc": {
+                "value": fomc.get("position_multiplier", 1.0),
+                "reason": fomc.get("window", "none"),
+            },
+            "gamma": {
+                "value": gamma.get("position_multiplier", 1.0),
+                "reason": gamma.get("regime", "unknown"),
+            },
+            "har_rv": {
+                "value": vol.get("position_multiplier", 1.0),
+                "reason": vol.get("forecast_label", "normal"),
+            },
+            "total": result.position_multiplier if hasattr(result, 'position_multiplier') else 1.0,
+        }
+
+    def _get_safety_state(self) -> dict:
+        """Get current safety rail state for dashboard."""
+        sr = self._safety_rails
+        return {
+            "daily_pnl": sr.daily_loss.daily_pnl,
+            "daily_limit": sr.daily_loss.max_daily_loss,
+            "consec_losses": sr.consecutive_losses._consecutive_losses,
+            "max_consec": sr.consecutive_losses.max_consecutive,
+            "position_size": sr.position_size.max_contracts if (
+                self._bot and self._bot.executor.has_active_trade) else 0,
+            "max_position": sr.position_size.max_contracts,
+            "heartbeat_age_sec": round(sr.heartbeat.seconds_since_last, 1),
+            "all_ok": sr.check_all(),
+        }
 
     # ──────────────────────────────────────────────────────────
     # MAIN LOOP
