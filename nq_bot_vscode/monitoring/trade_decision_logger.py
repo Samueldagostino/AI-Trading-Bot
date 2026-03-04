@@ -233,7 +233,7 @@ class TradeDecisionLogger:
             "id": str(uuid.uuid4()),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "decision": "EXIT",
-            "signal_direction": direction.upper(),
+            "signal_direction": (direction or "UNKNOWN").upper(),
             "entry_price": entry_price,
             "exit_price": exit_price,
             "total_pnl": total_pnl,

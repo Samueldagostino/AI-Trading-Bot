@@ -138,6 +138,8 @@ class SignalBridge:
             return self._reject("signal_score is NaN/Inf", metadata)
         if not math.isfinite(decision.atr):
             return self._reject("ATR is NaN/Inf", metadata)
+        if not math.isfinite(decision.entry_price):
+            return self._reject("entry_price is NaN/Inf", metadata)
 
         # ── SAFETY GATE 1: direction must be valid ──
         if decision.direction not in ("long", "short"):

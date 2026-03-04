@@ -112,11 +112,17 @@ class OvernightBiasModifier:
 
                 # Compute overnight bias if we have previous close
                 if (self._prev_day_close is not None
-                        and self._prev_close_date != current_date):
-                    self._overnight_bps = (
+                        and self._prev_close_date != current_date
+                        and self._prev_day_close != 0.0):
+                    raw_bps = (
                         (self._current_day_open - self._prev_day_close)
                         / self._prev_day_close
                     ) * 10000
+                    if math.isfinite(raw_bps):
+                        self._overnight_bps = raw_bps
+                    else:
+                        logger.warning("Overnight BPS is NaN/Inf — defaulting to 0")
+                        self._overnight_bps = 0.0
                     self._last_compute_date = current_date
 
     def calculate(self, htf_bias_direction: Optional[str]) -> ModifierResult:
