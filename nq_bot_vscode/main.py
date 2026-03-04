@@ -18,6 +18,7 @@ import math
 import sys
 import numpy as np
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional, Dict, List
 from zoneinfo import ZoneInfo
 
@@ -41,6 +42,7 @@ from risk.engine import RiskEngine, RiskDecision
 from risk.regime_detector import RegimeDetector
 from execution.scale_out_executor import ScaleOutExecutor
 from monitoring.engine import MonitoringEngine
+from monitoring.trade_decision_logger import TradeDecisionLogger
 from data_pipeline.pipeline import (
     DataPipeline, BarData, MultiTimeframeIterator,
     bardata_to_bar, bardata_to_htfbar, MINUTES_TO_LABEL,
@@ -111,6 +113,11 @@ class TradingOrchestrator:
         # Institutional Modifier Layer — Phase 1
         self._institutional_engine = InstitutionalModifierEngine()
         self._modifiers_enabled = True  # Can be toggled for A/B testing
+
+        # Trade Decision Logger — records every approval and rejection
+        self.decision_logger = TradeDecisionLogger(
+            str(Path(__file__).resolve().parent / "logs")
+        )
 
         # Execution - scale-out is the primary executor
         self.executor = ScaleOutExecutor(config)
@@ -362,6 +369,41 @@ class TradingOrchestrator:
                 "rejection_reason": reason,
                 "gate": gate,
             }
+            # Log to decision logger
+            _dir = direction.upper() if direction else "UNKNOWN"
+            _htf_biases = {}
+            if htf_bias and hasattr(htf_bias, 'tf_biases'):
+                _htf_biases = {
+                    tf: b.upper()[:7] if b else "N/A"
+                    for tf, b in htf_bias.tf_biases.items()
+                }
+            _conflicting = []
+            if htf_bias and hasattr(htf_bias, 'tf_biases'):
+                expected = "bullish" if _dir == "LONG" else "bearish"
+                _conflicting = [
+                    tf for tf, b in htf_bias.tf_biases.items()
+                    if b != expected and b != "neutral"
+                ]
+            # Map gate numbers to stage names
+            _stage_map = {
+                1: "HTF_GATE", 2: "NAN_GUARD", 3: "CONFLUENCE",
+                4: "NAN_GUARD", 5: "HC_STOP", 6: "MIN_RR",
+                7: "REGIME", 8: "RISK_REJECT", 9: "MODIFIER_STANDSIDE",
+            }
+            _stage = _stage_map.get(gate, reason)
+            self.decision_logger.log_rejection(
+                price_at_signal=bar.close,
+                signal_direction=_dir,
+                rejection_stage=_stage,
+                rejection_details={
+                    "htf_biases": _htf_biases,
+                    "conflicting_timeframes": _conflicting,
+                    "confluence_score": score if score else None,
+                    "confluence_threshold": HIGH_CONVICTION_MIN_SCORE,
+                    "stand_aside_reason": reason if gate == 9 else None,
+                    "safety_rail_triggered": reason if gate == 8 else None,
+                },
+            )
 
         # === 5b. UCL — EVALUATE ACTIVE WATCH STATES (runs every bar) ===
         ucl_confirmed: List[ConfirmedSignal] = []
@@ -609,6 +651,41 @@ class TradingOrchestrator:
                     action_result["sweep_levels"] = sweep_signal.swept_levels
                     action_result["sweep_score"] = sweep_signal.score
                     action_result["sweep_depth_pts"] = sweep_signal.sweep_depth_pts
+
+                # Log approved trade to decision logger
+                _mod_vals = {"overnight": 1.0, "fomc": 1.0, "gamma": 1.0,
+                             "volatility": 1.0, "total": 1.0}
+                if modifier_result is not None:
+                    _mod_vals = {
+                        "overnight": modifier_result.details.get(
+                            "overnight", {}).get("position", 1.0),
+                        "fomc": modifier_result.details.get(
+                            "fomc", {}).get("position", 1.0),
+                        "gamma": modifier_result.details.get(
+                            "gamma", {}).get("position", 1.0),
+                        "volatility": modifier_result.details.get(
+                            "volatility", {}).get("position", 1.0),
+                        "total": modifier_result.position_multiplier,
+                    }
+                self.decision_logger.log_approval(
+                    price_at_signal=bar.close,
+                    signal_direction=entry_direction.upper(),
+                    confluence_score=entry_score,
+                    modifier_values=_mod_vals,
+                    position_size=2.0,
+                    stop_width=raw_stop,
+                    runner_trail_width=atr_for_entry,
+                    entry_price=trade.entry_price,
+                    c1_target=trade.entry_price + (
+                        self.config.scale_out.c1_profit_threshold_pts
+                        if entry_direction == "long" else
+                        -self.config.scale_out.c1_profit_threshold_pts
+                    ),
+                    c2_trail_start=trade.entry_price + (
+                        atr_for_entry if entry_direction == "long"
+                        else -atr_for_entry
+                    ),
+                )
         else:
             logger.debug(f"Risk rejected: {risk_assessment.reason}")
             _set_rejection(entry_direction, entry_score, raw_stop,

@@ -595,6 +595,38 @@ All circuit breakers require manual restart after tripping.
     ))
     root_logger.addHandler(file_handler)
 
+    # Use ibkr_startup flow when not in dry-run mode for automated startup
+    if not args.dry_run:
+        try:
+            from scripts.ibkr_startup import IBKRStartupRunner
+            startup_runner = IBKRStartupRunner(
+                dry_run=False,
+                max_daily_loss=args.max_daily_loss,
+                log_level=args.log_level,
+            )
+            loop = asyncio.new_event_loop()
+
+            def _startup_signal_handler():
+                logger.info("Shutdown signal received (SIGINT/SIGTERM)")
+                startup_runner.request_shutdown()
+
+            if sys.platform != "win32":
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    loop.add_signal_handler(sig, _startup_signal_handler)
+
+            try:
+                loop.run_until_complete(startup_runner.run())
+            except KeyboardInterrupt:
+                pass
+            except Exception:
+                logger.critical("UNHANDLED EXCEPTION:\n%s", traceback.format_exc())
+                sys.exit(1)
+            finally:
+                loop.close()
+            return
+        except ImportError:
+            logger.info("ibkr_startup not available, falling back to direct runner")
+
     runner = PaperLiveRunner(
         dry_run=args.dry_run,
         max_daily_loss=args.max_daily_loss,
