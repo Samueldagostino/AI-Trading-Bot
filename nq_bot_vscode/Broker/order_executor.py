@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-from Broker.ibkr_client import IBKRClient, IBKRConfig, SessionType, get_session_type
+from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, SessionType, get_session_type
 
 logger = logging.getLogger(__name__)
 

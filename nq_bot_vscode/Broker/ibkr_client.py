@@ -1,1507 +1,465 @@
 """
-IBKR Client Portal API Data Connector
-======================================
-Connects to Interactive Brokers Client Portal Gateway for MNQ futures data.
+IBKR TWS API Client via ib_insync
+==================================
+Direct socket connection to TWS / IB Gateway for MNQ futures trading.
 
-Architecture:
-- HTTP REST: Authentication, contract search, market data snapshots, historical bars
-- Session keepalive via /tickle endpoint every 60 seconds
-- Polls market data snapshots at configurable interval (default 2s)
+Replaces the Client Portal Gateway HTTP approach with a persistent socket
+connection. No browser, no SSL, no session timeouts.
 
-The Client Portal Gateway must be running locally (or on a reachable host).
-Download from: https://www.interactivebrokers.com/en/trading/ib-api.php
+Port reference:
+  7497 = TWS paper trading
+  7496 = TWS live trading
+  4002 = IB Gateway paper trading
+  4001 = IB Gateway live trading
 
 Env vars:
-- IBKR_GATEWAY_HOST  (default: localhost)
-- IBKR_GATEWAY_PORT  (default: 5000)
-- IBKR_ACCOUNT_TYPE  (paper | live)
-- IBKR_SYMBOL        (default: MNQ)
+  IBKR_TWS_HOST       (default: 127.0.0.1)
+  IBKR_TWS_PORT       (default: 7497)
+  IBKR_CLIENT_ID      (default: 1)
+  IBKR_SYMBOL         (default: MNQ)
 
-SECURITY: This module NEVER logs tokens, credentials, or session cookies.
+SECURITY: This module NEVER logs credentials or account numbers.
 """
 
 import asyncio
-import json
 import logging
-import math
 import os
-import ssl
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from enum import Enum
-from zoneinfo import ZoneInfo
-from typing import Optional, Dict, List, Callable, Any
+from datetime import datetime, timezone
+from typing import Callable, Dict, List, Optional
+
+from ib_insync import IB, Contract, Future, MarketOrder, LimitOrder, StopOrder, util
 
 from features.engine import Bar
 
 logger = logging.getLogger(__name__)
 
+# Re-export Client Portal classes for backward compatibility.
+# Other modules (orchestrator, order_executor, run_ibkr, tests) still import
+# these names from Broker.ibkr_client. The Client Portal code is preserved
+# in ibkr_client_portal.py but is no longer the primary path.
 try:
-    import aiohttp
+    from Broker.ibkr_client_portal import (  # noqa: F401
+        IBKRClient as IBKRClientPortal,
+        IBKRConfig,
+        IBKRDataFeed,
+        IBKRWebSocket,
+        CandleAggregator,
+        ContractInfo,
+        MarketSnapshot,
+        SessionType,
+        get_session_type,
+        BACKFILL_BAR_SIZE,
+        BACKFILL_PERIOD,
+        CANDLE_INTERVAL_SECONDS,
+        CONSECUTIVE_GAP_ALERT_THRESHOLD,
+        SNAPSHOT_FIELDS,
+        WS_FALLBACK_THRESHOLD,
+    )
+    from Broker.ibkr_client_portal import ET_TZ as ET_OFFSET  # noqa: F401
 except ImportError:
-    aiohttp = None
-    logger.warning("aiohttp not installed. Install with: pip install aiohttp")
+    pass
+
+# ================================================================
+# CONSTANTS
+# ================================================================
+
+RECONNECT_MAX_RETRIES = 3
+RECONNECT_BASE_DELAY = 2.0  # seconds, exponential backoff
+HEARTBEAT_INTERVAL = 30.0   # seconds
 
 
 # ================================================================
-# CONFIGURATION
-# ================================================================
-
-@dataclass
-class IBKRConfig:
-    """Configuration for IBKR Client Portal Gateway connection."""
-    gateway_host: str = os.getenv("IBKR_GATEWAY_HOST", "localhost")
-    gateway_port: int = int(os.getenv("IBKR_GATEWAY_PORT", "5000"))
-    account_type: str = os.getenv("IBKR_ACCOUNT_TYPE", "paper")  # paper | live
-    symbol: str = os.getenv("IBKR_SYMBOL", "MNQ")
-    poll_interval_seconds: float = 2.0
-    keepalive_interval_seconds: float = 60.0
-    reconnect_delay_seconds: float = 5.0
-    max_reconnect_attempts: int = 10
-
-    @property
-    def base_url(self) -> str:
-        return f"https://{self.gateway_host}:{self.gateway_port}/v1/api"
-
-    @property
-    def is_live(self) -> bool:
-        return self.account_type == "live"
-
-
-# ================================================================
-# MARKET DATA SNAPSHOT FIELDS
-# ================================================================
-# IBKR Client Portal field IDs for /iserver/marketdata/snapshot
-SNAPSHOT_FIELDS = {
-    31: "last_price",
-    84: "bid",
-    85: "ask",
-    86: "high",
-    88: "low",
-}
-
-
-# ================================================================
-# DATA CLASSES
-# ================================================================
-
-@dataclass
-class MarketSnapshot:
-    """Parsed market data snapshot."""
-    conid: int = 0
-    last_price: float = 0.0
-    bid: float = 0.0
-    ask: float = 0.0
-    high: float = 0.0
-    low: float = 0.0
-    timestamp: Optional[datetime] = None
-
-
-@dataclass
-class ContractInfo:
-    """Resolved IBKR contract details."""
-    conid: int = 0
-    symbol: str = ""
-    exchange: str = ""
-    expiry: str = ""       # YYYYMMDD
-    description: str = ""
-
-
-# ================================================================
-# SESSION TYPE
-# ================================================================
-
-# US Eastern timezone — DST-aware via IANA database.
-# ZoneInfo automatically handles EST (UTC-5) / EDT (UTC-4) transitions.
-ET_TZ = ZoneInfo("America/New_York")
-# Back-compat alias (existing code imports ET_OFFSET)
-ET_OFFSET = ET_TZ
-
-
-class SessionType(Enum):
-    RTH = "RTH"    # Regular Trading Hours: 9:30–16:00 ET
-    ETH = "ETH"    # Extended Trading Hours: 18:00–9:29 ET
-
-
-def get_session_type(ts: datetime) -> SessionType:
-    """
-    Determine RTH vs ETH for a given timestamp.
-    RTH = 9:30–16:00 ET (same logic as main.py process_bar).
-    Everything else is ETH.
-    """
-    et_time = ts.astimezone(ET_TZ)
-    t = et_time.hour + et_time.minute / 60.0
-    if 9.5 <= t < 16.0:
-        return SessionType.RTH
-    return SessionType.ETH
-
-
-# ================================================================
-# CANDLE AGGREGATOR
-# ================================================================
-
-# Data quality alert threshold: if this many consecutive 2-minute
-# windows are missed, an alert is logged.
-CONSECUTIVE_GAP_ALERT_THRESHOLD = 3
-
-# Candle interval in seconds (2 minutes).
-CANDLE_INTERVAL_SECONDS = 120
-
-
-class CandleAggregator:
-    """
-    Aggregates raw tick/snapshot data into 2-minute OHLCV candles.
-
-    Output candles are dicts matching the features.engine.Bar constructor:
-        {
-            "timestamp": datetime (UTC, bar open time),
-            "open":   float (first tick price, 2dp),
-            "high":   float (max tick price, 2dp),
-            "low":    float (min tick price, 2dp),
-            "close":  float (last tick price, 2dp),
-            "volume": int   (tick count in window),
-            "tick_count": int,
-            "session_type": SessionType.RTH | SessionType.ETH,
-        }
-
-    Data quality checks:
-    - Rejects candles with zero volume (no ticks received)
-    - Rejects candles where high < low (should be impossible, safety net)
-    - Logs warnings for gaps > 2 minutes between candles
-    - Triggers alert if 3+ consecutive candle windows are missed
-    """
-
-    def __init__(self, on_candle: Optional[Callable] = None):
-        self._on_candle = on_candle
-
-        # Current candle being built
-        self._current_open: float = 0.0
-        self._current_high: float = -math.inf
-        self._current_low: float = math.inf
-        self._current_close: float = 0.0
-        self._current_volume: int = 0
-        self._current_tick_count: int = 0
-        self._current_window_start: Optional[datetime] = None
-
-        # Tracking
-        self._last_candle_time: Optional[datetime] = None
-        self._last_tick_time: Optional[datetime] = None
-        self._consecutive_gaps: int = 0
-        self._candles_emitted: int = 0
-        self._candles_rejected: int = 0
-        self._ticks_processed: int = 0
-        self._ticks_out_of_order: int = 0
-        self._duplicate_candles_skipped: int = 0
-
-    def on_candle(self, callback: Callable) -> None:
-        """Register callback for completed candles."""
-        self._on_candle = callback
-
-    def process_tick(self, price: float, volume: int, timestamp: datetime) -> Optional[dict]:
-        """
-        Feed a single tick/snapshot into the aggregator.
-
-        Args:
-            price: Last trade price (already rounded to 2dp by caller).
-            volume: Volume for this tick (1 for a single snapshot).
-            timestamp: UTC timestamp of the tick.
-
-        Returns:
-            Completed candle dict if a 2-minute boundary was crossed, else None.
-        """
-        if not math.isfinite(price) or price <= 0:
-            return None
-
-        self._ticks_processed += 1
-
-        # Out-of-order detection: reject ticks older than the last
-        # emitted candle (prevents replay corruption on reconnect)
-        if (self._last_candle_time is not None
-                and timestamp < self._last_candle_time):
-            self._ticks_out_of_order += 1
-            if self._ticks_out_of_order <= 5:
-                logger.warning(
-                    "Out-of-order tick dropped: tick=%s < last_candle=%s",
-                    timestamp.isoformat(), self._last_candle_time.isoformat(),
-                )
-            return None
-
-        # Track last tick time for diagnostics
-        self._last_tick_time = timestamp
-
-        window_start = self._get_window_start(timestamp)
-
-        # First tick ever — start the first window
-        if self._current_window_start is None:
-            self._start_new_window(price, volume, window_start)
-            return None
-
-        # Same window — update running OHLCV
-        if window_start == self._current_window_start:
-            self._update_current(price, volume)
-            return None
-
-        # New window — close the current candle and start a new one
-        completed = self._close_current_candle()
-        self._start_new_window(price, volume, window_start)
-        return completed
-
-    def flush(self) -> Optional[dict]:
-        """
-        Force-emit the current partial candle (e.g. at session close).
-        Returns the candle if valid, None otherwise.
-        """
-        if self._current_window_start is None or self._current_volume == 0:
-            return None
-        return self._close_current_candle()
-
-    def reset(self) -> None:
-        """Reset aggregator state (e.g. on reconnect).
-
-        Note: _last_candle_time is preserved intentionally so that
-        duplicate/out-of-order detection still works across reconnects.
-        """
-        self._current_open = 0.0
-        self._current_high = -math.inf
-        self._current_low = math.inf
-        self._current_close = 0.0
-        self._current_volume = 0
-        self._current_tick_count = 0
-        self._current_window_start = None
-        self._consecutive_gaps = 0
-
-    def get_stats(self) -> dict:
-        return {
-            "candles_emitted": self._candles_emitted,
-            "candles_rejected": self._candles_rejected,
-            "ticks_processed": self._ticks_processed,
-            "consecutive_gaps": self._consecutive_gaps,
-            "ticks_out_of_order": self._ticks_out_of_order,
-            "duplicate_candles_skipped": self._duplicate_candles_skipped,
-        }
-
-    # ----------------------------------------------------------------
-    # INTERNAL
-    # ----------------------------------------------------------------
-
-    @staticmethod
-    def _get_window_start(ts: datetime) -> datetime:
-        """
-        Compute the 2-minute window start for a given timestamp.
-        E.g. 10:03:47 -> 10:02:00, 10:04:01 -> 10:04:00.
-        """
-        floored_minute = ts.minute - (ts.minute % 2)
-        return ts.replace(minute=floored_minute, second=0, microsecond=0)
-
-    def _start_new_window(self, price: float, volume: int, window_start: datetime) -> None:
-        self._current_window_start = window_start
-        self._current_open = price
-        self._current_high = price
-        self._current_low = price
-        self._current_close = price
-        self._current_volume = volume
-        self._current_tick_count = 1
-
-    def _update_current(self, price: float, volume: int) -> None:
-        if price > self._current_high:
-            self._current_high = price
-        if price < self._current_low:
-            self._current_low = price
-        self._current_close = price
-        self._current_volume += volume
-        self._current_tick_count += 1
-
-    def _close_current_candle(self) -> Optional[dict]:
-        """Build candle dict, run quality checks, emit if valid."""
-        candle = {
-            "timestamp": self._current_window_start,
-            "open": round(self._current_open, 2),
-            "high": round(self._current_high, 2),
-            "low": round(self._current_low, 2),
-            "close": round(self._current_close, 2),
-            "volume": self._current_volume,
-            "tick_count": self._current_tick_count,
-            "session_type": get_session_type(self._current_window_start),
-        }
-
-        # --- Duplicate timestamp detection ---
-        if (self._last_candle_time is not None
-                and candle["timestamp"] <= self._last_candle_time):
-            self._duplicate_candles_skipped += 1
-            logger.warning(
-                "Duplicate candle timestamp skipped: %s (last=%s)",
-                candle["timestamp"].isoformat(),
-                self._last_candle_time.isoformat(),
-            )
-            return None
-
-        # --- Data quality checks ---
-        rejection_reason = self._validate_candle(candle)
-        if rejection_reason:
-            logger.warning("Candle REJECTED (%s): %s %s",
-                           rejection_reason,
-                           candle["timestamp"].isoformat(),
-                           candle)
-            self._candles_rejected += 1
-            return None
-
-        # --- Gap detection ---
-        self._check_gap(candle["timestamp"])
-
-        self._last_candle_time = candle["timestamp"]
-        self._candles_emitted += 1
-
-        if self._on_candle:
-            self._on_candle(candle)
-
-        return candle
-
-    @staticmethod
-    def _validate_candle(candle: dict) -> Optional[str]:
-        """
-        Return rejection reason string if candle fails quality checks,
-        or None if candle is valid.
-        """
-        if candle["volume"] <= 0:
-            return "zero_volume"
-        if candle["high"] < candle["low"]:
-            return "high_lt_low"
-        # NaN/Inf in any OHLC field would corrupt the entire signal pipeline
-        for field in ("open", "high", "low", "close"):
-            if field in candle and not math.isfinite(candle[field]):
-                return f"nan_inf_{field}"
-        return None
-
-    def _check_gap(self, current_time: datetime) -> None:
-        """Log warnings for gaps between candles."""
-        if self._last_candle_time is None:
-            self._consecutive_gaps = 0
-            return
-
-        expected_next = self._last_candle_time + timedelta(seconds=CANDLE_INTERVAL_SECONDS)
-        gap = (current_time - expected_next).total_seconds()
-
-        if gap >= CANDLE_INTERVAL_SECONDS:
-            missed = int(gap / CANDLE_INTERVAL_SECONDS)
-            self._consecutive_gaps += missed
-            logger.warning(
-                "Candle gap: %d missed windows (%s -> %s, %.0fs gap)",
-                missed,
-                self._last_candle_time.isoformat(),
-                current_time.isoformat(),
-                gap + CANDLE_INTERVAL_SECONDS,
-            )
-            if self._consecutive_gaps >= CONSECUTIVE_GAP_ALERT_THRESHOLD:
-                logger.error(
-                    "ALERT: %d consecutive candle windows missed — "
-                    "possible data feed issue",
-                    self._consecutive_gaps,
-                )
-        else:
-            self._consecutive_gaps = 0
-
-
-# ================================================================
-# WEBSOCKET STREAMING
-# ================================================================
-
-# Number of consecutive WebSocket failures before switching to HTTP fallback.
-WS_FALLBACK_THRESHOLD = 3
-
-# Seconds between WebSocket reconnection attempts.
-WS_RECONNECT_DELAY = 5.0
-
-
-class IBKRWebSocket:
-    """
-    WebSocket client for IBKR Client Portal Gateway streaming data.
-
-    Connects to wss://{host}:{port}/v1/api/ws and subscribes to
-    market data fields for a given conid. Parses incoming JSON
-    messages and forwards ticks to a callback.
-
-    Falls back gracefully — the caller (IBKRDataFeed) handles
-    switching to HTTP polling when this fails.
-    """
-
-    def __init__(self, config: 'IBKRConfig', conid: int):
-        self.config = config
-        self._conid = conid
-        self._ws: Optional[Any] = None
-        self._session: Optional[Any] = None
-        self._connected: bool = False
-        self._on_tick: Optional[Callable] = None
-        self._receive_task: Optional[asyncio.Task] = None
-        self._consecutive_failures: int = 0
-
-    @property
-    def ws_url(self) -> str:
-        return f"wss://{self.config.gateway_host}:{self.config.gateway_port}/v1/api/ws"
-
-    @property
-    def is_connected(self) -> bool:
-        return self._connected
-
-    def on_tick(self, callback: Callable) -> None:
-        """Register callback: fn(price: float, volume: int, timestamp: datetime)."""
-        self._on_tick = callback
-
-    async def connect(self) -> bool:
-        """Open WebSocket connection and subscribe to market data."""
-        if aiohttp is None:
-            logger.error("aiohttp required for WebSocket: pip install aiohttp")
-            self._consecutive_failures += 1
-            return False
-
-        try:
-            ssl_ctx = ssl.create_default_context()
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = ssl.CERT_NONE
-
-            connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-            self._session = aiohttp.ClientSession(connector=connector)
-            self._ws = await self._session.ws_connect(self.ws_url, ssl=ssl_ctx)
-
-            # Subscribe to market data for this conid
-            sub_msg = f'smd+{self._conid}+{{"fields":["31","84","85","86","88"]}}'
-            await self._ws.send_str(sub_msg)
-
-            self._connected = True
-            self._consecutive_failures = 0
-            logger.info("WebSocket connected to %s, subscribed conid %d",
-                        self.ws_url, self._conid)
-
-            # Start background receive loop
-            self._receive_task = asyncio.create_task(self._receive_loop())
-            return True
-
-        except Exception as e:
-            logger.warning("WebSocket connect failed: %s", e)
-            self._consecutive_failures += 1
-            await self._cleanup()
-            return False
-
-    async def disconnect(self) -> None:
-        """Unsubscribe and close WebSocket."""
-        self._connected = False
-
-        if self._receive_task and not self._receive_task.done():
-            self._receive_task.cancel()
-            try:
-                await self._receive_task
-            except asyncio.CancelledError:
-                pass
-
-        if self._ws and not self._ws.closed:
-            try:
-                unsub_msg = f'umd+{self._conid}+{{}}'
-                await self._ws.send_str(unsub_msg)
-            except Exception:
-                pass
-
-        await self._cleanup()
-        logger.info("WebSocket disconnected")
-
-    async def _cleanup(self) -> None:
-        if self._ws and not self._ws.closed:
-            await self._ws.close()
-        self._ws = None
-        if self._session and not self._session.closed:
-            await self._session.close()
-        self._session = None
-        self._connected = False
-
-    async def _receive_loop(self) -> None:
-        """Read messages from WebSocket and dispatch ticks."""
-        while self._connected and self._ws and not self._ws.closed:
-            try:
-                msg = await self._ws.receive(timeout=30.0)
-
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    self._handle_message(msg.data)
-                elif msg.type == aiohttp.WSMsgType.CLOSED:
-                    logger.warning("WebSocket closed by server")
-                    break
-                elif msg.type == aiohttp.WSMsgType.ERROR:
-                    logger.error("WebSocket error: %s", self._ws.exception())
-                    break
-
-            except asyncio.TimeoutError:
-                # No data in 30s — still connected, just quiet market
-                continue
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("WebSocket receive error: %s", e)
-                self._consecutive_failures += 1
-                break
-
-        self._connected = False
-
-    def _handle_message(self, raw: str) -> None:
-        """Parse a WebSocket JSON message and fire tick callback."""
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return
-
-        # IBKR WS sends various message types. Market data updates
-        # contain the conid as a key or a "conid" field.
-        conid_key = str(self._conid)
-
-        # Format 1: list of updates
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict) and str(item.get("conid", "")) == conid_key:
-                    snap = item
-                    break
-            else:
-                return
-        # Format 2: {"conid_str": {...fields...}}
-        elif isinstance(data, dict) and conid_key in data:
-            snap = data[conid_key]
-        # Format 3: top-level dict with "conid" field
-        elif isinstance(data, dict) and data.get("conid") == self._conid:
-            snap = data
-        else:
-            return
-
-        # Extract last price (field 31)
-        last_raw = snap.get("31") or snap.get("last_price")
-        if last_raw is None:
-            return
-
-        price = IBKRClient._parse_price(last_raw)
-        if price <= 0:
-            return
-
-        ts = datetime.now(timezone.utc)
-
-        if self._on_tick:
-            self._on_tick(price, 1, ts)
-
-
-# ================================================================
-# IBKR DATA FEED — HIGH-LEVEL ORCHESTRATOR
-# ================================================================
-
-# Historical backfill: 2 hours of 2-minute bars = 60 bars.
-BACKFILL_PERIOD = "2h"
-BACKFILL_BAR_SIZE = "2min"
-
-
-class IBKRDataFeed:
-    """
-    High-level data feed that ties together:
-    - IBKRClient (REST API for auth, contract, historical data)
-    - IBKRWebSocket (primary streaming data)
-    - CandleAggregator (builds 2m candles from ticks)
-    - HTTP snapshot polling (fallback when WebSocket is down)
-
-    Lifecycle:
-        feed = IBKRDataFeed(client)
-        feed.on_bar(my_callback)
-        await feed.start()     # backfill + stream
-        ...
-        await feed.stop()
-
-    The on_bar callback receives features.engine.Bar instances with
-    session_type set to "RTH" or "ETH".
-    """
-
-    def __init__(self, client: 'IBKRClient'):
-        self._client = client
-        self._aggregator = CandleAggregator()
-        self._ws: Optional[IBKRWebSocket] = None
-
-        # Callbacks
-        self._on_bar: Optional[Callable] = None
-
-        # State
-        self._running: bool = False
-        self._data_mode: str = "none"  # "websocket" | "polling" | "none"
-        self._monitor_task: Optional[asyncio.Task] = None
-        self._backfill_bars: List[dict] = []
-
-        # Wire aggregator candle output to our bar dispatch
-        self._aggregator.on_candle(self._dispatch_bar)
-
-    def on_bar(self, callback: Callable) -> None:
-        """Register callback for completed 2-minute bars."""
-        self._on_bar = callback
-
-    def get_current_price(self) -> Optional[Dict[str, float]]:
-        """Return latest bid/ask/last from the underlying client."""
-        return self._client.get_current_price()
-
-    def is_connected(self) -> bool:
-        """True if feed is running and receiving data."""
-        if not self._running:
-            return False
-        if self._data_mode == "websocket":
-            return self._ws is not None and self._ws.is_connected
-        if self._data_mode == "polling":
-            return self._client.is_connected
-        return False
-
-    def get_status(self) -> dict:
-        return {
-            "running": self._running,
-            "data_mode": self._data_mode,
-            "ws_connected": self._ws.is_connected if self._ws else False,
-            "backfill_bars": len(self._backfill_bars),
-            "aggregator": self._aggregator.get_stats(),
-            "client": self._client.get_status(),
-        }
-
-    # ================================================================
-    # LIFECYCLE
-    # ================================================================
-
-    async def start(self) -> bool:
-        """
-        Start the data feed:
-        1. Verify client is connected
-        2. Run historical backfill (2h of 2m bars)
-        3. Try WebSocket streaming (primary)
-        4. Fall back to HTTP polling if WS fails
-        5. Start health monitor
-        """
-        if not self._client.is_connected:
-            logger.error("IBKRDataFeed.start(): client not connected")
-            return False
-
-        if not self._client.contract:
-            logger.error("IBKRDataFeed.start(): no contract resolved")
-            return False
-
-        self._running = True
-
-        # Step 1: Historical backfill
-        await self._run_backfill()
-
-        # Step 2: Try WebSocket
-        ws_ok = await self._start_websocket()
-        if ws_ok:
-            self._data_mode = "websocket"
-            logger.info("Data feed started — mode: WebSocket")
-        else:
-            # Step 3: Fallback to HTTP polling
-            await self._start_polling()
-            self._data_mode = "polling"
-            logger.info("Data feed started — mode: HTTP polling (WebSocket unavailable)")
-
-        # Step 4: Health monitor
-        self._monitor_task = asyncio.create_task(self._health_monitor())
-
-        return True
-
-    async def stop(self) -> None:
-        """Stop all data feed activity."""
-        self._running = False
-
-        if self._monitor_task and not self._monitor_task.done():
-            self._monitor_task.cancel()
-            try:
-                await self._monitor_task
-            except asyncio.CancelledError:
-                pass
-
-        if self._ws:
-            await self._ws.disconnect()
-            self._ws = None
-
-        await self._client.stop_polling()
-
-        # Flush any partial candle
-        self._aggregator.flush()
-
-        self._data_mode = "none"
-        logger.info("Data feed stopped")
-
-    # ================================================================
-    # HISTORICAL BACKFILL
-    # ================================================================
-
-    async def _run_backfill(self) -> None:
-        """
-        Fetch 2 hours of 2-minute historical bars for indicator warmup.
-        Dispatches each bar through the on_bar callback.
-        """
-        logger.info("Starting historical backfill (%s, %s)...",
-                     BACKFILL_PERIOD, BACKFILL_BAR_SIZE)
-
-        raw_bars = await self._client.get_historical_bars(
-            period=BACKFILL_PERIOD,
-            bar_size=BACKFILL_BAR_SIZE,
-        )
-
-        if not raw_bars:
-            logger.warning("Backfill returned no data — indicators will cold-start")
-            return
-
-        self._backfill_bars = raw_bars
-        count = 0
-
-        for bar_dict in raw_bars:
-            # Add session_type tag to match CandleAggregator output format
-            bar_dict["session_type"] = get_session_type(bar_dict["timestamp"])
-            bar_dict.setdefault("tick_count", 0)
-
-            if self._on_bar:
-                bar = self.candle_to_bar(bar_dict)
-                if bar is not None:
-                    self._on_bar(bar)
-                    count += 1
-
-        logger.info("Backfill complete: %d bars dispatched for warmup", count)
-
-    # ================================================================
-    # WEBSOCKET STREAMING (PRIMARY)
-    # ================================================================
-
-    async def _start_websocket(self) -> bool:
-        """Attempt to connect WebSocket and wire it to the aggregator."""
-        conid = self._client.contract.conid
-        self._ws = IBKRWebSocket(self._client.config, conid)
-        self._ws.on_tick(self._aggregator.process_tick)
-
-        return await self._ws.connect()
-
-    # ================================================================
-    # HTTP POLLING FALLBACK
-    # ================================================================
-
-    async def _start_polling(self) -> None:
-        """Start HTTP snapshot polling and wire snapshots to the aggregator."""
-        self._client.on_snapshot(self._on_poll_snapshot)
-        await self._client.start_polling()
-
-    async def _on_poll_snapshot(self, snapshot: 'MarketSnapshot') -> None:
-        """Convert HTTP snapshot to tick for the aggregator."""
-        if snapshot.last_price > 0:
-            self._aggregator.process_tick(
-                snapshot.last_price,
-                1,
-                snapshot.timestamp or datetime.now(timezone.utc),
-            )
-
-    # ================================================================
-    # HEALTH MONITOR
-    # ================================================================
-
-    async def _health_monitor(self) -> None:
-        """
-        Background loop that monitors data feed health.
-        - If WebSocket drops, switch to HTTP polling.
-        - If WebSocket recovers, switch back from polling.
-        """
-        while self._running:
-            try:
-                await asyncio.sleep(10.0)
-
-                if self._data_mode == "websocket":
-                    if self._ws and not self._ws.is_connected:
-                        logger.warning("WebSocket lost — attempting reconnect...")
-                        reconnected = await self._ws.connect()
-                        if not reconnected:
-                            if self._ws._consecutive_failures >= WS_FALLBACK_THRESHOLD:
-                                logger.warning(
-                                    "WebSocket failed %d times — falling back to HTTP polling",
-                                    self._ws._consecutive_failures,
-                                )
-                                await self._start_polling()
-                                self._data_mode = "polling"
-
-                elif self._data_mode == "polling":
-                    # Periodically try to upgrade back to WebSocket
-                    if self._ws and not self._ws.is_connected:
-                        reconnected = await self._ws.connect()
-                        if reconnected:
-                            logger.info("WebSocket reconnected — switching back from polling")
-                            await self._client.stop_polling()
-                            self._data_mode = "websocket"
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("Health monitor error: %s", e)
-
-    # ================================================================
-    # BAR DISPATCH
-    # ================================================================
-
-    # Fields required to construct a Bar (excluding optional session_type)
-    _BAR_REQUIRED_FIELDS = ("timestamp", "open", "high", "low", "close", "volume")
-    _BAR_OPTIONAL_FIELDS = ("bid_volume", "ask_volume", "delta", "tick_count", "vwap")
-
-    @staticmethod
-    def candle_to_bar(candle: dict) -> Optional[Bar]:
-        """
-        Convert a candle dict (from CandleAggregator or backfill) to a Bar.
-
-        Steps:
-        1. Extract session_type before constructing Bar
-        2. Build Bar with explicit field mapping (no **kwargs)
-        3. Attach session_type after construction
-        4. Log warning for any missing expected field
-        """
-        # 1. Extract session_type — may be SessionType enum or string
-        raw_session = candle.get("session_type")
-        if raw_session is not None:
-            session_str = raw_session.value if isinstance(raw_session, SessionType) else str(raw_session)
-        else:
-            session_str = None
-
-        # 4. Check for missing required fields
-        for f in IBKRDataFeed._BAR_REQUIRED_FIELDS:
-            if f not in candle:
-                logger.warning("candle_to_bar: missing required field '%s' — skipping bar", f)
-                return None
-
-        # 5. Validate OHLC prices are finite and positive
-        for f in ("open", "high", "low", "close"):
-            val = candle[f]
-            if not isinstance(val, (int, float)) or not math.isfinite(val) or val <= 0:
-                logger.warning("candle_to_bar: invalid %s=%.4f — skipping bar", f, val if isinstance(val, (int, float)) else 0)
-                return None
-
-        for f in IBKRDataFeed._BAR_OPTIONAL_FIELDS:
-            if f not in candle:
-                logger.warning("candle_to_bar: missing optional field '%s' — using default", f)
-
-        # 2. Build Bar with explicit field mapping
-        bar = Bar(
-            timestamp=candle["timestamp"],
-            open=candle["open"],
-            high=candle["high"],
-            low=candle["low"],
-            close=candle["close"],
-            volume=candle["volume"],
-            bid_volume=candle.get("bid_volume", 0),
-            ask_volume=candle.get("ask_volume", 0),
-            delta=candle.get("delta", 0),
-            tick_count=candle.get("tick_count", 0),
-            vwap=candle.get("vwap", 0.0),
-        )
-
-        # 3. Attach session_type after construction
-        bar.session_type = session_str
-
-        return bar
-
-    def _dispatch_bar(self, candle: dict) -> None:
-        """Convert candle dict to Bar and forward to the on_bar callback."""
-        if self._on_bar:
-            bar = self.candle_to_bar(candle)
-            if bar is not None:
-                self._on_bar(bar)
-
-
-# ================================================================
-# IBKR CLIENT
+# TWS CLIENT
 # ================================================================
 
 class IBKRClient:
     """
-    Async client for IBKR Client Portal Gateway.
+    TWS API client via ib_insync.
 
-    Handles:
-    - Session authentication and keepalive
-    - MNQ front-month contract resolution
-    - Market data snapshot polling
-    - Connection health monitoring
-
-    Usage:
-        client = IBKRClient(IBKRConfig())
-        await client.connect()
-        snapshot = await client.get_market_snapshot()
-        await client.disconnect()
+    Provides:
+      - Socket connection to TWS / IB Gateway
+      - Real-time bar subscription for MNQ
+      - Order placement (Market, Limit, Stop)
+      - Position and account queries
+      - Auto-reconnect with exponential backoff
+      - Heartbeat monitoring
     """
 
-    def __init__(self, config: Optional[IBKRConfig] = None):
-        self.config = config or IBKRConfig()
-        self._session: Optional[Any] = None
-        self._connected: bool = False
-        self._authenticated: bool = False
-        self._account_id: str = ""
-        self._contract: Optional[ContractInfo] = None
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 7497,
+        client_id: int = 1,
+    ):
+        self._host = host
+        self._port = port
+        self._client_id = client_id
 
-        # Background tasks
-        self._keepalive_task: Optional[asyncio.Task] = None
-        self._poll_task: Optional[asyncio.Task] = None
+        self._ib = IB()
+        self._contract: Optional[Contract] = None
+        self._bars = None  # RealTimeBarList or BarDataList
 
         # Callbacks
-        self._on_snapshot: Optional[Callable] = None
+        self._on_bar_update: List[Callable] = []
+        self._on_order_filled: List[Callable] = []
+        self._on_error: List[Callable] = []
 
-        # Last known data
-        self._last_snapshot: Optional[MarketSnapshot] = None
-        self._last_keepalive: float = 0.0
-        self._session_valid: bool = False
+        # Reconnect state
+        self._reconnect_attempts = 0
 
-    # ================================================================
-    # CONNECTION LIFECYCLE
-    # ================================================================
+        # Heartbeat
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._last_heartbeat: float = 0.0
 
-    async def connect(self) -> bool:
+        # Wire up ib_insync events
+        self._ib.errorEvent += self._handle_error
+        self._ib.disconnectedEvent += self._handle_disconnect
+        self._ib.orderStatusEvent += self._handle_order_status
+
+    # ──────────────────────────────────────────────────────
+    # CONNECTION
+    # ──────────────────────────────────────────────────────
+
+    async def connect(
+        self,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        client_id: Optional[int] = None,
+    ) -> bool:
         """
-        Connect to Client Portal Gateway.
+        Connect to TWS / IB Gateway.
 
-        1. Create HTTP session (with SSL verification disabled for localhost gateway)
-        2. Validate existing session via /iserver/auth/status
-        3. Resolve MNQ front-month contract
-        4. Start keepalive loop
+        Args:
+            host: Override host (default: self._host)
+            port: Override port (default: self._port)
+            client_id: Override client ID (default: self._client_id)
+
+        Returns:
+            True if connected successfully.
         """
-        if aiohttp is None:
-            raise ImportError("aiohttp required: pip install aiohttp")
+        h = host or self._host
+        p = port or self._port
+        cid = client_id or self._client_id
 
-        logger.info("Connecting to IBKR Client Portal Gateway at %s:%d",
-                     self.config.gateway_host, self.config.gateway_port)
-        logger.info("Account type: %s", self.config.account_type)
+        try:
+            await self._ib.connectAsync(h, p, clientId=cid)
+            self._reconnect_attempts = 0
+            self._last_heartbeat = time.monotonic()
+            logger.info("Connected to TWS at %s:%d (clientId=%d)", h, p, cid)
 
-        # Client Portal Gateway uses self-signed SSL cert on localhost
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
+            # Start heartbeat monitor
+            self._heartbeat_task = asyncio.ensure_future(self._heartbeat_loop())
 
-        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-        self._session = aiohttp.ClientSession(connector=connector)
-
-        # Step 1: Check/validate session
-        if not await self._check_auth_status():
-            logger.error("Gateway session not authenticated. "
-                         "Please log in via the Client Portal Gateway web UI.")
-            await self._session.close()
-            self._session = None
-            return False
-
-        self._authenticated = True
-
-        # Step 2: Get account ID
-        if not await self._fetch_account_id():
-            logger.error("Could not fetch account ID")
-            await self._session.close()
-            self._session = None
-            return False
-
-        # Step 3: Resolve contract
-        self._contract = await self._resolve_front_month(self.config.symbol)
-        if not self._contract:
-            logger.error("Could not resolve front-month contract for %s",
-                         self.config.symbol)
-            await self._session.close()
-            self._session = None
-            return False
-
-        logger.info("Contract resolved: %s %s -> conid %s",
-                     self._contract.symbol, self._contract.expiry,
-                     self._contract.conid)
-
-        # Step 4: Start keepalive
-        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
-
-        self._connected = True
-        logger.info("IBKR client connected successfully")
-        return True
-
-    async def disconnect(self) -> None:
-        """Gracefully disconnect and cancel background tasks."""
-        self._connected = False
-
-        if self._keepalive_task and not self._keepalive_task.done():
-            self._keepalive_task.cancel()
-            try:
-                await self._keepalive_task
-            except asyncio.CancelledError:
-                pass
-
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
-            try:
-                await self._poll_task
-            except asyncio.CancelledError:
-                pass
-
-        if self._session:
-            await self._session.close()
-            self._session = None
-
-        self._authenticated = False
-        self._session_valid = False
-        logger.info("IBKR client disconnected")
-
-    # ================================================================
-    # AUTHENTICATION & SESSION
-    # ================================================================
-
-    async def _check_auth_status(self) -> bool:
-        """
-        Check if the gateway session is authenticated.
-        The user must have already logged in via the CP Gateway web UI.
-        """
-        data = await self._get("/iserver/auth/status")
-        if data is None:
-            return False
-
-        authenticated = data.get("authenticated", False)
-        competing = data.get("competing", False)
-
-        if competing:
-            logger.warning("Competing session detected — calling /iserver/auth/compete")
-            await self._post("/iserver/auth/compete")
-            # Re-check
-            data = await self._get("/iserver/auth/status")
-            authenticated = data.get("authenticated", False) if data else False
-
-        self._session_valid = authenticated
-        if authenticated:
-            logger.info("Gateway session is authenticated")
-        else:
-            logger.warning("Gateway session NOT authenticated")
-
-        return authenticated
-
-    async def _tickle(self) -> bool:
-        """
-        Send keepalive to prevent session timeout.
-        POST /tickle
-        """
-        data = await self._post("/tickle")
-        if data is None:
-            return False
-
-        self._last_keepalive = time.time()
-        session_valid = data.get("session", "") != ""
-        self._session_valid = session_valid
-        return session_valid
-
-    async def _keepalive_loop(self) -> None:
-        """Background loop: tickle the gateway every 60 seconds."""
-        while self._connected:
-            try:
-                success = await self._tickle()
-                if not success:
-                    logger.warning("Keepalive tickle failed — session may have expired")
-                    # Try to re-validate
-                    if not await self._check_auth_status():
-                        logger.error("Session expired. Re-authentication required.")
-                        self._session_valid = False
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("Keepalive error: %s", e)
-
-            await asyncio.sleep(self.config.keepalive_interval_seconds)
-
-    async def _fetch_account_id(self) -> bool:
-        """Fetch the account ID from /portfolio/accounts."""
-        data = await self._get("/portfolio/accounts")
-        if not data or not isinstance(data, list) or len(data) == 0:
-            return False
-
-        # Select first account (or filter by account type)
-        for acct in data:
-            acct_type = acct.get("type", "")
-            acct_id = acct.get("accountId", "")
-            # Paper accounts often have 'DEMO' or 'paper' prefix
-            if self.config.account_type == "paper" and "DU" in str(acct_id):
-                self._account_id = acct_id
-                break
-            elif self.config.account_type == "live" and "DU" not in str(acct_id):
-                self._account_id = acct_id
-                break
-
-        # Fallback: use first account
-        if not self._account_id:
-            self._account_id = data[0].get("accountId", "")
-
-        if self._account_id:
-            logger.info("Using account: %s", self._account_id)
             return True
+        except (ConnectionRefusedError, OSError, asyncio.TimeoutError) as e:
+            logger.error("Failed to connect to TWS at %s:%d — %s", h, p, e)
+            return False
+        except Exception as e:
+            logger.error("Unexpected connection error: %s", e)
+            return False
 
-        return False
+    def disconnect(self) -> None:
+        """Disconnect from TWS."""
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+        if self._ib.isConnected():
+            self._ib.disconnect()
+            logger.info("Disconnected from TWS")
 
-    # ================================================================
-    # CONTRACT RESOLUTION
-    # ================================================================
+    def is_connected(self) -> bool:
+        """Check if connected to TWS."""
+        return self._ib.isConnected()
 
-    async def _resolve_front_month(self, symbol: str) -> Optional[ContractInfo]:
+    # ──────────────────────────────────────────────────────
+    # CONTRACT
+    # ──────────────────────────────────────────────────────
+
+    def get_contract(self, symbol: str = "MNQ", exchange: str = "CME") -> Contract:
         """
-        Resolve the continuous front-month futures contract.
-
-        1. Search via /iserver/secdef/search (POST body: {"symbol": "..."} only)
-        2. Find the FUT section in the response and parse available months
-        3. Determine front-month from the months string (e.g. "MAR26;JUN26;...")
-        4. Get specific contract details via /iserver/contract/info
-
-        Expected response format:
-        [{"conid": "362687422", "companyHeader": "...", "symbol": "MNQ",
-          "sections": [{"secType": "FUT", "months": "MAR26;JUN26;...",
-                        "exchange": "CME"}]}]
+        Get MNQ futures contract definition.
+        Auto-rolls to front month via qualifyContracts.
         """
-        # Step 1: Search for the symbol — ONLY send {"symbol": ...}
-        # The /iserver/secdef/search endpoint returns 500 if extra fields
-        # (secType, exchange, name, etc.) are included in the POST body.
-        search_data = await self._post(
-            "/iserver/secdef/search",
-            {"symbol": symbol}
-        )
-
-        if not search_data or not isinstance(search_data, list):
-            logger.error("Contract search returned no results for %s", symbol)
-            return None
-
-        # Step 2: Find the entry whose sections contain secType "FUT"
-        futures_entry = None
-        fut_section = None
-        for entry in search_data:
-            for section in entry.get("sections", []):
-                if isinstance(section, dict) and section.get("secType") == "FUT":
-                    futures_entry = entry
-                    fut_section = section
-                    break
-            if futures_entry:
-                break
-
-        if not futures_entry:
-            # Fallback: use first result
-            futures_entry = search_data[0]
-            fut_section = None
-
-        conid = futures_entry.get("conid", 0)
-        # conid may be returned as a string from the API
-        if isinstance(conid, str):
-            try:
-                conid = int(conid)
-            except (ValueError, TypeError):
-                conid = 0
-
-        exchange = ""
-        months = ""
-        if fut_section:
-            months = fut_section.get("months", "")
-            exchange = fut_section.get("exchange", "")
-
-        # Step 3: Parse front-month from the months string (e.g. "MAR26;JUN26;SEP26")
-        front_month = ""
-        if months:
-            month_list = [m.strip() for m in months.split(";") if m.strip()]
-            if month_list:
-                # The first month in the list is the front-month (nearest expiry)
-                front_month = month_list[0]
-                logger.info(
-                    "Contract search: %s has %d expiries, front-month: %s",
-                    symbol, len(month_list), front_month,
-                )
-
-        # Step 4: Build ContractInfo from search result data directly.
-        # Note: /iserver/contract/info returns 404 on Client Portal Gateway;
-        # the search result already contains everything we need.
-        if conid:
-            return ContractInfo(
-                conid=conid,
-                symbol=futures_entry.get("symbol", symbol),
-                exchange=exchange,
-                expiry=front_month,
-                description=futures_entry.get("companyHeader", ""),
-            )
-
-        return None
-
-    async def check_contract_rollover(self) -> Optional[ContractInfo]:
-        """
-        Check if the front-month contract has changed (quarterly rollover).
-        Returns new ContractInfo if rollover detected, None otherwise.
-        """
-        if not self._contract:
-            return None
-
-        new_contract = await self._resolve_front_month(self.config.symbol)
-        if not new_contract:
-            return None
-
-        if new_contract.conid != self._contract.conid:
+        contract = Future(symbol, exchange=exchange)
+        qualified = self._ib.qualifyContracts(contract)
+        if qualified:
+            self._contract = qualified[0]
             logger.info(
-                "CONTRACT ROLLOVER detected: %s (conid %d) -> %s (conid %d)",
-                self._contract.expiry, self._contract.conid,
-                new_contract.expiry, new_contract.conid,
+                "Contract qualified: %s %s (conId=%d, expiry=%s)",
+                self._contract.symbol,
+                self._contract.exchange,
+                self._contract.conId,
+                self._contract.lastTradeDateOrContractMonth,
             )
-            old = self._contract
-            self._contract = new_contract
-            return new_contract
+            return self._contract
+        raise ValueError(f"Could not qualify contract {symbol} on {exchange}")
 
-        return None
+    # ──────────────────────────────────────────────────────
+    # MARKET DATA
+    # ──────────────────────────────────────────────────────
 
-    # ================================================================
-    # MARKET DATA — HTTP SNAPSHOT POLLING
-    # ================================================================
-
-    async def get_market_snapshot(self) -> Optional[MarketSnapshot]:
+    async def subscribe_market_data(
+        self,
+        symbol: str = "MNQ",
+        exchange: str = "CME",
+    ) -> bool:
         """
-        Fetch a market data snapshot for the resolved contract.
-        GET /iserver/marketdata/snapshot?conids={conid}&fields=31,84,85,86,88
+        Subscribe to real-time bars for MNQ.
+
+        Uses reqRealTimeBars for 5-second bars.
+        Each completed bar fires on_bar_update callbacks.
+
+        Returns:
+            True if subscription started successfully.
         """
-        if not self._contract:
-            return None
+        if self._contract is None:
+            try:
+                self.get_contract(symbol, exchange)
+            except ValueError as e:
+                logger.error("subscribe_market_data: %s", e)
+                return False
 
-        conid = self._contract.conid
-        field_ids = ",".join(str(f) for f in SNAPSHOT_FIELDS.keys())
+        try:
+            self._bars = self._ib.reqRealTimeBars(
+                self._contract,
+                barSize=5,
+                whatToShow="TRADES",
+                useRTH=False,
+            )
+            self._bars.updateEvent += self._on_realtime_bar
+            logger.info("Subscribed to real-time bars for %s", symbol)
+            return True
+        except Exception as e:
+            logger.error("Failed to subscribe to market data: %s", e)
+            return False
 
-        data = await self._get(
-            "/iserver/marketdata/snapshot",
-            params={"conids": str(conid), "fields": field_ids}
-        )
-
-        if not data:
-            return None
-
-        # Response is a list of snapshots (one per conid)
-        if isinstance(data, list) and len(data) > 0:
-            snap_data = data[0]
-        elif isinstance(data, dict):
-            snap_data = data
-        else:
-            return None
-
-        snapshot = MarketSnapshot(
-            conid=conid,
-            last_price=self._parse_price(snap_data.get("31")),
-            bid=self._parse_price(snap_data.get("84")),
-            ask=self._parse_price(snap_data.get("85")),
-            high=self._parse_price(snap_data.get("86")),
-            low=self._parse_price(snap_data.get("88")),
-            timestamp=datetime.now(timezone.utc),
-        )
-
-        self._last_snapshot = snapshot
-        return snapshot
-
-    async def start_polling(self) -> None:
-        """Start background market data polling."""
-        if self._poll_task and not self._poll_task.done():
-            logger.warning("Polling already active")
+    def _on_realtime_bar(self, bars, has_new_bar) -> None:
+        """Internal handler for real-time bar updates."""
+        if not has_new_bar or not bars:
             return
 
-        self._poll_task = asyncio.create_task(self._poll_loop())
-        logger.info("Market data polling started (interval: %.1fs)",
-                     self.config.poll_interval_seconds)
+        self._last_heartbeat = time.monotonic()
+        ib_bar = bars[-1]
 
-    async def stop_polling(self) -> None:
-        """Stop background polling."""
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
-            try:
-                await self._poll_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("Market data polling stopped")
-
-    async def _poll_loop(self) -> None:
-        """Background loop: poll market data snapshots."""
-        while self._connected:
-            try:
-                snapshot = await self.get_market_snapshot()
-                if snapshot and self._on_snapshot:
-                    await self._on_snapshot(snapshot)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("Snapshot poll error: %s", e)
-
-            await asyncio.sleep(self.config.poll_interval_seconds)
-
-    # ================================================================
-    # HISTORICAL DATA
-    # ================================================================
-
-    async def get_historical_bars(
-        self,
-        period: str = "2h",
-        bar_size: str = "2min",
-    ) -> List[dict]:
-        """
-        Fetch historical bars from Client Portal Gateway.
-        GET /iserver/marketdata/history?conid={conid}&period={period}&bar={bar}
-
-        Returns list of OHLCV dicts compatible with the Bar dataclass.
-        """
-        if not self._contract:
-            return []
-
-        data = await self._get(
-            "/iserver/marketdata/history",
-            params={
-                "conid": str(self._contract.conid),
-                "period": period,
-                "bar": bar_size,
-            }
+        bar = Bar(
+            timestamp=datetime.fromtimestamp(
+                ib_bar.time.timestamp(), tz=timezone.utc
+            ) if hasattr(ib_bar.time, 'timestamp') else datetime.now(timezone.utc),
+            open=ib_bar.open_,
+            high=ib_bar.high,
+            low=ib_bar.low,
+            close=ib_bar.close,
+            volume=int(ib_bar.volume),
         )
 
-        if not data or "data" not in data:
-            logger.warning("Historical bar fetch returned no data")
-            return []
-
-        bars = []
-        for raw_bar in data["data"]:
-            bars.append({
-                "timestamp": datetime.fromtimestamp(
-                    raw_bar.get("t", 0) / 1000, tz=timezone.utc
-                ),
-                "open": round(raw_bar.get("o", 0.0), 2),
-                "high": round(raw_bar.get("h", 0.0), 2),
-                "low": round(raw_bar.get("l", 0.0), 2),
-                "close": round(raw_bar.get("c", 0.0), 2),
-                "volume": raw_bar.get("v", 0),
-            })
-
-        logger.info("Fetched %d historical bars (%s, %s)", len(bars), period, bar_size)
-        return bars
-
-    # ================================================================
-    # HTTP HELPERS
-    # ================================================================
-
-    async def _get(self, endpoint: str, params: dict = None) -> Optional[Any]:
-        """GET request to Client Portal Gateway."""
-        if not self._session:
-            return None
-
-        url = f"{self.config.base_url}{endpoint}"
-        try:
-            async with self._session.get(url, params=params) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                elif resp.status == 401:
-                    logger.warning("GET %s -> 401 Unauthorized (session expired)", endpoint)
-                    self._session_valid = False
-                    return None
-                else:
-                    body = await resp.text()
-                    logger.error("GET %s [%d]: %s", endpoint, resp.status, body[:200])
-                    return None
-        except aiohttp.ClientConnectorError:
-            logger.error("Cannot reach gateway at %s (is it running?)",
-                         self.config.base_url)
-            return None
-        except Exception as e:
-            logger.error("GET %s error: %s", endpoint, e)
-            return None
-
-    async def _post(self, endpoint: str, payload: dict = None) -> Optional[Any]:
-        """POST request to Client Portal Gateway."""
-        if not self._session:
-            return None
-
-        url = f"{self.config.base_url}{endpoint}"
-        try:
-            async with self._session.post(url, json=payload or {}) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                elif resp.status == 401:
-                    logger.warning("POST %s -> 401 Unauthorized", endpoint)
-                    self._session_valid = False
-                    return None
-                else:
-                    body = await resp.text()
-                    logger.error("POST %s [%d]: %s", endpoint, resp.status, body[:200])
-                    return None
-        except aiohttp.ClientConnectorError:
-            logger.error("Cannot reach gateway at %s (is it running?)",
-                         self.config.base_url)
-            return None
-        except Exception as e:
-            logger.error("POST %s error: %s", endpoint, e)
-            return None
-
-    # ================================================================
-    # CALLBACKS
-    # ================================================================
-
-    def on_snapshot(self, callback: Callable) -> None:
-        """Register callback for market data snapshot updates."""
-        self._on_snapshot = callback
-
-    def get_session_type(self) -> SessionType:
-        """Return current session type (RTH or ETH)."""
-        return get_session_type(datetime.now(timezone.utc))
-
-    # ================================================================
-    # STATUS & HEALTH
-    # ================================================================
-
-    @property
-    def is_connected(self) -> bool:
-        """True if connected and session is valid."""
-        return self._connected and self._session_valid
-
-    @property
-    def contract(self) -> Optional[ContractInfo]:
-        return self._contract
-
-    @property
-    def account_id(self) -> str:
-        return self._account_id
-
-    @property
-    def last_snapshot(self) -> Optional[MarketSnapshot]:
-        return self._last_snapshot
-
-    def get_current_price(self) -> Optional[Dict[str, float]]:
-        """Return latest bid/ask/last from most recent snapshot."""
-        if not self._last_snapshot:
-            return None
-        return {
-            "bid": self._last_snapshot.bid,
-            "ask": self._last_snapshot.ask,
-            "last": self._last_snapshot.last_price,
-        }
-
-    def get_status(self) -> dict:
-        """Return connection health summary."""
-        return {
-            "connected": self._connected,
-            "session_valid": self._session_valid,
-            "authenticated": self._authenticated,
-            "account_id": self._account_id,
-            "account_type": self.config.account_type,
-            "gateway": f"{self.config.gateway_host}:{self.config.gateway_port}",
-            "symbol": self.config.symbol,
-            "conid": self._contract.conid if self._contract else 0,
-            "contract_expiry": self._contract.expiry if self._contract else "",
-            "last_keepalive_age_s": round(time.time() - self._last_keepalive, 1)
-            if self._last_keepalive else None,
-            "last_snapshot_time": self._last_snapshot.timestamp.isoformat()
-            if self._last_snapshot and self._last_snapshot.timestamp else None,
-            "polling_active": self._poll_task is not None
-            and not self._poll_task.done() if self._poll_task else False,
-        }
-
-    # ================================================================
-    # HELPERS
-    # ================================================================
-
-    @staticmethod
-    def _parse_price(value: Any) -> float:
-        """
-        Parse a price value from IBKR snapshot response.
-        Values may be str, float, int, or prefixed with 'C' (closing).
-        """
-        if value is None:
-            return 0.0
-        if isinstance(value, (int, float)):
-            parsed = round(float(value), 2)
-            if not math.isfinite(parsed):
-                return 0.0
-            return parsed
-        if isinstance(value, str):
-            # IBKR sometimes prefixes with 'C' for closing price
-            cleaned = value.lstrip("C").strip()
+        for cb in self._on_bar_update:
             try:
-                parsed = round(float(cleaned), 2)
-                if not math.isfinite(parsed):
-                    return 0.0
-                return parsed
-            except (ValueError, TypeError):
-                return 0.0
-        return 0.0
+                cb(bar)
+            except Exception as e:
+                logger.error("Bar callback error: %s", e)
+
+    # ──────────────────────────────────────────────────────
+    # ORDERS
+    # ──────────────────────────────────────────────────────
+
+    async def place_order(
+        self,
+        action: str,
+        quantity: int,
+        order_type: str = "MKT",
+        limit_price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+    ) -> Optional[int]:
+        """
+        Place an order.
+
+        Args:
+            action: 'BUY' or 'SELL'
+            quantity: Number of contracts
+            order_type: 'MKT', 'LMT', or 'STP'
+            limit_price: Required for LMT orders
+            stop_price: Required for STP orders
+
+        Returns:
+            order_id on success, None on failure.
+        """
+        if self._contract is None:
+            logger.error("No contract qualified — call get_contract() first")
+            return None
+
+        if order_type == "MKT":
+            order = MarketOrder(action, quantity)
+        elif order_type == "LMT":
+            if limit_price is None:
+                logger.error("limit_price required for LMT order")
+                return None
+            order = LimitOrder(action, quantity, limit_price)
+        elif order_type == "STP":
+            if stop_price is None:
+                logger.error("stop_price required for STP order")
+                return None
+            order = StopOrder(action, quantity, stop_price)
+        else:
+            logger.error("Unsupported order type: %s", order_type)
+            return None
+
+        try:
+            trade = self._ib.placeOrder(self._contract, order)
+            logger.info(
+                "Order placed: %s %d %s @ %s (orderId=%d)",
+                action, quantity, order_type,
+                limit_price or stop_price or "MKT",
+                trade.order.orderId,
+            )
+            return trade.order.orderId
+        except Exception as e:
+            logger.error("Order placement failed: %s", e)
+            return None
+
+    async def cancel_order(self, order_id: int) -> bool:
+        """Cancel an open order by order ID."""
+        for trade in self._ib.openTrades():
+            if trade.order.orderId == order_id:
+                self._ib.cancelOrder(trade.order)
+                logger.info("Cancel requested for orderId=%d", order_id)
+                return True
+        logger.warning("Order %d not found in open trades", order_id)
+        return False
+
+    # ──────────────────────────────────────────────────────
+    # POSITIONS & ACCOUNT
+    # ──────────────────────────────────────────────────────
+
+    async def get_positions(self) -> list:
+        """Get current positions."""
+        positions = self._ib.positions()
+        result = []
+        for pos in positions:
+            result.append({
+                "account": pos.account,
+                "symbol": pos.contract.symbol,
+                "exchange": pos.contract.exchange,
+                "size": pos.position,
+                "avg_cost": pos.avgCost,
+            })
+        return result
+
+    async def get_account_summary(self) -> dict:
+        """Get account summary (buying power, cash, PnL)."""
+        summary = {}
+        acct_values = self._ib.accountSummary()
+        for av in acct_values:
+            if av.tag in ("BuyingPower", "TotalCashValue", "UnrealizedPnL",
+                          "RealizedPnL", "NetLiquidation"):
+                summary[av.tag] = float(av.value) if av.value else 0.0
+        return summary
+
+    # ──────────────────────────────────────────────────────
+    # CALLBACKS
+    # ──────────────────────────────────────────────────────
+
+    def on_bar_update(self, callback: Callable) -> None:
+        """Register callback for bar updates. Callback receives Bar."""
+        self._on_bar_update.append(callback)
+
+    def on_order_filled(self, callback: Callable) -> None:
+        """Register callback for order fills. Callback receives trade dict."""
+        self._on_order_filled.append(callback)
+
+    def on_error(self, callback: Callable) -> None:
+        """Register callback for errors. Callback receives (reqId, errorCode, errorString)."""
+        self._on_error.append(callback)
+
+    # ──────────────────────────────────────────────────────
+    # INTERNAL EVENT HANDLERS
+    # ──────────────────────────────────────────────────────
+
+    def _handle_error(self, reqId, errorCode, errorString, contract) -> None:
+        """Handle IB error events."""
+        # Filter out non-critical info messages
+        if errorCode in (2104, 2106, 2158, 2119):
+            # Data farm connection messages — info only
+            logger.debug("IB info [%d]: %s", errorCode, errorString)
+            return
+
+        logger.error("IB error [reqId=%d, code=%d]: %s", reqId, errorCode, errorString)
+        for cb in self._on_error:
+            try:
+                cb(reqId, errorCode, errorString)
+            except Exception as e:
+                logger.error("Error callback failed: %s", e)
+
+    def _handle_disconnect(self) -> None:
+        """Handle disconnection — attempt reconnect."""
+        logger.warning("Disconnected from TWS")
+        asyncio.ensure_future(self._reconnect())
+
+    def _handle_order_status(self, trade) -> None:
+        """Handle order status updates — fire on_order_filled for fills."""
+        if trade.orderStatus.status == "Filled":
+            fill_info = {
+                "order_id": trade.order.orderId,
+                "action": trade.order.action,
+                "quantity": trade.orderStatus.filled,
+                "avg_fill_price": trade.orderStatus.avgFillPrice,
+                "status": "Filled",
+            }
+            logger.info(
+                "Order FILLED: %s %s @ %.2f (orderId=%d)",
+                trade.order.action,
+                trade.orderStatus.filled,
+                trade.orderStatus.avgFillPrice,
+                trade.order.orderId,
+            )
+            for cb in self._on_order_filled:
+                try:
+                    cb(fill_info)
+                except Exception as e:
+                    logger.error("Fill callback error: %s", e)
+
+    # ──────────────────────────────────────────────────────
+    # AUTO-RECONNECT
+    # ──────────────────────────────────────────────────────
+
+    async def _reconnect(self) -> None:
+        """Auto-reconnect with exponential backoff (3 retries)."""
+        for attempt in range(1, RECONNECT_MAX_RETRIES + 1):
+            delay = RECONNECT_BASE_DELAY * (2 ** (attempt - 1))
+            logger.info(
+                "Reconnect attempt %d/%d in %.0fs...",
+                attempt, RECONNECT_MAX_RETRIES, delay,
+            )
+            await asyncio.sleep(delay)
+
+            try:
+                await self._ib.connectAsync(
+                    self._host, self._port, clientId=self._client_id
+                )
+                if self._ib.isConnected():
+                    logger.info("Reconnected to TWS on attempt %d", attempt)
+                    self._reconnect_attempts = 0
+                    return
+            except Exception as e:
+                logger.warning("Reconnect attempt %d failed: %s", attempt, e)
+
+        logger.critical(
+            "Failed to reconnect after %d attempts — manual intervention required",
+            RECONNECT_MAX_RETRIES,
+        )
+
+    # ──────────────────────────────────────────────────────
+    # HEARTBEAT
+    # ──────────────────────────────────────────────────────
+
+    async def _heartbeat_loop(self) -> None:
+        """Check connection health every 30 seconds."""
+        try:
+            while True:
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                if not self._ib.isConnected():
+                    logger.warning("Heartbeat: TWS connection lost")
+                    await self._reconnect()
+                else:
+                    logger.debug("Heartbeat: TWS connection OK")
+        except asyncio.CancelledError:
+            pass

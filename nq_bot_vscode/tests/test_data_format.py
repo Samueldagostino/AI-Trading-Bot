@@ -28,7 +28,7 @@ from data_pipeline.ibkr_adapter import (
     adapt_ibkr_bar,
     adapt_historical_bar,
 )
-from Broker.ibkr_client import CandleAggregator
+from Broker.ibkr_client_portal import CandleAggregator
 
 
 # ================================================================
@@ -267,7 +267,7 @@ class TestAdaptIbkrBar:
         assert bar.session_type == "RTH"
 
     def test_with_session_type_enum(self):
-        from Broker.ibkr_client import SessionType
+        from Broker.ibkr_client_portal import SessionType
         candle = make_valid_candle()
         candle["session_type"] = SessionType.ETH
         bar = adapt_ibkr_bar(candle)

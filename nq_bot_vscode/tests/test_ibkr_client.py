@@ -23,7 +23,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock, call
 
-from Broker.ibkr_client import (
+from Broker.ibkr_client_portal import (
     IBKRClient,
     IBKRConfig,
     IBKRDataFeed,

@@ -1,17 +1,17 @@
 """
 IBKR Paper Trading Runner with Safety Rails
 ==============================================
-Main entry point for paper trading via IBKR Client Portal Gateway.
+Main entry point for paper trading via TWS API (ib_insync).
 
 Pipeline:
-  IBKRClient -> IBKRDataFeed -> CandleAggregator -> 2m Bar
+  IBKRClient (TWS socket) -> on_bar_update callback -> tws_adapter -> Bar
     -> process_bar() (HTF gate + HC filter + institutional modifiers)
       -> Safety Rails check -> Paper order execution
         -> PaperTradingMonitor (statistics, persistence)
 
 Startup sequence:
-  1. Initialize IBKR connection (Client Portal Gateway)
-  2. Subscribe to MNQ data feed
+  1. Connect to TWS / IB Gateway via socket
+  2. Subscribe to MNQ real-time bars
   3. Initialize HTF engine, confluence scorer, modifier engine
   4. Initialize safety rails
   5. Initialize paper trading monitor
@@ -24,12 +24,16 @@ Usage:
     python scripts/run_paper_live.py
     python scripts/run_paper_live.py --dry-run
     python scripts/run_paper_live.py --max-daily-loss 300
+    python scripts/run_paper_live.py --port 4002
     python scripts/run_paper_live.py --log-level DEBUG
 
-Requires .env (or env vars) with:
-    IBKR_GATEWAY_HOST   (default: localhost)
-    IBKR_GATEWAY_PORT   (default: 5000)
-    IBKR_ACCOUNT_TYPE   paper | live
+Port reference:
+  7497 = TWS paper trading (default)
+  7496 = TWS live trading
+  4002 = IB Gateway paper trading
+  4001 = IB Gateway live trading
+
+Requires TWS / IB Gateway running with API access enabled.
 """
 
 import argparse
@@ -126,10 +130,10 @@ class DryRunDataGenerator:
 
 class PaperLiveRunner:
     """
-    Main paper trading runner with IBKR connectivity and safety rails.
+    Main paper trading runner with TWS connectivity and safety rails.
 
     Coordinates:
-      - IBKR data feed (or dry-run synthetic data)
+      - TWS real-time bar feed (or dry-run synthetic data)
       - TradingOrchestrator.process_bar()
       - SafetyRails (circuit breakers)
       - PaperTradingMonitor (statistics)
@@ -143,15 +147,16 @@ class PaperLiveRunner:
         dry_run: bool = False,
         max_daily_loss: float = 500.0,
         log_level: str = "INFO",
+        port: int = 7497,
     ):
         self._dry_run = dry_run
         self._max_daily_loss = max_daily_loss
         self._log_level = log_level
+        self._tws_port = port
 
         # Core components (initialized in start())
         self._bot: Optional[TradingOrchestrator] = None
         self._ibkr_client = None
-        self._ibkr_data_feed = None
 
         # Safety rails
         self._safety_rails = SafetyRails(SafetyRailsConfig(
@@ -192,14 +197,14 @@ class PaperLiveRunner:
         await self._bot.initialize(skip_db=True)
         logger.info("TradingOrchestrator initialized (skip_db=True)")
 
-        # b. Connect IBKR (or skip for dry-run)
+        # b. Connect TWS (or skip for dry-run)
         if not self._dry_run:
-            connected = await self._connect_ibkr()
+            connected = await self._connect_tws()
             if not connected:
-                logger.critical("IBKR connection failed — exiting")
+                logger.critical("TWS connection failed — exiting")
                 sys.exit(1)
         else:
-            logger.info("DRY-RUN mode — using synthetic data (no IBKR)")
+            logger.info("DRY-RUN mode — using synthetic data (no TWS)")
 
         # c. Safety rails already initialized in __init__
         logger.info("Safety rails initialized:")
@@ -219,61 +224,49 @@ class PaperLiveRunner:
 
         await self._run_loop()
 
-    async def _connect_ibkr(self) -> bool:
-        """Initialize IBKR connection and data feed."""
+    async def _connect_tws(self) -> bool:
+        """Initialize TWS connection and subscribe to market data."""
         try:
-            from Broker.ibkr_client import IBKRClient, IBKRDataFeed, IBKRConfig
+            from Broker.ibkr_client import IBKRClient
 
-            ibkr_config = IBKRConfig(
-                gateway_host=os.environ.get("IBKR_GATEWAY_HOST", "localhost"),
-                gateway_port=int(os.environ.get("IBKR_GATEWAY_PORT", "5000")),
-                account_type=os.environ.get("IBKR_ACCOUNT_TYPE", "paper"),
-                symbol=os.environ.get("IBKR_SYMBOL", "MNQ"),
-            )
+            # Use pre-injected client if available (from ibkr_startup)
+            if self._ibkr_client is None:
+                tws_host = os.environ.get("IBKR_TWS_HOST", "127.0.0.1")
+                client_id = int(os.environ.get("IBKR_CLIENT_ID", "1"))
 
-            # Safety: warn if live
-            if ibkr_config.is_live:
-                logger.warning("=" * 60)
-                logger.warning("  *** LIVE ACCOUNT DETECTED ***")
-                logger.warning("  Paper trading runner should use PAPER account")
-                logger.warning("=" * 60)
+                self._ibkr_client = IBKRClient(
+                    host=tws_host,
+                    port=self._tws_port,
+                    client_id=client_id,
+                )
+                connected = await self._ibkr_client.connect()
+                if not connected:
+                    return False
 
-            self._ibkr_client = IBKRClient(ibkr_config)
-            connected = await self._ibkr_client.connect()
-            if not connected:
+            # Register bar callback
+            self._ibkr_client.on_bar_update(self._on_tws_bar)
+
+            # Subscribe to MNQ market data
+            subscribed = await self._ibkr_client.subscribe_market_data("MNQ", "CME")
+            if not subscribed:
+                logger.error("Failed to subscribe to MNQ market data")
                 return False
 
-            # Resolve MNQ contract
-            resolved = await self._ibkr_client.resolve_contract()
-            if not resolved:
-                logger.error("Failed to resolve MNQ contract")
-                return False
-
-            # Start data feed
-            self._ibkr_data_feed = IBKRDataFeed(self._ibkr_client)
-            self._ibkr_data_feed.on_bar(self._on_ibkr_bar)
-            started = await self._ibkr_data_feed.start()
-            if not started:
-                logger.error("Failed to start IBKR data feed")
-                return False
-
-            logger.info("IBKR connected: %s:%d (%s)",
-                        ibkr_config.gateway_host,
-                        ibkr_config.gateway_port,
-                        ibkr_config.account_type)
+            logger.info("TWS connected: port %d", self._tws_port)
             return True
 
         except ImportError:
-            logger.error("aiohttp not installed. Required for IBKR. Use --dry-run instead.")
+            logger.error("ib_insync not installed. Required for TWS. Use --dry-run instead.")
             return False
         except Exception as e:
-            logger.error("IBKR connection failed: %s", e)
+            logger.error("TWS connection failed: %s", e)
             return False
 
     def _print_banner(self) -> None:
         logger.info("=" * 60)
-        logger.info("  IBKR PAPER TRADING RUNNER (with Safety Rails)")
+        logger.info("  IBKR PAPER TRADING RUNNER (TWS API + Safety Rails)")
         logger.info("  Mode:           %s", "DRY-RUN (synthetic data)" if self._dry_run else "LIVE DATA")
+        logger.info("  TWS Port:       %d", self._tws_port)
         logger.info("  Max daily loss: $%.2f", self._max_daily_loss)
         logger.info("  Max pos size:   2 contracts (ABSOLUTE)")
         logger.info("  HC filter:      score>=0.75, stop<=30pts")
@@ -285,8 +278,8 @@ class PaperLiveRunner:
     # BAR PROCESSING
     # ──────────────────────────────────────────────────────────
 
-    def _on_ibkr_bar(self, bar: Bar) -> None:
-        """Callback from IBKR data feed — schedule async processing."""
+    def _on_tws_bar(self, bar: Bar) -> None:
+        """Callback from TWS real-time bars — schedule async processing."""
         asyncio.get_event_loop().create_task(self._process_bar_safe(bar))
 
     async def _process_bar_safe(self, bar: Bar) -> None:
@@ -391,7 +384,7 @@ class PaperLiveRunner:
                     await self._process_bar(bar)
                     await asyncio.sleep(2.0)
                 else:
-                    # Bars arrive via IBKR callback, just monitor
+                    # Bars arrive via TWS callback, just monitor
                     await asyncio.sleep(1.0)
 
                     # Check heartbeat
@@ -492,18 +485,12 @@ class PaperLiveRunner:
         self._monitor.print_dashboard()
         self._print_safety_summary()
 
-        # Close IBKR connections
-        if self._ibkr_data_feed:
-            try:
-                await self._ibkr_data_feed.stop()
-            except Exception as e:
-                logger.warning("Error stopping data feed: %s", e)
-
+        # Close TWS connection
         if self._ibkr_client:
             try:
-                await self._ibkr_client.disconnect()
+                self._ibkr_client.disconnect()
             except Exception as e:
-                logger.warning("Error disconnecting IBKR: %s", e)
+                logger.warning("Error disconnecting TWS: %s", e)
 
         # Close orchestrator
         if self._bot:
@@ -534,14 +521,21 @@ class PaperLiveRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IBKR Paper Trading Runner — MNQ with safety rails",
+        description="IBKR Paper Trading Runner — MNQ with safety rails (TWS API)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  python scripts/run_paper_live.py                     # Live IBKR paper trading
+  python scripts/run_paper_live.py                     # Live TWS paper trading
   python scripts/run_paper_live.py --dry-run            # Synthetic data, no IBKR
   python scripts/run_paper_live.py --max-daily-loss 300  # Override daily loss limit
+  python scripts/run_paper_live.py --port 4002          # Use IB Gateway paper port
   python scripts/run_paper_live.py --log-level DEBUG    # Verbose logging
+
+Port reference:
+  7497 = TWS paper trading (default)
+  7496 = TWS live trading
+  4002 = IB Gateway paper trading
+  4001 = IB Gateway live trading
 
 Safety Rails:
   - Max daily loss:       $500 (configurable via --max-daily-loss)
@@ -564,6 +558,10 @@ All circuit breakers require manual restart after tripping.
         "--log-level", type=str, default="INFO",
         choices=["DEBUG", "INFO", "WARNING"],
         help="Logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=7497,
+        help="TWS/Gateway port (default: 7497 for TWS paper)",
     )
     args = parser.parse_args()
 
@@ -603,6 +601,7 @@ All circuit breakers require manual restart after tripping.
                 dry_run=False,
                 max_daily_loss=args.max_daily_loss,
                 log_level=args.log_level,
+                port=args.port,
             )
             loop = asyncio.new_event_loop()
 
@@ -631,6 +630,7 @@ All circuit breakers require manual restart after tripping.
         dry_run=args.dry_run,
         max_daily_loss=args.max_daily_loss,
         log_level=args.log_level,
+        port=args.port,
     )
 
     # Event loop with signal handlers

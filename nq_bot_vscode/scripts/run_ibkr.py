@@ -71,7 +71,7 @@ if _env_path.exists():
                 os.environ.setdefault(key.strip(), val)
 
 from config.settings import CONFIG
-from Broker.ibkr_client import (
+from Broker.ibkr_client_portal import (
     IBKRConfig,
     IBKRClient,
     IBKRDataFeed,

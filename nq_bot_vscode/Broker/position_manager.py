@@ -24,7 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from Broker.ibkr_client import IBKRClient
+from Broker.ibkr_client_portal import IBKRClient
 from Broker.order_executor import IBKROrderExecutor, MNQ_POINT_VALUE
 
 logger = logging.getLogger(__name__)

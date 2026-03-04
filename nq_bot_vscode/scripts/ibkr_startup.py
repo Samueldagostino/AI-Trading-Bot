@@ -3,34 +3,37 @@ IBKR Startup Automation — One-Command Paper Trading Launch
 ============================================================
 Single entry point that handles the entire IBKR paper trading setup:
 
-  1. Check IBKR Client Portal Gateway connectivity
-  2. Verify authentication
-  3. Subscribe to MNQ contract data
-  4. Initialize all engines (HTF, confluence, modifiers, safety rails, logger)
-  5. Print startup checklist
-  6. Start the main trading loop with graceful shutdown
+  1. Connect to TWS / IB Gateway via socket
+  2. Verify connection
+  3. Request account info to verify paper trading account
+  4. Subscribe to MNQ contract data
+  5. Initialize all engines (HTF, confluence, modifiers, safety rails, logger)
+  6. Print startup checklist
+  7. Start the main trading loop with graceful shutdown
 
 Usage:
     python scripts/ibkr_startup.py
     python scripts/ibkr_startup.py --dry-run
     python scripts/ibkr_startup.py --max-daily-loss 300
+    python scripts/ibkr_startup.py --port 4002
 
-Requires IBKR Client Portal Gateway running at https://localhost:5000
-(or host/port configured via IBKR_GATEWAY_HOST / IBKR_GATEWAY_PORT env vars).
+Requires TWS or IB Gateway running with API access enabled.
+Port reference:
+  7497 = TWS paper trading (default)
+  7496 = TWS live trading
+  4002 = IB Gateway paper trading
+  4001 = IB Gateway live trading
 
 SECURITY: No IBKR credentials are stored in code.
 """
 
 import argparse
 import asyncio
-import json
 import logging
 import logging.handlers
 import os
 import signal
-import ssl
 import sys
-import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,58 +69,65 @@ LOGS_DIR = project_dir / "logs"
 
 
 # ═══════════════════════════════════════════════════════════════
-# GATEWAY CHECKER
+# TWS CONNECTION CHECKER
 # ═══════════════════════════════════════════════════════════════
 
-def check_gateway_status(host: str = "localhost", port: int = 5000) -> dict:
+def check_tws_connection(host: str = "127.0.0.1", port: int = 7497, client_id: int = 1) -> dict:
     """
-    Check if IBKR Client Portal Gateway is running and authenticated.
+    Check if TWS / IB Gateway is running and accepting connections.
 
     Returns dict with:
         connected: bool
-        authenticated: bool
+        account_type: str or None ('paper' / 'live')
         error: str or None
     """
     try:
-        import urllib.request
+        from Broker.ibkr_client import IBKRClient
 
-        # Create SSL context that doesn't verify (gateway uses self-signed cert)
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
-        url = f"https://{host}:{port}/v1/api/iserver/auth/status"
-        req = urllib.request.Request(url, method="GET")
-        req.add_header("User-Agent", "NQBot/1.0")
-
-        with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
-            data = json.loads(resp.read().decode())
-            authenticated = data.get("authenticated", False)
-            return {
-                "connected": True,
-                "authenticated": authenticated,
-                "error": None,
-            }
+        client = IBKRClient(host=host, port=port, client_id=client_id)
+        loop = asyncio.new_event_loop()
+        try:
+            connected = loop.run_until_complete(client.connect())
+            if connected:
+                result = {
+                    "connected": True,
+                    "account_type": None,
+                    "error": None,
+                }
+                client.disconnect()
+                return result
+            else:
+                return {
+                    "connected": False,
+                    "account_type": None,
+                    "error": "Connection refused",
+                }
+        finally:
+            loop.close()
     except Exception as e:
         return {
             "connected": False,
-            "authenticated": False,
+            "account_type": None,
             "error": str(e),
         }
 
 
-def print_gateway_instructions() -> None:
-    """Print instructions for starting the IBKR Client Portal Gateway."""
+def print_tws_instructions(port: int = 7497) -> None:
+    """Print instructions for configuring TWS API access."""
     print("\n" + "=" * 60)
-    print("  IBKR CLIENT PORTAL GATEWAY NOT DETECTED")
+    print("  CANNOT CONNECT TO TWS / IB GATEWAY")
     print("=" * 60)
     print()
-    print("  Please start the gateway before running this script:")
+    print(f"  Cannot connect to TWS/IB Gateway on port {port}.")
+    print("  Please:")
     print()
-    print("  1. Open IBKR Client Portal Gateway")
-    print("  2. Navigate to https://localhost:5000")
-    print("  3. Log in with your IBKR credentials")
-    print("  4. Return here and press Enter to continue")
+    print("  1. Open Trader Workstation (TWS)")
+    print("  2. Go to File -> Global Configuration -> API -> Settings")
+    print("  3. Enable 'Enable ActiveX and Socket Clients'")
+    print(f"  4. Set Socket Port to {port}")
+    print("  5. Uncheck 'Read-Only API'")
+    print("  6. Click Apply")
+    print("  7. Re-run this script")
     print()
     print("=" * 60)
 
@@ -163,11 +173,11 @@ class StartupChecklist:
 
 class IBKRStartupRunner:
     """
-    Single entry point for IBKR paper trading.
+    Single entry point for IBKR paper trading via TWS API.
 
     Handles:
-      - Gateway connectivity check
-      - Authentication verification
+      - TWS socket connectivity check
+      - Account verification
       - MNQ contract subscription
       - Engine initialization
       - Startup checklist
@@ -180,18 +190,21 @@ class IBKRStartupRunner:
         dry_run: bool = False,
         max_daily_loss: float = 500.0,
         log_level: str = "INFO",
+        port: int = 7497,
     ):
         self._dry_run = dry_run
         self._max_daily_loss = max_daily_loss
         self._log_level = log_level
 
-        self._gateway_host = os.environ.get("IBKR_GATEWAY_HOST", "localhost")
-        self._gateway_port = int(os.environ.get("IBKR_GATEWAY_PORT", "5000"))
+        self._tws_host = os.environ.get("IBKR_TWS_HOST", "127.0.0.1")
+        self._tws_port = int(os.environ.get("IBKR_TWS_PORT", str(port)))
+        self._client_id = int(os.environ.get("IBKR_CLIENT_ID", "1"))
 
         self._checklist = StartupChecklist()
         self._decision_logger = TradeDecisionLogger(str(LOGS_DIR))
         self._paper_runner = None
         self._shutdown_event = asyncio.Event()
+        self._ibkr_client = None
 
     @property
     def checklist(self) -> StartupChecklist:
@@ -206,14 +219,14 @@ class IBKRStartupRunner:
         self._print_banner()
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Step 1: Check gateway
+        # Step 1: Check TWS connection
         if not self._dry_run:
-            gateway_ok = await self._check_gateway()
+            gateway_ok = await self._check_tws()
             if not gateway_ok:
                 return
         else:
-            self._checklist.add("IBKR Gateway", "OK", "Skipped (dry-run)")
-            self._checklist.add("Authentication", "OK", "Skipped (dry-run)")
+            self._checklist.add("TWS Connection", "OK", "Skipped (dry-run)")
+            self._checklist.add("Account", "OK", "Skipped (dry-run)")
 
         # Step 2: Initialize engines
         await self._initialize_engines()
@@ -231,47 +244,59 @@ class IBKRStartupRunner:
         # Step 4: Start trading loop
         await self._start_trading()
 
-    async def _check_gateway(self) -> bool:
-        """Check gateway connectivity and authentication."""
-        status = check_gateway_status(self._gateway_host, self._gateway_port)
+    async def _check_tws(self) -> bool:
+        """Check TWS connectivity and verify account."""
+        from Broker.ibkr_client import IBKRClient
 
-        if not status["connected"]:
-            self._checklist.add("IBKR Gateway", "FAIL", "Not reachable")
-            print_gateway_instructions()
+        self._ibkr_client = IBKRClient(
+            host=self._tws_host,
+            port=self._tws_port,
+            client_id=self._client_id,
+        )
 
-            # Wait for user to press Enter
+        connected = await self._ibkr_client.connect()
+
+        if not connected:
+            self._checklist.add("TWS Connection", "FAIL", "Not reachable")
+            print_tws_instructions(self._tws_port)
+
+            # Wait for user to start TWS
             try:
-                input("\n  Press Enter after starting the gateway... ")
+                input("\n  Press Enter after configuring TWS... ")
             except (EOFError, KeyboardInterrupt):
                 return False
 
             # Retry
-            status = check_gateway_status(self._gateway_host, self._gateway_port)
-            if not status["connected"]:
-                self._checklist.add("IBKR Gateway", "FAIL", "Still not reachable")
+            connected = await self._ibkr_client.connect()
+            if not connected:
+                self._checklist.add("TWS Connection", "FAIL", "Still not reachable")
                 return False
 
-        self._checklist.add("IBKR Gateway", "OK", "Connected")
+        self._checklist.add("TWS Connection", "OK",
+                            f"Connected ({self._tws_host}:{self._tws_port})")
 
-        if status["authenticated"]:
-            self._checklist.add("Authentication", "OK", "Active")
-        else:
-            self._checklist.add("Authentication", "FAIL", "Not authenticated")
-            print("\n  Authentication required. Please log in at "
-                  f"https://{self._gateway_host}:{self._gateway_port}")
-
-            # Wait for user to log in, then re-check
-            try:
-                input("\n  Press Enter after logging in... ")
-            except (EOFError, KeyboardInterrupt):
-                return False
-
-            status = check_gateway_status(self._gateway_host, self._gateway_port)
-            if status["authenticated"]:
-                self._checklist.add("Authentication", "OK", "Active (after re-login)")
+        # Verify account
+        try:
+            summary = await self._ibkr_client.get_account_summary()
+            if summary:
+                nlv = summary.get("NetLiquidation", 0)
+                self._checklist.add("Account", "OK",
+                                    f"Verified (NLV=${nlv:,.0f})")
             else:
-                self._checklist.add("Authentication", "FAIL", "Still not authenticated")
-                return False
+                self._checklist.add("Account", "WARN", "No account data yet")
+        except Exception as e:
+            self._checklist.add("Account", "WARN", f"Could not verify: {e}")
+
+        # Subscribe to MNQ
+        try:
+            contract = self._ibkr_client.get_contract("MNQ", "CME")
+            self._checklist.add(
+                "MNQ Contract", "OK",
+                f"{contract.localSymbol} (expiry {contract.lastTradeDateOrContractMonth})",
+            )
+        except Exception as e:
+            self._checklist.add("MNQ Contract", "FAIL", str(e))
+            return False
 
         return True
 
@@ -312,10 +337,13 @@ class IBKRStartupRunner:
                 dry_run=self._dry_run,
                 max_daily_loss=self._max_daily_loss,
                 log_level=self._log_level,
+                port=self._tws_port,
             )
 
-            # Inject decision logger
+            # Inject decision logger and existing client
             self._paper_runner._decision_logger = self._decision_logger
+            if self._ibkr_client:
+                self._paper_runner._ibkr_client = self._ibkr_client
 
             await self._paper_runner.start()
 
@@ -390,6 +418,10 @@ class IBKRStartupRunner:
         print(f"\n  Logs saved to: {self._decision_logger._json_path}")
         print("=" * 50)
 
+        # Disconnect TWS
+        if self._ibkr_client:
+            self._ibkr_client.disconnect()
+
     def request_shutdown(self) -> None:
         """Called from signal handler."""
         self._shutdown_event.set()
@@ -399,9 +431,9 @@ class IBKRStartupRunner:
     def _print_banner(self) -> None:
         print()
         print("=" * 60)
-        print("  IBKR PAPER TRADING — AUTOMATED STARTUP")
+        print("  IBKR PAPER TRADING — AUTOMATED STARTUP (TWS API)")
         print(f"  Mode:       {'DRY-RUN (synthetic data)' if self._dry_run else 'LIVE DATA'}")
-        print(f"  Gateway:    {self._gateway_host}:{self._gateway_port}")
+        print(f"  TWS:        {self._tws_host}:{self._tws_port}")
         print(f"  Max Loss:   ${self._max_daily_loss:.0f}/day")
         print(f"  Log Level:  {self._log_level}")
         print("=" * 60)
@@ -414,13 +446,20 @@ class IBKRStartupRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IBKR Paper Trading — One-Command Startup",
+        description="IBKR Paper Trading — One-Command Startup (TWS API)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  python scripts/ibkr_startup.py                     # Full IBKR paper trading
+  python scripts/ibkr_startup.py                     # Full IBKR paper trading (TWS port 7497)
   python scripts/ibkr_startup.py --dry-run            # Synthetic data, no IBKR
   python scripts/ibkr_startup.py --max-daily-loss 300  # Override daily loss limit
+  python scripts/ibkr_startup.py --port 4002          # Use IB Gateway paper trading port
+
+Port reference:
+  7497 = TWS paper trading (default)
+  7496 = TWS live trading
+  4002 = IB Gateway paper trading
+  4001 = IB Gateway live trading
 """,
     )
     parser.add_argument(
@@ -435,6 +474,10 @@ Examples:
         "--log-level", type=str, default="INFO",
         choices=["DEBUG", "INFO", "WARNING"],
         help="Logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=7497,
+        help="TWS/Gateway port (default: 7497 for TWS paper)",
     )
     args = parser.parse_args()
 
@@ -470,6 +513,7 @@ Examples:
         dry_run=args.dry_run,
         max_daily_loss=args.max_daily_loss,
         log_level=args.log_level,
+        port=args.port,
     )
 
     loop = asyncio.new_event_loop()

@@ -153,3 +153,28 @@ IBKR_SNAPSHOT_TO_BAR_FIELD_MAP = {
     "86": "high",         # Session high
     "88": "low",          # Session low
 }
+
+
+# ================================================================
+# TWS ADAPTER (ib_insync)
+# ================================================================
+
+def adapt_tws_bar(ib_bar) -> Optional[Bar]:
+    """
+    Convert an ib_insync RealTimeBar or BarData to a Bar dataclass.
+
+    This is the TWS-specific counterpart to adapt_ibkr_bar() above.
+    Delegates to Broker.tws_adapter for the actual conversion.
+
+    Args:
+        ib_bar: An ib_insync RealTimeBar or BarData object.
+
+    Returns:
+        Bar instance, or None if validation fails.
+    """
+    try:
+        from Broker.tws_adapter import adapt_tws_bar as _adapt
+        return _adapt(ib_bar)
+    except ImportError:
+        logger.warning("adapt_tws_bar: Broker.tws_adapter not available")
+        return None

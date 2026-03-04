@@ -39,7 +39,7 @@ from signals.liquidity_sweep import LiquiditySweepDetector
 from risk.engine import RiskEngine, RiskDecision
 from risk.regime_detector import RegimeDetector
 
-from Broker.ibkr_client import IBKRClient, IBKRConfig, IBKRDataFeed
+from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, IBKRDataFeed
 from Broker.order_executor import IBKROrderExecutor, ExecutorConfig
 from Broker.position_manager import PositionManager
 from execution.signal_bridge import SignalBridge, TradeDecision

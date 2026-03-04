@@ -31,7 +31,7 @@ from Broker.order_executor import (
     ExecutorConfig,
     MNQ_POINT_VALUE as EXECUTOR_MNQ_POINT_VALUE,
 )
-from Broker.ibkr_client import IBKRClient, IBKRConfig, ContractInfo
+from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, ContractInfo
 
 
 # ═══════════════════════════════════════════════════════════════

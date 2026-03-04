@@ -34,7 +34,7 @@ from Broker.order_executor import (
     IBKROrderType,
 )
 from Broker.position_manager import PositionManager
-from Broker.ibkr_client import IBKRClient, IBKRConfig, ContractInfo
+from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, ContractInfo
 from features.engine import Bar
 from signals.aggregator import SignalDirection
 from risk.engine import RiskDecision
@@ -612,7 +612,7 @@ class TestImportChain:
     """Verify all components in the vertical slice can be imported."""
 
     def test_ibkr_client_import(self):
-        from Broker.ibkr_client import IBKRClient, IBKRDataFeed
+        from Broker.ibkr_client_portal import IBKRClient, IBKRDataFeed
         assert IBKRClient is not None
 
     def test_order_executor_import(self):
