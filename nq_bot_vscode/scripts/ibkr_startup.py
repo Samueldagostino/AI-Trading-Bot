@@ -259,7 +259,19 @@ class IBKRStartupRunner:
             self._checklist.add("Authentication", "FAIL", "Not authenticated")
             print("\n  Authentication required. Please log in at "
                   f"https://{self._gateway_host}:{self._gateway_port}")
-            return False
+
+            # Wait for user to log in, then re-check
+            try:
+                input("\n  Press Enter after logging in... ")
+            except (EOFError, KeyboardInterrupt):
+                return False
+
+            status = check_gateway_status(self._gateway_host, self._gateway_port)
+            if status["authenticated"]:
+                self._checklist.add("Authentication", "OK", "Active (after re-login)")
+            else:
+                self._checklist.add("Authentication", "FAIL", "Still not authenticated")
+                return False
 
         return True
 
