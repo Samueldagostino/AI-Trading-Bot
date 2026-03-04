@@ -28,15 +28,16 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from config.settings import RiskConfig
+from config.constants import HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS
 
 logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════
-# CONSTANTS — match main.py HC filter (frozen, validated)
+# CONSTANTS — imported from config/constants.py (single source of truth)
 # ═══════════════════════════════════════════════════════════════
-MIN_SIGNAL_SCORE = 0.75
-MAX_STOP_DISTANCE_PTS = 30.0
+MIN_SIGNAL_SCORE = HIGH_CONVICTION_MIN_SCORE
+MAX_STOP_DISTANCE_PTS = HIGH_CONVICTION_MAX_STOP_PTS
 
 
 # ═══════════════════════════════════════════════════════════════

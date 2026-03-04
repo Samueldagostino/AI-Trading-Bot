@@ -279,7 +279,11 @@ class TradingOrchestrator:
 
         # === 4. MANAGE ACTIVE POSITION ===
         if self.executor.has_active_trade:
-            result = await self.executor.update(bar.close, bar.timestamp)
+            try:
+                result = await self.executor.update(bar.close, bar.timestamp)
+            except Exception as e:
+                logger.error("executor.update() raised: %s", e, exc_info=True)
+                return action_result
             if result:
                 if result.get("action") == "trade_closed":
                     result["close_timestamp"] = bar.timestamp.isoformat()
@@ -290,6 +294,14 @@ class TradingOrchestrator:
                         "pnl": total_pnl,
                         "direction": result["direction"],
                     })
+                    # Log exit to decision logger
+                    self.decision_logger.log_exit(
+                        direction=result.get("direction", "UNKNOWN"),
+                        entry_price=result.get("entry_price", 0.0),
+                        exit_price=result.get("exit_price", bar.close),
+                        total_pnl=total_pnl,
+                        exit_reason=result.get("exit_type", "trade_closed"),
+                    )
 
                     action_result = result
 

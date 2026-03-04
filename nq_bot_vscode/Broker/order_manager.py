@@ -18,6 +18,7 @@ This module enforces 2 contract max INDEPENDENTLY of safety_rails.py.
 
 import json
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -314,6 +315,11 @@ class OrderManager:
 
     def record_pnl(self, pnl: float) -> None:
         """Record trade PnL for daily loss tracking."""
+        if not math.isfinite(pnl):
+            logger.critical("NaN/Inf PnL received — activating circuit breaker")
+            self._circuit_breaker = True
+            self._log_action("CIRCUIT_BREAKER", {"reason": "NaN/Inf PnL", "pnl": str(pnl)})
+            return
         self._daily_pnl += pnl
 
     def trip_circuit_breaker(self) -> None:

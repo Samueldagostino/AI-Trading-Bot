@@ -16,6 +16,7 @@ All breakers support manual reset via reset_breaker().
 
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -105,6 +106,21 @@ class MaxDailyLossCircuitBreaker:
         if self._tripped:
             return False  # Already tripped
 
+        # NaN guard — NaN comparisons return False, silently bypassing the gate
+        if not math.isfinite(trade_pnl):
+            self._tripped = True
+            self._trip_time = datetime.now(timezone.utc).isoformat()
+            logger.critical(
+                "CIRCUIT BREAKER: NaN/Inf PnL received — "
+                "HALTING ALL TRADING (data integrity failure)"
+            )
+            if self._event_log:
+                self._event_log.log_event("MaxDailyLoss", "TRIPPED", {
+                    "reason": "NaN/Inf PnL received",
+                    "daily_pnl": self._daily_pnl,
+                })
+            return True
+
         self._daily_pnl += trade_pnl
 
         if self._daily_pnl <= -self.max_daily_loss:
@@ -192,6 +208,19 @@ class MaxConsecutiveLossesBreaker:
         """
         if self._tripped:
             return False
+
+        # NaN guard
+        if not math.isfinite(pnl):
+            self._tripped = True
+            self._trip_time = datetime.now(timezone.utc).isoformat()
+            logger.critical(
+                "CIRCUIT BREAKER: NaN/Inf PnL in consecutive-loss tracker — HALTING"
+            )
+            if self._event_log:
+                self._event_log.log_event("MaxConsecutiveLosses", "TRIPPED", {
+                    "reason": "NaN/Inf PnL received",
+                })
+            return True
 
         if pnl < 0:
             self._consecutive_losses += 1

@@ -206,6 +206,51 @@ class TradeDecisionLogger:
         return entry
 
     # ================================================================
+    # EXIT LOGGING
+    # ================================================================
+    def log_exit(
+        self,
+        direction: str,
+        entry_price: float,
+        exit_price: float,
+        total_pnl: float,
+        exit_reason: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Log a trade exit with realized P&L.
+
+        Args:
+            direction: "LONG" or "SHORT".
+            entry_price: Original entry price.
+            exit_price: Exit price.
+            total_pnl: Realized P&L in dollars.
+            exit_reason: Why the trade closed.
+
+        Returns:
+            The complete logged entry dict.
+        """
+        entry = {
+            "id": str(uuid.uuid4()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "decision": "EXIT",
+            "signal_direction": direction.upper(),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "total_pnl": total_pnl,
+            "exit_reason": exit_reason,
+        }
+
+        self._write_json(entry)
+        self._decisions.append(entry)
+
+        logger.debug(
+            "Decision logged: EXIT %s entry=%.2f exit=%.2f pnl=%.2f reason=%s",
+            direction, entry_price, exit_price, total_pnl, exit_reason,
+        )
+
+        return entry
+
+    # ================================================================
     # SESSION SUMMARY
     # ================================================================
     def get_session_summary(self) -> Dict[str, Any]:

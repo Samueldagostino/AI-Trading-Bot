@@ -20,12 +20,14 @@ and rejection reason if blocked.
 """
 
 import asyncio
+import json
 import logging
 import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, SessionType, get_session_type
@@ -150,6 +152,10 @@ class IBKROrderExecutor:
         self._config = config or ExecutorConfig()
         self._state = ExecutorState()
         self._on_fill: Optional[Callable] = None
+        # Persistent order log file
+        self._log_dir = Path(__file__).resolve().parent.parent / "logs"
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._order_log_path = self._log_dir / "order_log.json"
 
     # ──────────────────────────────────────────────────────────
     # PUBLIC API
@@ -544,7 +550,7 @@ class IBKROrderExecutor:
         return 0.0
 
     def _log_order(self, record: OrderRecord) -> None:
-        """Log every order attempt (accepted or rejected)."""
+        """Log every order attempt (accepted or rejected) to file and memory."""
         status = "ACCEPTED" if record.accepted else "REJECTED"
         logger.info(
             "ORDER %s: ts=%s side=%s contracts=%d type=%s price=%.2f "
@@ -560,3 +566,21 @@ class IBKROrderExecutor:
             record.broker_order_id or "—",
         )
         self._state.order_log.append(record)
+        # Persist to JSONL file
+        entry = {
+            "timestamp": record.timestamp.isoformat(),
+            "action": status,
+            "side": record.side,
+            "order_type": record.order_type,
+            "contracts": record.contracts,
+            "price": record.price,
+            "tag": record.tag,
+            "rejection_reason": record.rejection_reason,
+            "broker_order_id": record.broker_order_id,
+            "fill_price": record.fill_price,
+        }
+        try:
+            with open(self._order_log_path, "a") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+        except OSError as e:
+            logger.warning("Failed to write order log: %s", e)
