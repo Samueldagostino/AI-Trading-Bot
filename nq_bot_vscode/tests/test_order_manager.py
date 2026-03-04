@@ -306,23 +306,23 @@ class TestTrailingStopModification:
 class TestOrderLog:
     @pytest.mark.asyncio
     async def test_entry_logged(self, order_mgr, mock_client, tmp_path):
-        """Entry actions are logged to order_log.json."""
+        """Entry actions are logged to order_log.json (JSONL format)."""
         mock_client.place_order = AsyncMock(return_value=1)
         await order_mgr.submit_entry("LONG", 1, 20950.0)
 
         log_path = tmp_path / "order_log.json"
         assert log_path.exists()
-        entries = json.loads(log_path.read_text())
-        assert len(entries) >= 1
-        assert entries[-1]["action"] == "ENTRY"
+        lines = [json.loads(l) for l in log_path.read_text().strip().splitlines() if l.strip()]
+        assert len(lines) >= 1
+        assert lines[-1]["action"] == "ENTRY"
 
     @pytest.mark.asyncio
     async def test_blocked_logged(self, order_mgr, mock_client, tmp_path):
-        """Blocked orders are logged."""
+        """Blocked orders are logged (JSONL format)."""
         order_mgr.trip_circuit_breaker()
         await order_mgr.submit_entry("LONG", 1, 20950.0, 21000.0)
 
         log_path = tmp_path / "order_log.json"
         assert log_path.exists()
-        entries = json.loads(log_path.read_text())
-        assert entries[-1]["action"] == "BLOCKED"
+        lines = [json.loads(l) for l in log_path.read_text().strip().splitlines() if l.strip()]
+        assert lines[-1]["action"] == "BLOCKED"

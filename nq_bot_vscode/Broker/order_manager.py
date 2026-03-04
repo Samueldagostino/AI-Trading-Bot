@@ -68,6 +68,12 @@ class OrderManager:
         if self._circuit_breaker:
             return "Circuit breaker is active"
 
+        # NaN guard — if daily PnL is corrupted, block all orders
+        if not math.isfinite(self._daily_pnl):
+            self._circuit_breaker = True
+            logger.critical("NaN/Inf daily_pnl detected in safety check — activating circuit breaker")
+            return "Circuit breaker: NaN/Inf daily PnL"
+
         if self._current_position_size + size > MAX_CONTRACTS:
             return (
                 f"Position size would exceed {MAX_CONTRACTS} contracts "
@@ -353,7 +359,7 @@ class OrderManager:
     # ──────────────────────────────────────────────────────
 
     def _log_action(self, action: str, details: dict) -> None:
-        """Append order action to order_log.json."""
+        """Append order action to order_log.json (JSONL, atomic append)."""
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "action": action,
@@ -361,12 +367,7 @@ class OrderManager:
         }
 
         try:
-            existing = []
-            if self._log_path.exists():
-                text = self._log_path.read_text().strip()
-                if text:
-                    existing = json.loads(text)
-            existing.append(entry)
-            self._log_path.write_text(json.dumps(existing, indent=2, default=str))
-        except Exception as e:
+            with open(self._log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+        except OSError as e:
             logger.error("Failed to write order log: %s", e)

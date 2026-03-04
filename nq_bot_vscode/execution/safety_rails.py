@@ -297,6 +297,12 @@ class MaxPositionSizeGuard:
         Returns:
             min(requested, max_contracts)
         """
+        if not isinstance(requested_contracts, int) or requested_contracts < 0:
+            logger.error(
+                "POSITION SIZE GUARD: Invalid requested_contracts=%r — defaulting to 0",
+                requested_contracts,
+            )
+            return 0
         if requested_contracts > self.max_contracts:
             self._clamp_count += 1
             logger.warning(
@@ -483,14 +489,13 @@ class SafetyRails:
         Check all circuit breakers. Returns True if trading is allowed.
 
         Does NOT check position size (that's a clamp, not a halt).
+        All breakers are always evaluated (no short-circuit) so that
+        heartbeat side effects fire even when another breaker is tripped.
         """
-        if not self.daily_loss.check():
-            return False
-        if not self.consecutive_losses.check():
-            return False
-        if not self.heartbeat.check():
-            return False
-        return True
+        dl_ok = self.daily_loss.check()
+        cl_ok = self.consecutive_losses.check()
+        hb_ok = self.heartbeat.check()
+        return dl_ok and cl_ok and hb_ok
 
     def record_trade(self, pnl: float) -> bool:
         """

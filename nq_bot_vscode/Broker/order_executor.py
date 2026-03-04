@@ -414,8 +414,8 @@ class IBKROrderExecutor:
             logger.critical(self._state.halt_reason)
             return f"KILL_SWITCH: daily P&L is NaN/Inf"
 
-        if not isinstance(request.contracts, int) or request.contracts < 0:
-            return f"INVALID_CONTRACTS: {request.contracts!r} (must be non-negative int)"
+        if not isinstance(request.contracts, int) or request.contracts <= 0:
+            return f"INVALID_CONTRACTS: {request.contracts!r} (must be positive int)"
 
         # 1. Kill switch / halt
         if self._state.is_halted:
@@ -580,7 +580,7 @@ class IBKROrderExecutor:
             "fill_price": record.fill_price,
         }
         try:
-            with open(self._order_log_path, "a") as f:
+            with open(self._order_log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
         except OSError as e:
             logger.warning("Failed to write order log: %s", e)

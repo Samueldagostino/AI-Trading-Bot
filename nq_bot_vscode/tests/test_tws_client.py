@@ -292,13 +292,16 @@ class TestBarValidation:
         )
         assert validate_bar(bar) is False
 
-    def test_high_less_than_low_rejected(self):
+    def test_high_less_than_low_self_heals(self):
+        """Bar.__post_init__ auto-corrects high < low by swapping."""
         bar = Bar(
             timestamp=datetime.now(timezone.utc),
             open=21000.0, high=20990.0, low=21000.0,
             close=21002.0, volume=100,
         )
-        assert validate_bar(bar) is False
+        # Bar self-heals: high/low swapped, then adjusted to cover open/close
+        assert bar.high >= bar.low
+        assert validate_bar(bar) is True
 
 
 # ================================================================

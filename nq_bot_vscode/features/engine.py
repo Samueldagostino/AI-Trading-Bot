@@ -16,6 +16,7 @@ Features implemented:
 """
 
 import logging
+import math
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -39,6 +40,36 @@ class Bar:
     tick_count: int = 0
     vwap: float = 0.0
     session_type: Optional[str] = None  # "RTH" or "ETH", set by IBKRDataFeed
+
+    def __post_init__(self):
+        """Validate OHLC data integrity on construction."""
+        # Guard against NaN/Inf in price fields
+        for fld in ("open", "high", "low", "close"):
+            val = getattr(self, fld)
+            if not math.isfinite(val):
+                logger.error("Bar has non-finite %s=%.4f at %s — clamping to close",
+                             fld, val, self.timestamp)
+                object.__setattr__(self, fld, self.close if math.isfinite(self.close) else 0.0)
+
+        # Fix invalid OHLC: high must be >= low, high >= open/close, low <= open/close
+        if self.high < self.low:
+            logger.warning("Bar high (%.2f) < low (%.2f) at %s — swapping",
+                           self.high, self.low, self.timestamp)
+            object.__setattr__(self, "high", max(self.high, self.low))
+            object.__setattr__(self, "low", min(self.high, self.low))
+
+        actual_high = max(self.open, self.high, self.low, self.close)
+        actual_low = min(self.open, self.high, self.low, self.close)
+        if self.high < actual_high:
+            object.__setattr__(self, "high", actual_high)
+        if self.low > actual_low:
+            object.__setattr__(self, "low", actual_low)
+
+        # Guard against negative volume
+        if self.volume < 0:
+            logger.warning("Bar has negative volume (%d) at %s — setting to 0",
+                           self.volume, self.timestamp)
+            object.__setattr__(self, "volume", 0)
 
     @property
     def range(self) -> float:
@@ -237,13 +268,17 @@ class NQFeatureEngine:
             )
             true_ranges.append(tr)
 
-        snapshot.atr_14 = round(np.mean(true_ranges), 2)
+        atr_val = float(np.mean(true_ranges))
+        snapshot.atr_14 = round(atr_val, 2) if math.isfinite(atr_val) else 0.0
 
         # Realized volatility (annualized from 1-min returns)
         if len(self._bars) >= 20:
             closes = [b.close for b in self._bars[-21:]]
-            returns = [np.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
-            snapshot.realized_vol = round(np.std(returns) * np.sqrt(390), 4)  # 390 min/day
+            # Guard against zero/negative closes that would produce NaN in log
+            if all(c > 0 for c in closes):
+                returns = [np.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+                rv = float(np.std(returns) * np.sqrt(390))
+                snapshot.realized_vol = round(rv, 4) if math.isfinite(rv) else 0.0
 
     # ================================================================
     # VWAP + Deviation Bands
@@ -254,6 +289,8 @@ class NQFeatureEngine:
             return
 
         vwap = self._session_volume_price_sum / self._session_volume_sum
+        if not math.isfinite(vwap):
+            return
         snapshot.session_vwap = round(vwap, 2)
         snapshot.price_vs_vwap = round(bar.close - vwap, 2)
 
@@ -350,7 +387,8 @@ class NQFeatureEngine:
         # Trend strength: distance between EMAs normalized by ATR
         if snapshot.atr_14 > 0:
             ema_spread = abs(ema_8 - ema_21) / snapshot.atr_14
-            snapshot.trend_strength = round(min(ema_spread, 1.0), 3)
+            if math.isfinite(ema_spread):
+                snapshot.trend_strength = round(min(ema_spread, 1.0), 3)
 
     def _ema(self, data: np.ndarray, period: int) -> float:
         """Compute EMA and return latest value."""
@@ -546,6 +584,8 @@ class NQFeatureEngine:
 
         recent_bars = self._bars[-(lookback + 1):-1]  # Exclude current bar
         avg_volume = np.mean([b.volume for b in recent_bars]) if recent_bars else 1
+        if avg_volume <= 0:
+            avg_volume = 1
         vol_threshold = avg_volume * self.config.sweep_volume_spike_multiplier
 
         # Find recent swing highs and lows
@@ -560,11 +600,13 @@ class NQFeatureEngine:
                 b.low < recent_bars[i+1].low and b.low < recent_bars[i+2].low):
                 swing_lows.append(b.low)
 
-        if current_bar.range == 0:
+        if current_bar.range <= 0:
             return
 
         wick_ratio_upper = current_bar.upper_wick / current_bar.range
         wick_ratio_lower = current_bar.lower_wick / current_bar.range
+        if not (math.isfinite(wick_ratio_upper) and math.isfinite(wick_ratio_lower)):
+            return
 
         # --- Buy-side sweep (sweep of highs) ---
         for sh in swing_highs:

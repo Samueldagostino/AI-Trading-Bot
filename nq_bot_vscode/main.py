@@ -30,6 +30,7 @@ from config.constants import (
     HTF_STRENGTH_GATE,
     UCL_FVG_CONFLUENCE_BOOST,
 )
+from config.validator import validate_config
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -135,11 +136,23 @@ class TradingOrchestrator:
         # Shadow-trade rejection capture (set by ReplaySimulator)
         self._last_rejection = None   # Populated at each rejection point
 
+        # Consecutive executor failure counter — escalates to emergency flatten
+        self._executor_fail_count = 0
+        self._EXECUTOR_FAIL_LIMIT = 5
+
     # ================================================================
     # INITIALIZATION
     # ================================================================
     async def initialize(self, skip_db: bool = False) -> None:
         """Initialize all components."""
+        # ── Config validation — refuse to start with bad config ──
+        config_errors = validate_config(self.config)
+        if config_errors:
+            raise SystemExit(
+                f"Configuration validation failed with {len(config_errors)} errors. "
+                "See log output above. Fix and restart."
+            )
+        logger.info("Config validation: PASSED")
         logger.info("=" * 60)
         logger.info("NQ TRADING BOT - INITIALIZING (MULTI-TIMEFRAME)")
         logger.info(f"  Environment:  {self.config.environment}")
@@ -228,7 +241,10 @@ class TradingOrchestrator:
 
         # === 0. INSTITUTIONAL MODIFIER STATE UPDATE (every bar) ===
         if self._modifiers_enabled:
-            self._institutional_engine.update_bar(bar)
+            try:
+                self._institutional_engine.update_bar(bar)
+            except Exception as e:
+                logger.warning("Modifier engine update_bar failed (degraded): %s", e)
 
         # === 1. FEATURES (execution TF) ===
         features = self.feature_engine.update(bar)
@@ -281,13 +297,35 @@ class TradingOrchestrator:
         if self.executor.has_active_trade:
             try:
                 result = await self.executor.update(bar.close, bar.timestamp)
+                self._executor_fail_count = 0  # Reset on success
             except Exception as e:
-                logger.error("executor.update() raised: %s", e, exc_info=True)
+                self._executor_fail_count += 1
+                logger.error(
+                    "executor.update() raised (%d/%d): %s",
+                    self._executor_fail_count, self._EXECUTOR_FAIL_LIMIT,
+                    e, exc_info=True,
+                )
+                if self._executor_fail_count >= self._EXECUTOR_FAIL_LIMIT:
+                    logger.critical(
+                        "executor.update() failed %d times — emergency flatten",
+                        self._executor_fail_count,
+                    )
+                    last_price = self._get_last_price()
+                    await self.executor.emergency_flatten(last_price)
+                    self._executor_fail_count = 0
                 return action_result
             if result:
                 if result.get("action") == "trade_closed":
                     result["close_timestamp"] = bar.timestamp.isoformat()
                     total_pnl = result["total_pnl"]
+                    # NaN guard — prevent corrupted PnL from poisoning risk engine
+                    if not math.isfinite(total_pnl):
+                        logger.critical(
+                            "NaN/Inf total_pnl from trade close — blocking risk update"
+                        )
+                        total_pnl = 0.0
+                        result["total_pnl"] = 0.0
+                        result["pnl_nan_guarded"] = True
                     self.risk_engine.record_trade_result(total_pnl, result["direction"])
                     self.monitoring.record_trade({
                         "action": "exit",
@@ -592,11 +630,18 @@ class TradingOrchestrator:
             atr_for_entry = features.atr_14
             if self._modifiers_enabled:
                 htf_dir = htf_bias.consensus_direction if htf_bias else None
-                modifier_result = self._institutional_engine.calculate(
-                    current_time=bar.timestamp,
-                    htf_bias_direction=htf_dir,
-                )
-                if modifier_result.stand_aside:
+                try:
+                    modifier_result = self._institutional_engine.calculate(
+                        current_time=bar.timestamp,
+                        htf_bias_direction=htf_dir,
+                    )
+                except Exception as e:
+                    # GRACEFUL DEGRADATION: modifier failure → use 1.0x multipliers
+                    logger.warning(
+                        "Modifier engine calculate() failed — using 1.0x multipliers: %s", e
+                    )
+                    modifier_result = None
+                if modifier_result and modifier_result.stand_aside:
                     logger.info(
                         f"INSTITUTIONAL STAND-ASIDE: {modifier_result.stand_aside_reason}"
                     )
@@ -604,13 +649,25 @@ class TradingOrchestrator:
                                    features.atr_14, "Institutional stand-aside", 9)
                     return None
 
-                # Apply multipliers
-                raw_stop *= modifier_result.stop_multiplier
-                atr_for_entry = features.atr_14 * modifier_result.runner_multiplier
+                # Apply multipliers (skip if modifier_result is None from graceful degradation)
+                if modifier_result:
+                    raw_stop *= modifier_result.stop_multiplier
+                    atr_for_entry = features.atr_14 * modifier_result.runner_multiplier
 
-                if (modifier_result.position_multiplier != 1.0
+                # Re-check HC max stop after modifier widening
+                if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+                    logger.info(
+                        "HC REJECT post-modifier: stop %.1f pts > %.1f (modifier widened)",
+                        raw_stop, HIGH_CONVICTION_MAX_STOP_PTS,
+                    )
+                    _set_rejection(entry_direction, entry_score, raw_stop,
+                                   features.atr_14, "Max stop exceeded after modifier", 5)
+                    return None
+
+                if (modifier_result
+                        and (modifier_result.position_multiplier != 1.0
                         or modifier_result.stop_multiplier != 1.0
-                        or modifier_result.runner_multiplier != 1.0):
+                        or modifier_result.runner_multiplier != 1.0)):
                     logger.info(
                         f"INSTITUTIONAL MODIFIERS: "
                         f"pos={modifier_result.position_multiplier:.2f}x "
