@@ -27,7 +27,7 @@ from config.constants import (
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
     HTF_STRENGTH_GATE,
-    UCL_WATCH_SCORE_MIN, UCL_WATCH_SCORE_MAX, UCL_IMMEDIATE_SCORE_MIN,
+    UCL_FVG_CONFLUENCE_BOOST,
 )
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
@@ -36,6 +36,7 @@ from signals.aggregator import SignalAggregator, SignalDirection
 from signals.liquidity_sweep import LiquiditySweepDetector, SweepSignal
 from signals.fvg_detector import FVGDetector
 from signals.watch_state import WatchStateManager, WatchState, ConfirmedSignal
+from signals.institutional_modifiers import InstitutionalModifierEngine
 from risk.engine import RiskEngine, RiskDecision
 from risk.regime_detector import RegimeDetector
 from execution.scale_out_executor import ScaleOutExecutor
@@ -106,6 +107,10 @@ class TradingOrchestrator:
         self._fvg_detector = FVGDetector()
         self._watch_manager = WatchStateManager()
         self._ucl_enabled = True  # Can be toggled for A/B testing
+
+        # Institutional Modifier Layer — Phase 1
+        self._institutional_engine = InstitutionalModifierEngine()
+        self._modifiers_enabled = True  # Can be toggled for A/B testing
 
         # Execution - scale-out is the primary executor
         self.executor = ScaleOutExecutor(config)
@@ -213,6 +218,10 @@ class TradingOrchestrator:
         self._last_bar = bar
         self._last_rejection = None  # Clear previous rejection
         action_result = None
+
+        # === 0. INSTITUTIONAL MODIFIER STATE UPDATE (every bar) ===
+        if self._modifiers_enabled:
+            self._institutional_engine.update_bar(bar)
 
         # === 1. FEATURES (execution TF) ===
         features = self.feature_engine.update(bar)
@@ -382,59 +391,51 @@ class TradingOrchestrator:
                            features.atr_14, "NaN score guard", 2)
             return None
 
-        # === 5c. UCL — ROUTE SIGNAL BY SCORE ===
-        # If a new signal exists but scores 0.60-0.84 → watch state (Phase 1: sweep only)
-        if (entry_direction is not None and
-                self._ucl_enabled and
-                UCL_WATCH_SCORE_MIN <= entry_score <= UCL_WATCH_SCORE_MAX and
-                entry_source == "sweep" and sweep_signal is not None):
-            # Create sweep watch state
-            sweep_dir = "LONG" if entry_direction == "long" else "SHORT"
-            sweep_low = sweep_signal.stop_price
-            if sweep_dir == "LONG":
-                invalidation = sweep_low - 10.0
-            else:
-                invalidation = sweep_low + 10.0
+        # === 5c. UCL v2 — FVG CONFLUENCE SCORE BOOST ===
+        # Before the HC gate, boost score if entry is near an active FVG
+        if entry_direction is not None and self._ucl_enabled:
+            fvg_direction = "bullish" if entry_direction == "long" else "bearish"
+            active_fvgs = self._fvg_detector.get_active_fvgs(fvg_direction)
+            fvg_confluence = False
+            for fvg in active_fvgs:
+                if fvg.status in ("UNFILLED", "PARTIALLY_FILLED"):
+                    # Check if current price is inside this FVG zone
+                    if fvg.fvg_low <= bar.close <= fvg.fvg_high:
+                        fvg_confluence = True
+                        break
+                    # Also check if entry would be within 10pts of FVG
+                    distance_to_fvg = min(
+                        abs(bar.close - fvg.fvg_low),
+                        abs(bar.close - fvg.fvg_high))
+                    if distance_to_fvg <= 10.0:
+                        fvg_confluence = True
+                        break
+            if fvg_confluence:
+                old_score = entry_score
+                entry_score += UCL_FVG_CONFLUENCE_BOOST
+                logger.info(
+                    f"FVG confluence: +{UCL_FVG_CONFLUENCE_BOOST} boost, "
+                    f"score {old_score:.3f} → {entry_score:.3f}"
+                )
 
-            watch = WatchState(
-                setup_type="sweep",
-                direction=sweep_dir,
-                trigger_bar=self._bars_processed,
-                trigger_price=bar.close,
-                key_level=float(sweep_signal.entry_price),
-                invalidation_price=invalidation,
-                expiry_bars=60,
-                confirmation_conditions=["RECLAIM", "FVG_FORM", "FVG_TAP"],
-                metadata={
-                    "sweep_low": sweep_low,
-                    "sweep_depth": getattr(sweep_signal, 'sweep_depth_pts', 0),
-                    "levels_swept": getattr(sweep_signal, 'swept_levels', []),
-                },
-                base_score=entry_score,
-                created_at=bar.timestamp,
-            )
-            self._watch_manager.add_watch(watch)
-            logger.debug(
-                f"UCL: sweep signal routed to watch state | "
-                f"{sweep_dir} score={entry_score:.3f}"
-            )
-            # Don't reject — signal is now in watch state
-            if not ucl_confirmed:
-                return None
-            # Fall through to process any confirmed signal
-
-        # === 5d. UCL — PROCESS CONFIRMED SIGNALS ===
-        # A confirmed watch state re-enters the pipeline with boosted score
-        if ucl_confirmed and not (entry_direction is not None and entry_score >= UCL_IMMEDIATE_SCORE_MIN):
+        # === 5d. UCL v2 — PROCESS CONFIRMED SIGNALS ===
+        # A confirmed wide-stop watch re-enters the pipeline with boosted score + tight stop
+        if ucl_confirmed and entry_direction is None:
             cs = ucl_confirmed[0]  # Process first confirmed signal
             entry_direction = "long" if cs.direction == "LONG" else "short"
             entry_score = cs.boosted_score
             entry_source = f"ucl_confirmed_{cs.setup_type}"
-            # Use structural stop from metadata if available
-            if cs.metadata.get("sweep_low"):
+            # Use tight confirmed stop from watch metadata
+            if cs.stop_distance > 0:
+                sweep_stop_override = cs.stop_distance
+            elif cs.metadata.get("confirmed_stop_distance"):
+                sweep_stop_override = cs.metadata["confirmed_stop_distance"]
+            elif cs.metadata.get("sweep_low"):
                 sweep_stop_override = abs(bar.close - cs.metadata["sweep_low"])
             logger.info(
-                f"UCL ENTRY: {entry_direction} via {cs.setup_type} | "
+                f"UCL wide-stop conversion: {entry_direction} via {cs.setup_type} | "
+                f"original stop {cs.metadata.get('original_stop', '?')}pt → "
+                f"confirmed stop {sweep_stop_override or '?'}pt | "
                 f"boosted={cs.boosted_score:.3f} | bars={cs.bars_to_confirm}"
             )
 
@@ -452,17 +453,29 @@ class TradingOrchestrator:
             return action_result
 
         # === 6. RISK CHECK ===
+        # Compute structural stop distance from signal chain
+        structural_stop_dist = None
+        if signal and hasattr(signal, 'structural_stop_price') and signal.structural_stop_price is not None:
+            structural_stop_dist = abs(bar.close - signal.structural_stop_price)
+            if structural_stop_dist <= 0:
+                structural_stop_dist = None
+
         risk_assessment = self.risk_engine.evaluate_trade(
             direction=entry_direction,
             entry_price=bar.close,
             atr=features.atr_14,
             vix=features.vix_level or 0,
             current_time=bar.timestamp,
+            structural_stop_distance=structural_stop_dist,
         )
 
-        # For sweep-only entries, use sweep's tighter stop if available
+        # For sweep/UCL entries, use the override stop if tighter
         raw_stop = risk_assessment.suggested_stop_distance
         if sweep_stop_override is not None and sweep_stop_override < raw_stop:
+            raw_stop = sweep_stop_override
+        # For UCL confirmed entries, always use the confirmed stop
+        if (entry_source and entry_source.startswith("ucl_confirmed_")
+                and sweep_stop_override is not None):
             raw_stop = sweep_stop_override
 
         if not math.isfinite(raw_stop):
@@ -474,6 +487,23 @@ class TradingOrchestrator:
 
         # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+            # UCL v2: route wide-stop sweeps to watch state for post-sweep confirmation
+            if (self._ucl_enabled and entry_source == "sweep"
+                    and entry_direction is not None):
+                self._create_wide_stop_watch(
+                    direction="LONG" if entry_direction == "long" else "SHORT",
+                    score=entry_score,
+                    sweep_low=bar.low,
+                    sweep_high=bar.high,
+                    original_stop=raw_stop,
+                    bar_index=self._bars_processed,
+                    current_bar=bar,
+                )
+                _set_rejection(entry_direction, entry_score, raw_stop,
+                               features.atr_14,
+                               "Max stop exceeded — routed to UCL watch", 5)
+                return None
+
             logger.debug(
                 f"HC REJECT: stop {raw_stop:.1f} pts "
                 f"> {HIGH_CONVICTION_MAX_STOP_PTS} (too wide, wait for tighter entry)"
@@ -501,6 +531,41 @@ class TradingOrchestrator:
             return None
 
         if risk_assessment.decision in (RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE):
+            # === 6b. INSTITUTIONAL MODIFIERS ===
+            # Applied AFTER all gates pass, BEFORE trade execution.
+            # Adjusts position size, stop width, C2 runner trail.
+            modifier_result = None
+            atr_for_entry = features.atr_14
+            if self._modifiers_enabled:
+                htf_dir = htf_bias.consensus_direction if htf_bias else None
+                modifier_result = self._institutional_engine.calculate(
+                    current_time=bar.timestamp,
+                    htf_bias_direction=htf_dir,
+                )
+                if modifier_result.stand_aside:
+                    logger.info(
+                        f"INSTITUTIONAL STAND-ASIDE: {modifier_result.stand_aside_reason}"
+                    )
+                    _set_rejection(entry_direction, entry_score, raw_stop,
+                                   features.atr_14, "Institutional stand-aside", 9)
+                    return None
+
+                # Apply multipliers
+                raw_stop *= modifier_result.stop_multiplier
+                atr_for_entry = features.atr_14 * modifier_result.runner_multiplier
+
+                if (modifier_result.position_multiplier != 1.0
+                        or modifier_result.stop_multiplier != 1.0
+                        or modifier_result.runner_multiplier != 1.0):
+                    logger.info(
+                        f"INSTITUTIONAL MODIFIERS: "
+                        f"pos={modifier_result.position_multiplier:.2f}x "
+                        f"stop={modifier_result.stop_multiplier:.2f}x "
+                        f"runner={modifier_result.runner_multiplier:.2f}x | "
+                        f"overnight={modifier_result.details.get('overnight', {}).get('classification', 'n/a')} "
+                        f"fomc={modifier_result.details.get('fomc', {}).get('window', 'n/a')}"
+                    )
+
             # === 7. ENTER SCALE-OUT TRADE ===
             # C1 exits via trail-from-profit (Variant C).
             # No fixed TP1 target — managed by ScaleOutExecutor.
@@ -508,7 +573,7 @@ class TradingOrchestrator:
                 direction=entry_direction,
                 entry_price=bar.close,
                 stop_distance=raw_stop,
-                atr=features.atr_14,
+                atr=atr_for_entry,
                 signal_score=entry_score,
                 regime=self._current_regime,
             )
@@ -530,6 +595,15 @@ class TradingOrchestrator:
                     "htf_bias": htf_dir,
                     "htf_strength": round(htf_str, 3),
                 }
+                # Attach institutional modifier metadata
+                if modifier_result is not None:
+                    action_result["inst_position_mult"] = modifier_result.position_multiplier
+                    action_result["inst_stop_mult"] = modifier_result.stop_multiplier
+                    action_result["inst_runner_mult"] = modifier_result.runner_multiplier
+                    action_result["inst_overnight"] = modifier_result.details.get(
+                        "overnight", {}).get("classification", "n/a")
+                    action_result["inst_fomc_window"] = modifier_result.details.get(
+                        "fomc", {}).get("window", "n/a")
                 # Attach sweep metadata if applicable
                 if entry_source in ("sweep", "confluence") and sweep_signal:
                     action_result["sweep_levels"] = sweep_signal.swept_levels
@@ -541,6 +615,50 @@ class TradingOrchestrator:
                            features.atr_14, "Risk decision rejected", 8)
 
         return action_result
+
+    def _create_wide_stop_watch(self, direction, score, sweep_low,
+                               sweep_high, original_stop, bar_index, current_bar):
+        """Create UCL watch for wide-stop sweep that needs confirmation.
+
+        Wide-stop sweeps (score >= 0.75, stop > 30pt) are routed here instead
+        of being blocked.  Post-sweep confirmation produces a tighter stop
+        from the confirmation level.
+        """
+        if direction == "LONG":
+            key_level = sweep_low       # swept level
+            invalidation = sweep_low - 15.0  # wider invalidation for HTF setups
+            stop_on_confirm = sweep_low - 5.0  # tight stop below sweep low
+        else:
+            key_level = sweep_high
+            invalidation = sweep_high + 15.0
+            stop_on_confirm = sweep_high + 5.0
+
+        watch = WatchState(
+            setup_type="wide_stop_sweep",
+            direction=direction,
+            trigger_bar=bar_index,
+            trigger_price=current_bar.close,
+            key_level=key_level,
+            invalidation_price=invalidation,
+            expiry_bars=90,  # wider window for HTF setups
+            confirmation_conditions=["RECLAIM", "FVG_FORM", "FVG_TAP"],
+            metadata={
+                "original_score": score,
+                "original_stop": original_stop,
+                "confirmed_stop_distance": abs(current_bar.close - stop_on_confirm),
+                "sweep_low": sweep_low,
+                "sweep_high": sweep_high,
+            },
+            base_score=score,
+            created_at=current_bar.timestamp,
+        )
+        self._watch_manager.add_watch(watch)
+        logger.info(
+            f"UCL wide-stop watch created: {direction} | "
+            f"score={score:.3f} | original_stop={original_stop:.1f}pt | "
+            f"confirmed_stop={abs(current_bar.close - stop_on_confirm):.1f}pt | "
+            f"key_level={key_level:.2f}"
+        )
 
     def _get_last_price(self) -> float:
         if hasattr(self, '_last_bar') and self._last_bar:
@@ -799,6 +917,7 @@ class TradingOrchestrator:
             "sweep_detector": self.sweep_detector.get_stats() if self._sweep_enabled else None,
             "ucl_watch_state": self._watch_manager.get_stats() if self._ucl_enabled else None,
             "ucl_fvg_detector": self._fvg_detector.get_stats() if self._ucl_enabled else None,
+            "institutional_modifiers": self._modifiers_enabled,
         }
 
 

@@ -113,6 +113,7 @@ class RiskEngine:
         atr: float,
         vix: float = 0.0,
         current_time: Optional[datetime] = None,
+        structural_stop_distance: Optional[float] = None,
     ) -> RiskAssessment:
         """
         Evaluate whether a proposed trade is allowed and compute
@@ -226,7 +227,9 @@ class RiskEngine:
             )
 
         # === COMPUTE POSITION SIZE ===
-        stop_distance, target_distance = self._compute_stop_target(atr)
+        stop_distance, target_distance = self._compute_stop_target(
+            atr, structural_stop_distance
+        )
         size_multiplier = self._compute_size_multiplier(vix, current_time)
         max_contracts = self._compute_position_size(
             stop_distance, entry_price, size_multiplier
@@ -303,13 +306,29 @@ class RiskEngine:
 
         return final_contracts
 
-    def _compute_stop_target(self, atr: float) -> Tuple[float, float]:
-        """Compute stop loss and take profit distances from ATR."""
-        stop_distance = atr * self.config.atr_multiplier_stop
+    def _compute_stop_target(
+        self, atr: float, structural_stop_distance: Optional[float] = None
+    ) -> Tuple[float, float]:
+        """Compute stop loss and take profit distances.
+
+        Uses min(structural_stop, ATR_stop) when a structural level is
+        available.  ATR-based stop acts as the ceiling; structural
+        placement provides the tighter, structure-aware stop.
+        """
+        atr_stop = atr * self.config.atr_multiplier_stop
+
+        # Use structural stop if available and tighter than ATR
+        if (structural_stop_distance is not None
+                and structural_stop_distance > 0
+                and structural_stop_distance < atr_stop):
+            stop_distance = structural_stop_distance
+        else:
+            stop_distance = atr_stop
+
         target_distance = atr * self.config.atr_multiplier_target
 
         # Enforce minimum R:R
-        if target_distance / stop_distance < self.config.min_rr_ratio:
+        if stop_distance > 0 and target_distance / stop_distance < self.config.min_rr_ratio:
             target_distance = stop_distance * self.config.min_rr_ratio
 
         return stop_distance, target_distance

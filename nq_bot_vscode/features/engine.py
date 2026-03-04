@@ -148,6 +148,11 @@ class FeatureSnapshot:
     recent_buy_sweep: bool = False
     recent_sell_sweep: bool = False
 
+    # Structural invalidation levels for stop placement
+    # These are price levels where the signal feature is negated
+    structural_stop_long: Optional[float] = None    # Tightest stop price for LONG entries
+    structural_stop_short: Optional[float] = None   # Tightest stop price for SHORT entries
+
 
 class NQFeatureEngine:
     """
@@ -671,13 +676,45 @@ class NQFeatureEngine:
 
         # Recent sweeps (last 10 bars)
         recent_cutoff = len(self._bars) - 10
-        recent_sweeps = [s for s in self._sweeps 
+        recent_sweeps = [s for s in self._sweeps
                         if s.confirmed and self._bars.index(self._bars[-1]) - recent_cutoff < 10]
         snapshot.recent_sweeps = self._sweeps[-5:] if self._sweeps else []
-        
+
         for sweep in self._sweeps[-5:]:
             if sweep.confirmed:
                 if sweep.sweep_type == "buy_side":
                     snapshot.recent_buy_sweep = True
                 elif sweep.sweep_type == "sell_side":
                     snapshot.recent_sell_sweep = True
+
+        # --- Structural stop levels for stop placement ---
+        long_structural_stops = []   # Prices below entry for LONG invalidation
+        short_structural_stops = []  # Prices above entry for SHORT invalidation
+
+        # OB structural stops (zone edge ± 3pts buffer)
+        for ob in active_obs:
+            if ob.direction == "bullish" and snapshot.near_bullish_ob:
+                long_structural_stops.append(ob.zone_low - 3.0)
+            elif ob.direction == "bearish" and snapshot.near_bearish_ob:
+                short_structural_stops.append(ob.zone_high + 3.0)
+
+        # FVG structural stops (FVG boundary ± 3pts buffer)
+        for fvg in active_fvgs:
+            if fvg.gap_type == "bullish" and snapshot.inside_bullish_fvg:
+                long_structural_stops.append(fvg.gap_low - 3.0)
+            elif fvg.gap_type == "bearish" and snapshot.inside_bearish_fvg:
+                short_structural_stops.append(fvg.gap_high + 3.0)
+
+        # Sweep structural stops (swept level ± 5pts buffer)
+        for sweep in self._sweeps[-5:]:
+            if sweep.confirmed:
+                if sweep.sweep_type == "sell_side":
+                    long_structural_stops.append(sweep.sweep_price - 5.0)
+                elif sweep.sweep_type == "buy_side":
+                    short_structural_stops.append(sweep.sweep_price + 5.0)
+
+        # Tightest = highest price for LONG (closest to entry), lowest for SHORT
+        if long_structural_stops:
+            snapshot.structural_stop_long = round(max(long_structural_stops), 2)
+        if short_structural_stops:
+            snapshot.structural_stop_short = round(min(short_structural_stops), 2)

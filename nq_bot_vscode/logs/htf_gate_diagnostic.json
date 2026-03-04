@@ -1,0 +1,214 @@
+{
+  "diagnostic_run": {
+    "period": "2025-09-01 to 2026-03-01",
+    "elapsed_seconds": 546.5,
+    "exec_bars_processed": 85752
+  },
+  "total_signals": 22055,
+  "approved": 2191,
+  "rejected": 19864,
+  "htf_rejected": 11481,
+  "rejection_rate": "52.1%",
+  "rejection_reasons": {
+    "multiple_conflict": 11481,
+    "1H_conflict": 8475,
+    "30m_conflict": 8352,
+    "15m_conflict": 7721,
+    "4H_conflict": 7758,
+    "5m_conflict": 5282,
+    "1D_conflict": 7532
+  },
+  "shadow_pnl_of_rejected": {
+    "would_have_been_winners": 3406,
+    "would_have_been_losers": 8074,
+    "hypothetical_pnl": -259636.28,
+    "hypothetical_pf": 0.64
+  },
+  "per_timeframe_analysis": {
+    "1D": {
+      "rejection_count": 7531,
+      "shadow_winners": 2248,
+      "shadow_losers": 5283,
+      "shadow_pnl": -226950.84,
+      "shadow_win_rate": 29.8,
+      "shadow_pf": 0.53,
+      "avg_mfe": 19.44,
+      "avg_mae": 22.08
+    },
+    "4H": {
+      "rejection_count": 7757,
+      "shadow_winners": 2158,
+      "shadow_losers": 5599,
+      "shadow_pnl": -237599.34,
+      "shadow_win_rate": 27.8,
+      "shadow_pf": 0.51,
+      "avg_mfe": 18.15,
+      "avg_mae": 21.12
+    },
+    "1H": {
+      "rejection_count": 8474,
+      "shadow_winners": 2367,
+      "shadow_losers": 6107,
+      "shadow_pnl": -234871.26,
+      "shadow_win_rate": 27.9,
+      "shadow_pf": 0.58,
+      "avg_mfe": 19.07,
+      "avg_mae": 22.54
+    },
+    "30m": {
+      "rejection_count": 8352,
+      "shadow_winners": 2409,
+      "shadow_losers": 5943,
+      "shadow_pnl": -201735.84,
+      "shadow_win_rate": 28.8,
+      "shadow_pf": 0.63,
+      "avg_mfe": 19.65,
+      "avg_mae": 22.36
+    },
+    "15m": {
+      "rejection_count": 7721,
+      "shadow_winners": 2308,
+      "shadow_losers": 5413,
+      "shadow_pnl": -146192.0,
+      "shadow_win_rate": 29.9,
+      "shadow_pf": 0.7,
+      "avg_mfe": 19.45,
+      "avg_mae": 21.64
+    },
+    "5m": {
+      "rejection_count": 5282,
+      "shadow_winners": 1654,
+      "shadow_losers": 3628,
+      "shadow_pnl": -105814.16,
+      "shadow_win_rate": 31.3,
+      "shadow_pf": 0.67,
+      "avg_mfe": 19.82,
+      "avg_mae": 20.82
+    }
+  },
+  "gate_value_analysis": {
+    "gate_improved_pf_by": "PROTECTING_EDGE",
+    "htf_strength_gate": 0.3,
+    "signals_worth_reconsidering": [
+      {
+        "timestamp": "2025-11-20T10:38:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 2135.46,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 115.5
+      },
+      {
+        "timestamp": "2025-11-20T10:42:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 2128.06,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 115.25
+      },
+      {
+        "timestamp": "2025-11-20T10:40:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 2044.42,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 115.75
+      },
+      {
+        "timestamp": "2025-11-20T10:34:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 2026.34,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 108.0
+      },
+      {
+        "timestamp": "2025-11-20T10:30:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 1963.42,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 156.5
+      },
+      {
+        "timestamp": "2025-11-20T10:28:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 1952.04,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 146.25
+      },
+      {
+        "timestamp": "2025-11-20T10:26:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 1940.1,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 141.75
+      },
+      {
+        "timestamp": "2025-11-20T10:24:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 1925.54,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 133.75
+      },
+      {
+        "timestamp": "2025-11-20T10:32:00+00:00",
+        "direction": "SHORT",
+        "score": 0.767,
+        "total_pnl": 1921.58,
+        "conflicting_tfs": [
+          "30m",
+          "15m",
+          "5m"
+        ],
+        "mfe": 139.75
+      },
+      {
+        "timestamp": "2025-11-19T12:48:00+00:00",
+        "direction": "LONG",
+        "score": 0.767,
+        "total_pnl": 1333.72,
+        "conflicting_tfs": [
+          "15m",
+          "5m"
+        ],
+        "mfe": 149.0
+      }
+    ]
+  }
+}
