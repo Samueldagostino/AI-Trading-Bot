@@ -123,277 +123,441 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NQ.BOT — Paper Trading Dashboard</title>
+<title>NQ.BOT — Live Trading Dashboard</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#0a0e14;--panel:#10151c;--border:#1b2433;
-  --green:#00d4aa;--red:#ff3b5c;--amber:#ffb800;--blue:#4da6ff;
-  --text:#c8d0dc;--dim:#5a6578;--white:#e8ecf2;
+  --bg-primary:#0a0e14;
+  --bg-secondary:#0d1117;
+  --bg-panel:#0b1018;
+  --border:#1a2332;
+  --grid:#141c28;
+  --text-primary:#e2e8f0;
+  --text-secondary:#6b7a8d;
+  --text-muted:#3d4a5c;
+  --green:#00d4aa;
+  --green-fill:rgba(0,212,170,0.12);
+  --red:#ff3b5c;
+  --red-fill:rgba(255,59,92,0.12);
+  --amber:#ffb800;
+  --amber-fill:rgba(255,184,0,0.12);
+  --blue:#4da6ff;
+  --blue-fill:rgba(77,166,255,0.12);
 }
-body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;overflow-x:hidden}
-/* HEADER */
-.header{display:flex;align-items:center;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--border);gap:16px;height:42px}
-.logo{font-size:16px;font-weight:700;letter-spacing:1px}
-.logo .nq{color:var(--green)}.logo .bot{color:var(--dim)}
-.badge{padding:2px 8px;border-radius:3px;font-size:10px;font-weight:600;letter-spacing:1px}
-.badge-paper{background:rgba(255,184,0,.15);color:var(--amber);border:1px solid rgba(255,184,0,.3)}
-.price-display{font-size:14px;font-weight:600;color:var(--white)}
-.price-change{font-size:11px;margin-left:6px}
-.price-change.up{color:var(--green)}.price-change.down{color:var(--red)}
-.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,212,170,.4)}50%{opacity:.7;box-shadow:0 0 0 6px rgba(0,212,170,0)}}
-.live-label{color:var(--green);font-size:10px;font-weight:600;letter-spacing:1px}
-.clock{color:var(--dim);font-size:11px;margin-left:auto}
+html,body{height:100%;overflow:hidden}
+body{
+  background:var(--bg-primary);
+  color:var(--text-primary);
+  font-family:'JetBrains Mono','Fira Code','SF Mono','Cascadia Code',monospace;
+  font-size:12px;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  min-width:1024px;
+}
 
-/* STATS ROW */
-.stats-row{display:flex;gap:1px;padding:1px;background:var(--border)}
-.stat-cell{flex:1;background:var(--panel);padding:8px 12px;text-align:center}
-.stat-label{color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
-.stat-value{font-size:14px;font-weight:600}
-.stat-value.positive{color:var(--green)}.stat-value.negative{color:var(--red)}.stat-value.neutral{color:var(--white)}
+/* ── HEADER BAR ── */
+.header{
+  display:flex;align-items:center;padding:0 16px;
+  background:var(--bg-panel);border-bottom:1px solid var(--border);
+  height:40px;gap:12px;
+}
+.logo{font-size:16px;font-weight:700;letter-spacing:0.5px;white-space:nowrap}
+.logo-nq{color:var(--green)}.logo-bot{color:#4a5568}
+.badge-paper{
+  padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;
+  letter-spacing:1px;text-transform:uppercase;white-space:nowrap;
+  background:rgba(255,184,0,0.15);color:var(--amber);border:1px solid rgba(255,184,0,0.3);
+}
+.hdr-sym{color:var(--text-secondary);font-size:12px;white-space:nowrap}
+.hdr-price{color:var(--text-primary);font-size:18px;font-weight:700;white-space:nowrap}
+.hdr-change{font-size:12px;white-space:nowrap}
+.hdr-change.up{color:var(--green)}.hdr-change.down{color:var(--red)}
+.hdr-sep{width:1px;height:20px;background:var(--border);flex-shrink:0}
+.tf-buttons{display:flex;gap:4px;align-items:center}
+.tf-btn{
+  background:transparent;color:var(--text-secondary);border:1px solid var(--border);
+  border-radius:3px;padding:2px 8px;height:22px;min-width:36px;
+  font-family:inherit;font-size:10px;cursor:pointer;transition:all .12s;
+  display:flex;align-items:center;justify-content:center;
+}
+.tf-btn:hover{background:var(--border);color:var(--text-primary)}
+.tf-btn.active{background:rgba(0,212,170,0.15);color:var(--green);border-color:var(--green)}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.live-dot{
+  width:8px;height:8px;border-radius:50%;background:var(--green);flex-shrink:0;
+  animation:pulse 2s infinite;
+}
+.live-dot.disconnected{background:var(--red);animation:none}
+@keyframes pulse{
+  0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,212,170,0.4)}
+  50%{opacity:.7;box-shadow:0 0 0 6px rgba(0,212,170,0)}
+}
+.live-label{font-size:10px;font-weight:600;letter-spacing:1px;white-space:nowrap}
+.live-label.on{color:var(--green)}.live-label.off{color:var(--red)}
+.clock{color:var(--text-secondary);font-size:12px;white-space:nowrap}
 
-/* MAIN LAYOUT */
-.main{display:flex;height:calc(100vh - 42px - 52px - 250px);min-height:400px}
-.chart-area{flex:1;background:var(--panel);border-right:1px solid var(--border);position:relative;overflow:hidden;display:flex;flex-direction:column}
+/* ── STATS BAR ── */
+.stats-bar{
+  display:flex;height:48px;
+  background:var(--bg-panel);border-bottom:1px solid var(--border);
+  padding:6px 16px;gap:2px;
+}
+.stat-card{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+}
+.stat-lbl{font-size:8px;text-transform:uppercase;color:#4a5568;letter-spacing:1.5px;line-height:1}
+.stat-val{font-size:20px;font-weight:700;line-height:1.2}
+.stat-sub{font-size:8px;color:var(--text-muted)}
+.stat-val.pos{color:var(--green)}.stat-val.neg{color:var(--red)}.stat-val.neut{color:var(--text-primary)}
+.stat-val.warn{color:var(--amber)}
+
+/* ── MAIN LAYOUT ── */
+.main{display:flex;height:calc(100vh - 40px - 48px - 200px)}
+.chart-col{flex:1;display:flex;flex-direction:column;position:relative;background:var(--bg-secondary);overflow:hidden}
 .chart-wrap{flex:1;position:relative;overflow:hidden}
-.sidebar{width:230px;background:var(--bg);overflow-y:auto;display:flex;flex-direction:column;gap:1px}
+#chartCanvas{display:block;width:100%;height:100%}
+.ohlc-bar{
+  position:absolute;top:8px;left:12px;z-index:10;pointer-events:none;
+  font-size:11px;line-height:1.4;
+  background:rgba(13,17,23,0.8);padding:4px 8px;border-radius:3px;
+}
+.ohlc-title{color:var(--text-secondary);font-weight:700;font-size:11px}
+.ohlc-tf{color:#4a5568;font-size:11px}
+.ohlc-dot{color:var(--green);font-size:10px}
+.ohlc-lbl{color:#4a5568}.ohlc-up{color:var(--green)}.ohlc-dn{color:var(--red)}
+.ohlc-vol{color:#4a5568;font-size:10px}
 
-/* TIMEFRAME SELECTOR */
-.tf-bar{display:flex;gap:4px;padding:4px 12px;background:var(--bg);border-bottom:1px solid var(--border)}
-.tf-btn{background:var(--panel);color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:2px 8px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;cursor:pointer;letter-spacing:0.5px;transition:all .15s}
-.tf-btn:hover{color:var(--white);border-color:var(--dim)}
-.tf-btn.active{color:var(--green);border-color:var(--green);background:rgba(0,212,170,0.08)}
+/* ── SIDEBAR ── */
+.sidebar{
+  width:240px;background:var(--bg-panel);border-left:1px solid var(--border);
+  overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:8px 0;
+}
+@media(max-width:1279px){.sidebar{display:none}.chart-col{border-right:none}}
+.side-hdr{
+  font-size:10px;text-transform:uppercase;color:#4a5568;letter-spacing:1.5px;
+  padding:0 12px 6px;border-bottom:1px solid var(--border);margin-bottom:4px;
+}
+.side-section{padding:0 12px}
+.pos-card{
+  padding:8px;border-radius:4px;margin-bottom:6px;
+}
+.pos-card.long-card{background:rgba(0,212,170,0.08);border:1px solid rgba(0,212,170,0.25)}
+.pos-card.short-card{background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.25)}
+.pos-dir-badge{font-size:10px;font-weight:700}
+.pos-dir-badge.long{color:var(--green)}.pos-dir-badge.short{color:var(--red)}
+.pos-entry{color:var(--text-primary);font-size:11px;margin-top:2px}
+.pos-pnl{font-size:14px;font-weight:700;margin-top:3px}
+.pos-timer{color:var(--amber);font-size:10px;font-weight:700;margin-top:2px}
+.pos-mod{color:#4a5568;font-size:8px;margin-top:1px}
+.pos-empty{color:var(--text-muted);font-size:10px;padding:8px 0}
 
-/* CHART */
-#chartCanvas{width:100%;height:100%;display:block}
-.ohlc-overlay{position:absolute;top:8px;left:12px;font-size:11px;color:var(--dim);z-index:10;pointer-events:none}
-.ohlc-overlay .sym{color:var(--white);font-weight:600}
-.ohlc-overlay .up{color:var(--green)}.ohlc-overlay .down{color:var(--red)}
+/* Safety Rails */
+.rail{margin-bottom:8px}
+.rail-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
+.rail-name{font-size:9px;color:var(--text-secondary)}
+.rail-status{font-size:9px;font-weight:700}
+.rail-status.ok{color:var(--green)}.rail-status.warn{color:var(--amber)}.rail-status.alert{color:var(--red)}
+.rail-bar{height:3px;background:var(--grid);border-radius:2px;overflow:hidden}
+.rail-fill{height:100%;border-radius:2px;transition:width .4s ease}
+.rail-val{font-size:8px;color:var(--text-muted);margin-top:2px}
 
-/* SIDEBAR PANELS */
-.side-panel{background:var(--panel);padding:10px 12px}
-.side-panel-title{color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px}
-.position-card{margin-bottom:8px;padding:6px;border:1px solid var(--border);border-radius:3px}
-.pos-dir{font-weight:600;font-size:11px}.pos-dir.long{color:var(--green)}.pos-dir.short{color:var(--red)}
-.pos-detail{color:var(--dim);font-size:10px;margin-top:2px}
-.pos-pnl{font-weight:600;font-size:12px;margin-top:2px}
-.pos-timer{color:var(--blue);font-size:10px}
+/* Modifiers */
+.mod-row{
+  display:flex;justify-content:space-between;align-items:flex-start;
+  padding:5px 0;border-bottom:1px solid var(--border);
+}
+.mod-row:last-child{border-bottom:none}
+.mod-name{font-size:9px;color:var(--text-secondary)}
+.mod-right{text-align:right}
+.mod-val{font-size:10px;font-weight:700}
+.mod-val.hi{color:var(--green)}.mod-val.lo{color:var(--amber)}.mod-val.dim{color:var(--text-secondary)}
+.mod-reason{font-size:7px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mod-total-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding-top:6px;margin-top:4px;border-top:1px solid var(--border);
+}
+.mod-total-lbl{font-size:10px;font-weight:700;color:var(--text-primary)}
+.mod-total-val{font-size:14px;font-weight:700;color:var(--blue)}
 
-/* SAFETY BARS */
-.safety-item{margin-bottom:6px}
-.safety-label{display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px}
-.safety-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
-.safety-fill{height:100%;border-radius:2px;transition:width .5s}
-.safety-ok{background:var(--green)}.safety-warn{background:var(--amber)}.safety-alert{background:var(--red)}
-.safety-status{font-size:9px;font-weight:600}
-.safety-status.ok{color:var(--green)}.safety-status.alert{color:var(--red)}.safety-status.warn{color:var(--amber)}
-
-/* MODIFIER */
-.mod-item{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:10px}
-.mod-name{color:var(--dim);text-transform:uppercase}
-.mod-value{font-weight:600;color:var(--white)}
-.mod-reason{color:var(--dim);font-size:9px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mod-total{border-top:1px solid var(--border);padding-top:6px;margin-top:6px;font-size:11px;font-weight:600;display:flex;justify-content:space-between}
-
-/* DECISIONS TABLE */
-.decisions-area{height:250px;background:var(--panel);border-top:1px solid var(--border);display:flex;flex-direction:column}
-.decisions-header{display:flex;align-items:center;padding:8px 16px;gap:12px;border-bottom:1px solid var(--border)}
-.decisions-title{color:var(--white);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px}
-.decisions-count{font-size:10px;color:var(--dim)}
-.decisions-scroll{flex:1;overflow-y:auto}
+/* ── DECISIONS TABLE ── */
+.decisions{
+  height:200px;background:var(--bg-panel);border-top:1px solid var(--border);
+  display:flex;flex-direction:column;
+}
+.dec-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:6px 16px;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.dec-title{font-size:10px;font-weight:700;color:#4a5568;text-transform:uppercase;letter-spacing:1.2px}
+.dec-count{font-size:9px;color:var(--text-muted)}
+.dec-scroll{flex:1;overflow-y:auto}
+.dec-scroll::-webkit-scrollbar{width:6px}
+.dec-scroll::-webkit-scrollbar-track{background:var(--border)}
+.dec-scroll::-webkit-scrollbar-thumb{background:var(--text-muted);border-radius:3px}
 table{width:100%;border-collapse:collapse}
-th{position:sticky;top:0;background:var(--bg);color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:1px;padding:6px 12px;text-align:left;border-bottom:1px solid var(--border)}
-td{padding:5px 12px;font-size:11px;border-bottom:1px solid rgba(27,36,51,.5)}
-tr:nth-child(even){background:rgba(16,21,28,.5)}
-tr:hover{background:rgba(77,166,255,.05)}
-.badge-approved{background:rgba(0,212,170,.15);color:var(--green);padding:1px 6px;border-radius:2px;font-size:9px;font-weight:600}
-.badge-rejected{background:rgba(255,59,92,.15);color:var(--red);padding:1px 6px;border-radius:2px;font-size:9px;font-weight:600}
-.no-data{color:var(--dim);text-align:center;padding:40px;font-size:11px}
+thead th{
+  position:sticky;top:0;background:var(--bg-panel);z-index:1;
+  font-size:8px;text-transform:uppercase;color:var(--text-muted);letter-spacing:1.2px;
+  padding:5px 10px;text-align:left;border-bottom:1px solid var(--border);
+}
+tbody td{padding:4px 10px;font-size:10px;height:28px;border-bottom:1px solid rgba(26,35,50,0.5)}
+tbody tr:nth-child(even){background:rgba(13,17,23,0.3)}
+tbody tr:hover{background:rgba(77,166,255,0.04)}
+.td-time{color:var(--text-secondary);font-size:10px}
+.td-dir{font-size:10px;font-weight:700}
+.td-dir.long{color:var(--green)}.td-dir.short{color:var(--red)}
+.td-price{color:var(--text-primary);font-size:10px}
+.badge-dec{padding:1px 6px;border-radius:2px;font-size:8px;font-weight:700;display:inline-block}
+.badge-dec.approved{background:rgba(0,212,170,0.15);color:var(--green)}
+.badge-dec.rejected{background:rgba(255,59,92,0.15);color:var(--red)}
+.td-score{color:var(--text-secondary);font-size:10px}
+.td-mod{color:var(--text-secondary);font-size:10px}
+.td-reason{color:var(--text-secondary);font-size:10px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.no-data{color:var(--text-muted);text-align:center;padding:30px;font-size:10px}
 </style>
 </head>
 <body>
 
 <!-- HEADER -->
 <div class="header">
-  <div class="logo"><span class="nq">NQ</span><span class="bot">.BOT</span></div>
-  <span class="badge badge-paper">PAPER</span>
-  <span class="price-display" id="lastPrice">--</span>
-  <span class="price-change" id="priceChange">--</span>
-  <div style="display:flex;align-items:center;gap:4px">
-    <div class="live-dot"></div>
-    <span class="live-label">LIVE</span>
+  <div class="logo"><span class="logo-nq">NQ</span><span class="logo-bot">.BOT</span></div>
+  <span class="badge-paper">PAPER</span>
+  <span class="hdr-sym">MNQ</span>
+  <span class="hdr-price" id="hdrPrice">--</span>
+  <span class="hdr-change" id="hdrChange">--</span>
+  <div class="hdr-sep"></div>
+  <div class="tf-buttons" id="tfButtons">
+    <button class="tf-btn" data-tf="1m">1m</button>
+    <button class="tf-btn active" data-tf="2m">2m</button>
+    <button class="tf-btn" data-tf="5m">5m</button>
+    <button class="tf-btn" data-tf="15m">15m</button>
+    <button class="tf-btn" data-tf="30m">30m</button>
+    <button class="tf-btn" data-tf="1H">1H</button>
+    <button class="tf-btn" data-tf="4H">4H</button>
+    <button class="tf-btn" data-tf="1D">1D</button>
   </div>
-  <span class="clock" id="clock">--:--:-- ET</span>
+  <div class="hdr-right">
+    <div style="display:flex;align-items:center;gap:4px">
+      <div class="live-dot" id="liveDot"></div>
+      <span class="live-label on" id="liveLabel">LIVE</span>
+    </div>
+    <span class="clock" id="clock">--:--:-- ET</span>
+  </div>
 </div>
 
-<!-- STATS ROW -->
-<div class="stats-row">
-  <div class="stat-cell"><div class="stat-label">Session PnL</div><div class="stat-value" id="statPnl">$0.00</div></div>
-  <div class="stat-cell"><div class="stat-label">Trades (W/L)</div><div class="stat-value neutral" id="statTrades">0 (0/0)</div></div>
-  <div class="stat-cell"><div class="stat-label">Win Rate</div><div class="stat-value neutral" id="statWinRate">0.0%</div></div>
-  <div class="stat-cell"><div class="stat-label">Profit Factor</div><div class="stat-value neutral" id="statPF">0.00</div></div>
-  <div class="stat-cell"><div class="stat-label">Sharpe</div><div class="stat-value neutral" id="statSharpe">0.00</div></div>
-  <div class="stat-cell"><div class="stat-label">Max DD</div><div class="stat-value neutral" id="statDD">$0.00</div></div>
-  <div class="stat-cell"><div class="stat-label">Bars</div><div class="stat-value neutral" id="statBars">0</div></div>
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat-card"><div class="stat-lbl">PNL</div><div class="stat-val neut" id="sPnl">$0.00</div></div>
+  <div class="stat-card"><div class="stat-lbl">TRADES W/L</div><div class="stat-val neut" id="sTrades">0 (0/0)</div></div>
+  <div class="stat-card"><div class="stat-lbl">WIN RATE</div><div class="stat-val neut" id="sWR">0.0%</div></div>
+  <div class="stat-card"><div class="stat-lbl">PROFIT FACTOR</div><div class="stat-val neut" id="sPF">0.00</div></div>
+  <div class="stat-card"><div class="stat-lbl">SHARPE</div><div class="stat-val neut" id="sSharpe">0.00</div></div>
+  <div class="stat-card"><div class="stat-lbl">MAX DD</div><div class="stat-val neut" id="sDD">$0.00</div></div>
+  <div class="stat-card"><div class="stat-lbl">BARS</div><div class="stat-val neut" id="sBars">0</div></div>
 </div>
 
 <!-- MAIN -->
 <div class="main">
-  <!-- CHART -->
-  <div class="chart-area">
-    <div class="tf-bar">
-      <button class="tf-btn" data-tf="1m">1m</button>
-      <button class="tf-btn active" data-tf="2m">2m</button>
-      <button class="tf-btn" data-tf="5m">5m</button>
-      <button class="tf-btn" data-tf="15m">15m</button>
-      <button class="tf-btn" data-tf="30m">30m</button>
-      <button class="tf-btn" data-tf="1H">1H</button>
-      <button class="tf-btn" data-tf="4H">4H</button>
-      <button class="tf-btn" data-tf="1D">1D</button>
-    </div>
+  <div class="chart-col">
     <div class="chart-wrap">
-      <div class="ohlc-overlay" id="ohlcOverlay">
-        <span class="sym" id="tfLabel">MNQ 2m</span>
-        <span id="ohlcO">O --</span>
-        <span id="ohlcH">H --</span>
-        <span id="ohlcL">L --</span>
-        <span id="ohlcC">C --</span>
-        <span id="ohlcChg">--</span>
+      <div class="ohlc-bar" id="ohlcBar">
+        <span class="ohlc-title">Micro E-mini Nasdaq-100 Futures</span>
+        <span class="ohlc-tf" id="ohlcTF"> · 2 · CME</span>
+        &nbsp;&nbsp;
+        <span class="ohlc-dot" id="ohlcDot">&#9679;</span>
+        <span id="ohlcVals">
+          <span class="ohlc-lbl">O</span><span class="ohlc-up" id="oO">--</span>
+          <span class="ohlc-lbl"> H</span><span class="ohlc-up" id="oH">--</span>
+          <span class="ohlc-lbl"> L</span><span class="ohlc-dn" id="oL">--</span>
+          <span class="ohlc-lbl"> C</span><span class="ohlc-up" id="oC">--</span>
+          <span id="oChg" class="ohlc-up"> --</span>
+        </span>
+        <span class="ohlc-vol" id="oVol"></span>
       </div>
       <canvas id="chartCanvas"></canvas>
     </div>
   </div>
-
-  <!-- SIDEBAR -->
   <div class="sidebar">
-    <!-- ACTIVE POSITIONS -->
-    <div class="side-panel">
-      <div class="side-panel-title">Active Positions</div>
-      <div id="positionsContainer"><div class="no-data">No open positions</div></div>
+    <!-- POSITIONS -->
+    <div class="side-hdr">ACTIVE POSITIONS</div>
+    <div class="side-section" id="posBox"><div class="pos-empty">No open positions</div></div>
+    <!-- SAFETY -->
+    <div class="side-hdr">SAFETY RAILS</div>
+    <div class="side-section" id="safetyBox">
+      <div class="rail"><div class="rail-top"><span class="rail-name">Daily Loss</span><span class="rail-status ok" id="rDailySt">OK</span></div><div class="rail-bar"><div class="rail-fill" id="rDailyFill" style="width:0%;background:var(--green)"></div></div><div class="rail-val" id="rDailyVal">$0 / $500</div></div>
+      <div class="rail"><div class="rail-top"><span class="rail-name">Consec Losses</span><span class="rail-status ok" id="rConsecSt">OK</span></div><div class="rail-bar"><div class="rail-fill" id="rConsecFill" style="width:0%;background:var(--green)"></div></div><div class="rail-val" id="rConsecVal">0 / 5</div></div>
+      <div class="rail"><div class="rail-top"><span class="rail-name">Position Size</span><span class="rail-status ok" id="rPosSt">OK</span></div><div class="rail-bar"><div class="rail-fill" id="rPosFill" style="width:0%;background:var(--green)"></div></div><div class="rail-val" id="rPosVal">0 / 2</div></div>
+      <div class="rail"><div class="rail-top"><span class="rail-name">Heartbeat</span><span class="rail-status ok" id="rHBSt">OK</span></div><div class="rail-bar"><div class="rail-fill" id="rHBFill" style="width:0%;background:var(--green)"></div></div><div class="rail-val" id="rHBVal">0s</div></div>
     </div>
-
-    <!-- SAFETY RAILS -->
-    <div class="side-panel">
-      <div class="side-panel-title">Safety Rails</div>
-      <div id="safetyContainer">
-        <div class="safety-item"><div class="safety-label"><span>Daily Loss</span><span class="safety-status ok" id="safetyDailyStatus">OK</span></div><div class="safety-bar"><div class="safety-fill safety-ok" id="safetyDailyBar" style="width:0%"></div></div><div style="font-size:9px;color:var(--dim);margin-top:1px" id="safetyDailyText">$0 / $500</div></div>
-        <div class="safety-item"><div class="safety-label"><span>Consec Losses</span><span class="safety-status ok" id="safetyConsecStatus">OK</span></div><div class="safety-bar"><div class="safety-fill safety-ok" id="safetyConsecBar" style="width:0%"></div></div><div style="font-size:9px;color:var(--dim);margin-top:1px" id="safetyConsecText">0 / 5</div></div>
-        <div class="safety-item"><div class="safety-label"><span>Position Size</span><span class="safety-status ok" id="safetyPosStatus">OK</span></div><div class="safety-bar"><div class="safety-fill safety-ok" id="safetyPosBar" style="width:0%"></div></div><div style="font-size:9px;color:var(--dim);margin-top:1px" id="safetyPosText">0 / 2</div></div>
-        <div class="safety-item"><div class="safety-label"><span>Heartbeat</span><span class="safety-status ok" id="safetyHBStatus">OK</span></div><div class="safety-bar"><div class="safety-fill safety-ok" id="safetyHBBar" style="width:0%"></div></div><div style="font-size:9px;color:var(--dim);margin-top:1px" id="safetyHBText">0s</div></div>
-      </div>
-    </div>
-
     <!-- MODIFIERS -->
-    <div class="side-panel">
-      <div class="side-panel-title">Modifiers</div>
-      <div id="modifiersContainer">
-        <div class="mod-item"><span class="mod-name">OVERNIGHT</span><span class="mod-value" id="modON">1.00x</span></div>
-        <div class="mod-item"><span class="mod-name">FOMC</span><span class="mod-value" id="modFOMC">1.00x</span></div>
-        <div class="mod-item"><span class="mod-name">GAMMA</span><span class="mod-value" id="modGamma">1.00x</span></div>
-        <div class="mod-item"><span class="mod-name">HAR-RV</span><span class="mod-value" id="modHARRV">1.00x</span></div>
-        <div class="mod-total"><span>TOTAL</span><span id="modTotal">1.00x</span></div>
-      </div>
+    <div class="side-hdr">MODIFIERS</div>
+    <div class="side-section" id="modBox">
+      <div class="mod-row"><span class="mod-name">OVERNIGHT</span><div class="mod-right"><div class="mod-val dim" id="mON">1.00x</div><div class="mod-reason" id="mONr">No data</div></div></div>
+      <div class="mod-row"><span class="mod-name">FOMC</span><div class="mod-right"><div class="mod-val dim" id="mFOMC">1.00x</div><div class="mod-reason" id="mFOMCr">No data</div></div></div>
+      <div class="mod-row"><span class="mod-name">GAMMA</span><div class="mod-right"><div class="mod-val dim" id="mGamma">1.00x</div><div class="mod-reason" id="mGammar">No data</div></div></div>
+      <div class="mod-row"><span class="mod-name">HAR-RV</span><div class="mod-right"><div class="mod-val dim" id="mHARRV">1.00x</div><div class="mod-reason" id="mHARRVr">No data</div></div></div>
+      <div class="mod-total-row"><span class="mod-total-lbl">TOTAL</span><span class="mod-total-val" id="mTotal">1.00x</span></div>
     </div>
   </div>
 </div>
 
 <!-- DECISIONS TABLE -->
-<div class="decisions-area">
-  <div class="decisions-header">
-    <span class="decisions-title">Trade Decisions</span>
-    <span class="decisions-count" id="decisionsCount">0 approved / 0 rejected</span>
+<div class="decisions">
+  <div class="dec-hdr">
+    <span class="dec-title">TRADE DECISIONS</span>
+    <span class="dec-count" id="decCount">0 approved / 0 rejected</span>
   </div>
-  <div class="decisions-scroll">
+  <div class="dec-scroll">
     <table>
-      <thead><tr><th>Time</th><th>Dir</th><th>Price</th><th>Decision</th><th>Score</th><th>Reason</th></tr></thead>
-      <tbody id="decisionsBody"><tr><td colspan="6" class="no-data">No decisions yet</td></tr></tbody>
+      <thead><tr>
+        <th>TIME</th><th>DIR</th><th>PRICE</th><th>DECISION</th><th>SCORE</th><th>MODIFIER</th><th>REASON</th>
+      </tr></thead>
+      <tbody id="decBody"><tr><td colspan="7" class="no-data">No decisions yet</td></tr></tbody>
     </table>
   </div>
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════════════
-// STATE
-// ═══════════════════════════════════════════════════════════
-let candles = [], trades = [], activeTrades = [], decisions = [];
-let status = {}, safety = {}, modifiers = {};
-let hoverIndex = -1;
-let selectedTF = '2m';
-let historicalData = {};  // {timeframe: [...candles]}
+'use strict';
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════
+let candles = [], activeTrades = [], decisions = [];
+let status = {}, safety = {}, modifiers = {};
+let selectedTF = '2m';
+let historicalData = {};
+let hoverIdx = -1;
+let mouseX = -1, mouseY = -1;
+let failCount = 0;
+let lastCandles = null, lastStatus = null;
+let rafId = 0;
+let offscreen = null, offCtx = null;
+
+const FONT = "'JetBrains Mono','Fira Code','SF Mono',monospace";
+const PAD_TOP = 32, PAD_RIGHT = 70, PAD_BOTTOM = 24, PAD_LEFT = 8;
+const VOL_RATIO = 0.12;
+const MAX_CANDLES = 100;
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// ═══════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const fmt = (n, d=2) => (n||0).toFixed(d);
+const fmtPnl = n => { const v=n||0; return (v>=0?'+':'')+v.toFixed(2); };
+const fmtComma = n => n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const pad2 = n => String(n).padStart(2,'0');
+
+function niceInterval(range, maxTicks) {
+  const rough = range / maxTicks;
+  const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const res = rough / mag;
+  let nice;
+  if (res <= 1.5) nice = 1;
+  else if (res <= 3) nice = 2;
+  else if (res <= 7) nice = 5;
+  else nice = 10;
+  return nice * mag;
+}
+
+function toET(d) {
+  return new Date(d.toLocaleString('en-US',{timeZone:'America/New_York'}));
+}
+
+function isRTH(d) {
+  const et = toET(d);
+  const h = et.getHours(), m = et.getMinutes();
+  const mins = h * 60 + m;
+  return mins >= 570 && mins < 960; // 9:30 - 16:00
+}
+
+// ═══════════════════════════════════════════════════
+// CLOCK
+// ═══════════════════════════════════════════════════
+function updateClock() {
+  const now = new Date();
+  const et = now.toLocaleString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  $('clock').textContent = et + ' ET';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════════════════════════════════════════════
 // TIMEFRAME SELECTOR
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
+const tfMap = {'1m':'1','2m':'2','5m':'5','15m':'15','30m':'30','1H':'60','4H':'240','1D':'D'};
 document.querySelectorAll('.tf-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     selectedTF = btn.dataset.tf;
-    document.getElementById('tfLabel').textContent = 'MNQ ' + selectedTF;
+    $('ohlcTF').textContent = ' \u00b7 ' + (tfMap[selectedTF]||selectedTF) + ' \u00b7 CME';
     fetchHistorical(selectedTF);
   });
 });
 
 async function fetchHistorical(tf) {
   try {
-    const res = await fetch('/api/historical?timeframe=' + encodeURIComponent(tf));
+    const res = await fetch('/api/historical?timeframe='+encodeURIComponent(tf));
     const data = await res.json();
-    if (Array.isArray(data)) {
-      historicalData[tf] = data;
-      updateChart();
-    }
+    if (Array.isArray(data)) { historicalData[tf] = data; scheduleRender(); }
   } catch(e) { console.warn('Historical fetch error:', e); }
 }
 
-// ═══════════════════════════════════════════════════════════
-// CLOCK
-// ═══════════════════════════════════════════════════════════
-function updateClock() {
-  const now = new Date();
-  const et = now.toLocaleString('en-US', {timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-  document.getElementById('clock').textContent = et + ' ET';
-}
-setInterval(updateClock, 1000);
-updateClock();
-
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
 // DATA FETCHING
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
 async function fetchData() {
   try {
-    const [sRes, dRes, cRes, tRes, mRes, sfRes, hRes] = await Promise.all([
-      fetch('/api/status').then(r=>r.json()).catch(()=>({})),
-      fetch('/api/decisions').then(r=>r.json()).catch(()=>[]),
-      fetch('/api/candles').then(r=>r.json()).catch(()=>[]),
-      fetch('/api/trades').then(r=>r.json()).catch(()=>[]),
-      fetch('/api/modifiers').then(r=>r.json()).catch(()=>({})),
-      fetch('/api/safety').then(r=>r.json()).catch(()=>({})),
-      fetch('/api/historical?timeframe=' + encodeURIComponent(selectedTF)).then(r=>r.json()).catch(()=>[]),
+    const [sR,dR,cR,tR,mR,sfR,hR] = await Promise.all([
+      fetch('/api/status').then(r=>r.json()).catch(()=>null),
+      fetch('/api/decisions').then(r=>r.json()).catch(()=>null),
+      fetch('/api/candles').then(r=>r.json()).catch(()=>null),
+      fetch('/api/trades').then(r=>r.json()).catch(()=>null),
+      fetch('/api/modifiers').then(r=>r.json()).catch(()=>null),
+      fetch('/api/safety').then(r=>r.json()).catch(()=>null),
+      fetch('/api/historical?timeframe='+encodeURIComponent(selectedTF)).then(r=>r.json()).catch(()=>null),
     ]);
-    status = sRes; decisions = dRes; candles = cRes;
-    activeTrades = tRes; modifiers = mRes; safety = sfRes;
-    if (Array.isArray(hRes)) historicalData[selectedTF] = hRes;
+    failCount = 0;
+    $('liveDot').classList.remove('disconnected');
+    $('liveLabel').textContent = 'LIVE';
+    $('liveLabel').className = 'live-label on';
+
+    if (sR !== null) status = sR;
+    if (dR !== null) decisions = dR;
+    if (cR !== null) candles = cR;
+    if (tR !== null) activeTrades = tR;
+    if (mR !== null) modifiers = mR;
+    if (sfR !== null) safety = sfR;
+    if (Array.isArray(hR)) historicalData[selectedTF] = hR;
+
     updateUI();
-  } catch(e) { console.warn('Fetch error:', e); }
+  } catch(e) {
+    failCount++;
+    if (failCount >= 3) {
+      $('liveDot').classList.add('disconnected');
+      $('liveLabel').textContent = 'DISCONNECTED';
+      $('liveLabel').className = 'live-label off';
+    }
+    console.warn('Fetch error:', e);
+  }
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
 // UI UPDATES
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
 function updateUI() {
   updateHeader();
   updateStats();
-  updateChart();
   updatePositions();
   updateSafety();
   updateModifiers();
   updateDecisions();
+  scheduleRender();
 }
-
-function fmt(n, d=2) { return (n||0).toFixed(d); }
-function fmtPnl(n) { const v=n||0; return (v>=0?'+':'')+v.toFixed(2); }
 
 function updateHeader() {
   if (!candles.length) return;
@@ -402,488 +566,562 @@ function updateHeader() {
   const price = last.c;
   const chg = price - prev.c;
   const pct = prev.c ? (chg/prev.c*100) : 0;
-  document.getElementById('lastPrice').textContent = fmt(price, 2);
-  const ce = document.getElementById('priceChange');
-  ce.textContent = `${fmtPnl(chg)} (${fmtPnl(pct)}%)`;
-  ce.className = 'price-change ' + (chg >= 0 ? 'up' : 'down');
+  $('hdrPrice').textContent = fmtComma(price);
+  const ce = $('hdrChange');
+  ce.textContent = fmtPnl(chg) + ' (' + fmtPnl(pct) + '%)';
+  ce.className = 'hdr-change ' + (chg >= 0 ? 'up' : 'down');
 }
 
 function updateStats() {
   const s = status;
-  const pnlEl = document.getElementById('statPnl');
   const pnl = s.total_pnl || 0;
-  pnlEl.textContent = '$' + fmtPnl(pnl);
-  pnlEl.className = 'stat-value ' + (pnl >= 0 ? 'positive' : 'negative');
-  document.getElementById('statTrades').textContent = `${s.trade_count||0} (${s.wins||0}/${s.losses||0})`;
-  document.getElementById('statWinRate').textContent = fmt(s.win_rate||0, 1) + '%';
-  document.getElementById('statPF').textContent = fmt(s.profit_factor||0, 2);
-  document.getElementById('statSharpe').textContent = fmt(s.sharpe_estimate||0, 2);
-  const ddEl = document.getElementById('statDD');
-  ddEl.textContent = '$' + fmt(s.max_drawdown||0, 2);
-  ddEl.className = 'stat-value ' + ((s.max_drawdown||0) > 0 ? 'negative' : 'neutral');
-  document.getElementById('statBars').textContent = candles.length;
+  const pe = $('sPnl');
+  pe.textContent = '$' + fmtPnl(pnl);
+  pe.className = 'stat-val ' + (pnl >= 0 ? 'pos' : 'neg');
+
+  $('sTrades').textContent = (s.trade_count||0) + ' (' + (s.wins||0) + '/' + (s.losses||0) + ')';
+
+  const wr = s.win_rate || 0;
+  const wrE = $('sWR');
+  wrE.textContent = fmt(wr,1) + '%';
+  wrE.className = 'stat-val ' + (wr > 50 ? 'pos' : wr >= 40 ? 'warn' : wr > 0 ? 'neg' : 'neut');
+
+  const pf = s.profit_factor || 0;
+  const pfE = $('sPF');
+  pfE.textContent = fmt(pf,2);
+  pfE.className = 'stat-val ' + (pf > 1.5 ? 'pos' : pf >= 1.0 ? 'warn' : pf > 0 ? 'neg' : 'neut');
+
+  $('sSharpe').textContent = fmt(s.sharpe_estimate||0,2);
+
+  const dd = s.max_drawdown || 0;
+  const ddE = $('sDD');
+  ddE.textContent = '$' + fmt(dd,2);
+  ddE.className = 'stat-val ' + (dd > 0 ? 'neg' : 'neut');
+
+  $('sBars').textContent = candles.length;
 }
 
-// ═══════════════════════════════════════════════════════════
-// CANDLESTICK CHART
-// ═══════════════════════════════════════════════════════════
-const chartCanvas = document.getElementById('chartCanvas');
-const ctx = chartCanvas.getContext('2d');
-const CHART_PAD_RIGHT = 70;
-const CHART_PAD_BOTTOM = 28;
-const CHART_PAD_TOP = 30;
-const CHART_PAD_LEFT = 8;
-const VOL_HEIGHT_RATIO = 0.15;
-const MAX_VISIBLE = 80;
+// ═══════════════════════════════════════════════════
+// POSITIONS
+// ═══════════════════════════════════════════════════
+function updatePositions() {
+  const el = $('posBox');
+  if (!Array.isArray(activeTrades) || !activeTrades.length) {
+    el.innerHTML = '<div class="pos-empty">No open positions</div>';
+    return;
+  }
+  el.innerHTML = activeTrades.map(t => {
+    const isLong = (t.dir||'').toUpperCase() === 'LONG';
+    const pnl = t.unrealized_pnl || 0;
+    const holdSec = t.entry_time ? Math.floor((Date.now() - new Date(t.entry_time).getTime())/1000) : 0;
+    const mm = pad2(Math.floor(holdSec/60));
+    const ss = pad2(holdSec % 60);
+    return '<div class="pos-card '+(isLong?'long-card':'short-card')+'">'
+      +'<div class="pos-dir-badge '+(isLong?'long':'short')+'">'+(t.dir||'?').toUpperCase()+'</div>'
+      +'<div class="pos-entry">'+(t.contracts||1)+'x @ '+fmtComma(t.ep||0)+'</div>'
+      +'<div class="pos-pnl" style="color:var(--'+(pnl>=0?'green':'red')+')">'+fmtPnl(pnl)+'</div>'
+      +'<div class="pos-timer">HOLD '+mm+':'+ss+'</div>'
+      +'<div class="pos-mod">Mod: '+fmt(t.modifier||1,2)+'x</div>'
+      +'</div>';
+  }).join('');
+}
+setInterval(updatePositions, 1000);
 
-let mouseX = -1, mouseY = -1;
+// ═══════════════════════════════════════════════════
+// SAFETY RAILS
+// ═══════════════════════════════════════════════════
+function updateSafety() {
+  const s = safety;
+  setRail('Daily', Math.abs(s.daily_pnl||0), s.daily_limit||500, '-$'+fmt(Math.abs(s.daily_pnl||0),0)+' / $'+(s.daily_limit||500));
+  setRail('Consec', s.consec_losses||0, s.max_consec||5, (s.consec_losses||0)+' / '+(s.max_consec||5));
+  setRail('Pos', s.position_size||0, s.max_position||2, (s.position_size||0)+' / '+(s.max_position||2));
+  const hb = s.heartbeat_age_sec || 0;
+  setRail('HB', Math.min(hb,300), 300, fmt(hb,0)+'s');
+}
+
+function setRail(name, val, max, text) {
+  const pct = max > 0 ? Math.min(100,(val/max)*100) : 0;
+  const fill = $('r'+name+'Fill');
+  const st = $('r'+name+'St');
+  const vt = $('r'+name+'Val');
+  fill.style.width = pct+'%';
+  const color = pct < 50 ? 'var(--green)' : pct < 80 ? 'var(--amber)' : 'var(--red)';
+  fill.style.background = color;
+  st.textContent = pct < 80 ? 'OK' : 'ALERT';
+  st.className = 'rail-status ' + (pct < 50 ? 'ok' : pct < 80 ? 'warn' : 'alert');
+  vt.textContent = text;
+}
+
+// ═══════════════════════════════════════════════════
+// MODIFIERS
+// ═══════════════════════════════════════════════════
+function updateModifiers() {
+  const m = modifiers;
+  setMod('ON', m.overnight);
+  setMod('FOMC', m.fomc);
+  setMod('Gamma', m.gamma);
+  setMod('HARRV', m.har_rv);
+  const te = $('mTotal');
+  if (te) te.textContent = fmt(m.total||1.0,2)+'x';
+}
+
+function setMod(id, obj) {
+  const v = obj && obj.value !== undefined ? obj.value : 1.0;
+  const r = obj && obj.reason ? obj.reason : 'No data';
+  const ve = $('m'+id);
+  const re = $('m'+id+'r');
+  if (ve) {
+    ve.textContent = fmt(v,2)+'x';
+    ve.className = 'mod-val ' + (v > 1.1 ? 'hi' : v < 0.9 ? 'lo' : 'dim');
+  }
+  if (re) re.textContent = r;
+}
+
+// ═══════════════════════════════════════════════════
+// DECISIONS TABLE
+// ═══════════════════════════════════════════════════
+function updateDecisions() {
+  const body = $('decBody');
+  const countEl = $('decCount');
+  if (!Array.isArray(decisions) || !decisions.length) {
+    body.innerHTML = '<tr><td colspan="7" class="no-data">No decisions yet</td></tr>';
+    countEl.textContent = '0 approved / 0 rejected';
+    return;
+  }
+  const approved = decisions.filter(d=>d.decision==='APPROVED').length;
+  const rejected = decisions.filter(d=>d.decision==='REJECTED').length;
+  countEl.textContent = approved+' approved / '+rejected+' rejected';
+
+  const sorted = [...decisions].reverse().slice(0,50);
+  body.innerHTML = sorted.map(d => {
+    const t = new Date(d.timestamp);
+    const time = t.toLocaleString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    const isA = d.decision==='APPROVED';
+    const dir = d.signal_direction||'--';
+    const score = d.confluence_score != null ? fmt(d.confluence_score,3) : '\u2014';
+    const modifier = d.modifier != null ? fmt(d.modifier,2)+'x' : '\u2014';
+    const reason = d.rejection_stage || (isA ? 'Signal approved' : '\u2014');
+    return '<tr>'
+      +'<td class="td-time">'+time+'</td>'
+      +'<td class="td-dir '+(dir==='LONG'?'long':'short')+'">'+dir+'</td>'
+      +'<td class="td-price">'+fmtComma(d.price_at_signal||0)+'</td>'
+      +'<td><span class="badge-dec '+(isA?'approved':'rejected')+'">'+(isA?'APPROVED':'REJECTED')+'</span></td>'
+      +'<td class="td-score">'+score+'</td>'
+      +'<td class="td-mod">'+modifier+'</td>'
+      +'<td class="td-reason" title="'+reason.replace(/"/g,'&quot;')+'">'+reason+'</td>'
+      +'</tr>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════
+// CHART ENGINE
+// ═══════════════════════════════════════════════════
+const canvas = $('chartCanvas');
+const ctx = canvas.getContext('2d');
+
+function getChartCandles() {
+  let cc = (selectedTF === '2m') ? candles : (historicalData[selectedTF] || []);
+  if (selectedTF === '2m' && historicalData['2m'] && historicalData['2m'].length) {
+    const liveSet = new Set(candles.map(c=>c.time));
+    const merged = [...historicalData['2m'].filter(c=>!liveSet.has(c.time)), ...candles];
+    merged.sort((a,b)=>new Date(a.time)-new Date(b.time));
+    cc = merged;
+  }
+  return cc;
+}
 
 function resizeCanvas() {
-  const rect = chartCanvas.parentElement.getBoundingClientRect();
-  chartCanvas.width = rect.width * (window.devicePixelRatio||1);
-  chartCanvas.height = rect.height * (window.devicePixelRatio||1);
-  chartCanvas.style.width = rect.width + 'px';
-  chartCanvas.style.height = rect.height + 'px';
-  ctx.setTransform(window.devicePixelRatio||1, 0, 0, window.devicePixelRatio||1, 0, 0);
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.floor(rect.width);
+  const h = Math.floor(rect.height);
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  // Offscreen double buffer
+  if (!offscreen || offscreen.width !== canvas.width || offscreen.height !== canvas.height) {
+    offscreen = document.createElement('canvas');
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+    offCtx = offscreen.getContext('2d');
+  }
 }
 
-window.addEventListener('resize', () => { resizeCanvas(); drawChart(); });
+function scheduleRender() {
+  if (!rafId) rafId = requestAnimationFrame(renderFrame);
+}
 
-chartCanvas.addEventListener('mousemove', (e) => {
-  const rect = chartCanvas.getBoundingClientRect();
-  mouseX = e.clientX - rect.left;
-  mouseY = e.clientY - rect.top;
-  drawChart();
-});
-chartCanvas.addEventListener('mouseleave', () => {
-  mouseX = -1; mouseY = -1; hoverIndex = -1;
-  drawChart();
-  updateOHLC(-1);
-});
-
-function updateChart() {
+function renderFrame() {
+  rafId = 0;
   resizeCanvas();
   drawChart();
 }
 
+// Throttled mouse handler
+let lastMouseTime = 0;
+canvas.addEventListener('mousemove', e => {
+  const now = performance.now();
+  if (now - lastMouseTime < 16) return; // ~60fps
+  lastMouseTime = now;
+  const rect = canvas.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
+  scheduleRender();
+});
+canvas.addEventListener('mouseleave', () => {
+  mouseX = -1; mouseY = -1; hoverIdx = -1;
+  updateOHLC(-1);
+  scheduleRender();
+});
+
+window.addEventListener('resize', () => scheduleRender());
+
 function drawChart() {
-  const W = chartCanvas.width / (window.devicePixelRatio||1);
-  const H = chartCanvas.height / (window.devicePixelRatio||1);
-  ctx.clearRect(0, 0, W, H);
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.width / dpr;
+  const H = canvas.height / dpr;
+  const c = offCtx;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, W, H);
 
-  // Use historical data for selected TF, fall back to live candles for 2m
-  let chartCandles = (selectedTF === '2m') ? candles : (historicalData[selectedTF] || []);
-  // For 2m, merge historical + live (deduplicate by time)
-  if (selectedTF === '2m' && historicalData['2m'] && historicalData['2m'].length) {
-    const liveSet = new Set(candles.map(c => c.time));
-    const merged = [...historicalData['2m'].filter(c => !liveSet.has(c.time)), ...candles];
-    merged.sort((a,b) => new Date(a.time) - new Date(b.time));
-    chartCandles = merged;
-  }
-
+  const chartCandles = getChartCandles();
   if (!chartCandles.length) {
-    ctx.fillStyle = '#5a6578';
-    ctx.font = '12px JetBrains Mono, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('Waiting for candle data...', W/2, H/2);
+    c.fillStyle = '#4a5568';
+    c.font = '12px ' + FONT;
+    c.textAlign = 'center';
+    c.fillText('Waiting for candle data...', W/2, H/2);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(offscreen, 0, 0);
     return;
   }
 
-  const visible = chartCandles.slice(-MAX_VISIBLE);
+  const visible = chartCandles.slice(-MAX_CANDLES);
   const n = visible.length;
-  const chartW = W - CHART_PAD_LEFT - CHART_PAD_RIGHT;
-  const chartH = H - CHART_PAD_TOP - CHART_PAD_BOTTOM;
-  const volH = chartH * VOL_HEIGHT_RATIO;
-  const priceH = chartH - volH - 4;
+  const chartW = W - PAD_LEFT - PAD_RIGHT;
+  const chartH = H - PAD_TOP - PAD_BOTTOM;
+  const volH = chartH * VOL_RATIO;
+  const priceH = chartH - volH;
   const candleW = chartW / n;
-  const bodyW = Math.max(1, candleW * 0.65);
+  const bodyW = Math.max(1, Math.min(candleW * 0.7, 12));
+  const wickW = 1;
 
   // Price range
   let hi = -Infinity, lo = Infinity, maxVol = 0;
-  for (const c of visible) {
-    if (c.h > hi) hi = c.h;
-    if (c.l < lo) lo = c.l;
-    if ((c.vol||0) > maxVol) maxVol = c.vol||0;
+  for (const bar of visible) {
+    if (bar.h > hi) hi = bar.h;
+    if (bar.l < lo) lo = bar.l;
+    if ((bar.vol||0) > maxVol) maxVol = bar.vol||0;
   }
-  const pad = (hi - lo) * 0.08 || 5;
-  hi += pad; lo -= pad;
-  const priceRange = hi - lo || 1;
+  const rawRange = hi - lo || 1;
+  const padPx = rawRange * 0.06;
+  hi += padPx; lo -= padPx;
+  const priceRange = hi - lo;
 
-  function priceY(p) { return CHART_PAD_TOP + (1 - (p - lo) / priceRange) * priceH; }
-  function candleX(i) { return CHART_PAD_LEFT + i * candleW + candleW / 2; }
+  const priceY = p => PAD_TOP + (1 - (p - lo) / priceRange) * priceH;
+  const candleCX = i => PAD_LEFT + i * candleW + candleW / 2;
 
-  // Grid lines
-  ctx.strokeStyle = '#1b2433';
-  ctx.lineWidth = 0.5;
-  const nGrid = 5;
-  for (let i = 0; i <= nGrid; i++) {
-    const y = CHART_PAD_TOP + (i / nGrid) * priceH;
-    ctx.beginPath(); ctx.moveTo(CHART_PAD_LEFT, y); ctx.lineTo(W - CHART_PAD_RIGHT, y); ctx.stroke();
-    const price = hi - (i / nGrid) * priceRange;
-    ctx.fillStyle = '#5a6578';
-    ctx.font = '9px JetBrains Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(price.toFixed(2), W - CHART_PAD_RIGHT + 6, y + 3);
+  // ── RTH session shading ──
+  drawSessionShading(c, visible, candleCX, candleW, n, PAD_TOP, priceH, W);
+
+  // ── Grid lines ──
+  const interval = niceInterval(priceRange, 6);
+  const firstGrid = Math.ceil(lo / interval) * interval;
+  c.lineWidth = 1;
+  c.font = '10px ' + FONT;
+  c.textAlign = 'right';
+  for (let p = firstGrid; p <= hi; p += interval) {
+    const y = Math.round(priceY(p)) + 0.5;
+    c.strokeStyle = '#141c28';
+    c.beginPath(); c.moveTo(PAD_LEFT, y); c.lineTo(W - PAD_RIGHT, y); c.stroke();
+    c.fillStyle = '#4a5568';
+    c.fillText(fmtComma(p), W - PAD_RIGHT + PAD_RIGHT - 4, y + 3);
   }
 
-  // Supply/Demand zones
-  drawZones(visible, candleX, priceY, n, chartW);
+  // Time axis gridlines
+  const timeStep = Math.max(1, Math.floor(n / 8));
+  c.textAlign = 'center';
+  let prevDate = '';
+  for (let i = 0; i < n; i += timeStep) {
+    const bar = visible[i];
+    const t = new Date(bar.time);
+    const x = Math.round(candleCX(i)) + 0.5;
+    c.strokeStyle = '#141c28';
+    c.lineWidth = 1;
+    c.beginPath(); c.moveTo(x, PAD_TOP); c.lineTo(x, PAD_TOP + chartH); c.stroke();
+  }
 
-  // Volume bars
-  const volBase = CHART_PAD_TOP + priceH + 4 + volH;
+  // ── Supply/Demand zones ──
+  drawZones(c, visible, candleCX, priceY, n, candleW);
+
+  // ── Volume bars ──
+  const volBase = PAD_TOP + priceH + volH;
   for (let i = 0; i < n; i++) {
-    const c = visible[i];
-    const vH = maxVol > 0 ? ((c.vol||0) / maxVol) * volH : 0;
-    const isUp = c.c >= c.o;
-    ctx.fillStyle = isUp ? 'rgba(0,212,170,0.25)' : 'rgba(255,59,92,0.25)';
-    ctx.fillRect(candleX(i) - bodyW/2, volBase - vH, bodyW, vH);
+    const bar = visible[i];
+    const vH = maxVol > 0 ? ((bar.vol||0) / maxVol) * volH : 0;
+    const isUp = bar.c >= bar.o;
+    c.fillStyle = isUp ? 'rgba(0,212,170,0.15)' : 'rgba(255,59,92,0.15)';
+    const bw = Math.max(1, bodyW - 1);
+    c.fillRect(candleCX(i) - bw/2, volBase - vH, bw, vH);
   }
 
-  // Candles
+  // ── Candles ──
   for (let i = 0; i < n; i++) {
-    const c = visible[i];
-    const isUp = c.c >= c.o;
-    const x = candleX(i);
-    const oY = priceY(c.o), cY = priceY(c.c);
-    const hY = priceY(c.h), lY = priceY(c.l);
+    const bar = visible[i];
+    const isUp = bar.c >= bar.o;
+    const x = candleCX(i);
+    const oY = priceY(bar.o), cY = priceY(bar.c);
+    const hY = priceY(bar.h), lY = priceY(bar.l);
+    const color = isUp ? '#00d4aa' : '#ff3b5c';
 
-    // Wick
-    ctx.strokeStyle = isUp ? '#00d4aa' : '#ff3b5c';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x, hY); ctx.lineTo(x, lY); ctx.stroke();
+    // Wick - crisp 1px
+    c.strokeStyle = color;
+    c.lineWidth = wickW;
+    const wx = Math.round(x) + 0.5;
+    c.beginPath(); c.moveTo(wx, Math.round(hY)); c.lineTo(wx, Math.round(lY)); c.stroke();
 
-    // Body
+    // Body - solid filled
     const top = Math.min(oY, cY);
-    const bodyH = Math.max(1, Math.abs(oY - cY));
-    if (isUp) {
-      // Solid filled green body
-      ctx.fillStyle = '#00d4aa';
-      ctx.fillRect(x - bodyW/2, top, bodyW, bodyH);
-    } else {
-      // Solid filled red body
-      ctx.fillStyle = '#ff3b5c';
-      ctx.fillRect(x - bodyW/2, top, bodyW, bodyH);
-    }
+    const bH = Math.max(1, Math.abs(oY - cY));
+    c.fillStyle = color;
+    c.fillRect(Math.round(x - bodyW/2), Math.round(top), Math.round(bodyW), Math.round(bH));
   }
 
-  // Trade markers
-  drawTradeMarkers(visible, candleX, priceY, n);
+  // ── Trade markers ──
+  drawTradeMarkers(c, visible, candleCX, priceY, n);
 
-  // Current price line
+  // ── Current price line ──
   if (visible.length) {
-    const lastC = visible[visible.length - 1];
-    const cpY = priceY(lastC.c);
-    const isUp = lastC.c >= lastC.o;
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = isUp ? '#00d4aa' : '#ff3b5c';
-    ctx.lineWidth = 0.8;
-    ctx.beginPath(); ctx.moveTo(CHART_PAD_LEFT, cpY); ctx.lineTo(W - CHART_PAD_RIGHT, cpY); ctx.stroke();
-    ctx.setLineDash([]);
-    // Price badge
-    const badgeColor = isUp ? '#00d4aa' : '#ff3b5c';
-    ctx.fillStyle = badgeColor;
-    ctx.fillRect(W - CHART_PAD_RIGHT, cpY - 8, CHART_PAD_RIGHT - 2, 16);
-    ctx.fillStyle = '#0a0e14';
-    ctx.font = '9px JetBrains Mono, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(lastC.c.toFixed(2), W - CHART_PAD_RIGHT/2, cpY + 3);
+    const last = visible[n-1];
+    const cpY = priceY(last.c);
+    const isUp = last.c >= last.o;
+    const color = isUp ? '#00d4aa' : '#ff3b5c';
+    c.setLineDash([4, 3]);
+    c.strokeStyle = color;
+    c.lineWidth = 1;
+    c.beginPath(); c.moveTo(PAD_LEFT, Math.round(cpY)+0.5); c.lineTo(W - PAD_RIGHT, Math.round(cpY)+0.5); c.stroke();
+    c.setLineDash([]);
+    // Badge
+    c.fillStyle = color;
+    const bw = PAD_RIGHT - 4;
+    c.fillRect(W - PAD_RIGHT + 2, cpY - 9, bw, 18);
+    c.fillStyle = '#0a0e14';
+    c.font = 'bold 10px ' + FONT;
+    c.textAlign = 'center';
+    c.fillText(fmtComma(last.c), W - PAD_RIGHT + 2 + bw/2, cpY + 4);
   }
 
-  // Time axis
-  if (mouseX < 0) {
-    ctx.fillStyle = '#5a6578';
-    ctx.font = '9px JetBrains Mono, monospace';
-    ctx.textAlign = 'center';
-    const step = Math.max(1, Math.floor(n / 6));
-    for (let i = 0; i < n; i += step) {
-      const c = visible[i];
-      const t = new Date(c.time);
-      const label = t.toLocaleString('en-US', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', hour12:false});
-      ctx.fillText(label, candleX(i), H - 6);
+  // ── Time axis labels ──
+  c.font = '9px ' + FONT;
+  c.textAlign = 'center';
+  c.fillStyle = '#4a5568';
+  prevDate = '';
+  for (let i = 0; i < n; i += timeStep) {
+    const bar = visible[i];
+    const t = new Date(bar.time);
+    const et = toET(t);
+    const x = candleCX(i);
+    const timeLabel = pad2(et.getHours()) + ':' + pad2(et.getMinutes());
+    const dateStr = MONS[et.getMonth()] + ' ' + et.getDate();
+    c.fillStyle = '#4a5568';
+    if (dateStr !== prevDate && i > 0) {
+      c.fillText(dateStr, x, H - 2);
+      c.fillText(timeLabel, x, H - 13);
+      prevDate = dateStr;
+    } else {
+      c.fillText(timeLabel, x, H - 7);
+      if (i === 0) prevDate = dateStr;
     }
   }
 
-  // Crosshair
-  if (mouseX >= CHART_PAD_LEFT && mouseX <= W - CHART_PAD_RIGHT && mouseY >= CHART_PAD_TOP && mouseY <= CHART_PAD_TOP + priceH) {
-    // Find hovered candle
-    const ci = Math.floor((mouseX - CHART_PAD_LEFT) / candleW);
-    hoverIndex = Math.max(0, Math.min(ci, n - 1));
-    const hc = visible[hoverIndex];
+  // ── Crosshair ──
+  const inChart = mouseX >= PAD_LEFT && mouseX <= W - PAD_RIGHT && mouseY >= PAD_TOP && mouseY <= PAD_TOP + priceH;
+  if (inChart) {
+    const ci = Math.floor((mouseX - PAD_LEFT) / candleW);
+    hoverIdx = Math.max(0, Math.min(ci, n-1));
+    const hc = visible[hoverIdx];
+    const cx = candleCX(hoverIdx);
 
-    // Vertical line
-    const cx = candleX(hoverIndex);
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = 'rgba(200,208,220,0.3)';
-    ctx.lineWidth = 0.5;
-    ctx.beginPath(); ctx.moveTo(cx, CHART_PAD_TOP); ctx.lineTo(cx, CHART_PAD_TOP + priceH); ctx.stroke();
+    // Vertical line (snap to candle center)
+    c.setLineDash([4, 4]);
+    c.strokeStyle = 'rgba(77,166,255,0.3)';
+    c.lineWidth = 1;
+    c.beginPath(); c.moveTo(Math.round(cx)+0.5, PAD_TOP); c.lineTo(Math.round(cx)+0.5, PAD_TOP + priceH); c.stroke();
 
-    // Horizontal line
-    ctx.beginPath(); ctx.moveTo(CHART_PAD_LEFT, mouseY); ctx.lineTo(W - CHART_PAD_RIGHT, mouseY); ctx.stroke();
-    ctx.setLineDash([]);
+    // Horizontal line (follows mouse Y)
+    c.strokeStyle = 'rgba(77,166,255,0.4)';
+    c.beginPath(); c.moveTo(PAD_LEFT, Math.round(mouseY)+0.5); c.lineTo(W - PAD_RIGHT, Math.round(mouseY)+0.5); c.stroke();
+    c.setLineDash([]);
 
-    // Price badge on Y axis
-    const hoverPrice = hi - ((mouseY - CHART_PAD_TOP) / priceH) * priceRange;
-    ctx.fillStyle = '#2a3545';
-    ctx.fillRect(W - CHART_PAD_RIGHT, mouseY - 8, CHART_PAD_RIGHT - 2, 16);
-    ctx.fillStyle = '#e8ecf2';
-    ctx.font = '9px JetBrains Mono, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(hoverPrice.toFixed(2), W - CHART_PAD_RIGHT/2, mouseY + 3);
+    // Price badge at mouse Y on right axis
+    const hoverPrice = hi - ((mouseY - PAD_TOP) / priceH) * priceRange;
+    const pbw = PAD_RIGHT - 4;
+    c.fillStyle = '#2563eb';
+    c.fillRect(W - PAD_RIGHT + 2, mouseY - 9, pbw, 18);
+    c.fillStyle = '#ffffff';
+    c.font = '10px ' + FONT;
+    c.textAlign = 'center';
+    c.fillText(fmtComma(hoverPrice), W - PAD_RIGHT + 2 + pbw/2, mouseY + 4);
 
-    // Time badge at bottom
-    const t = new Date(hc.time);
-    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const timeStr = `${days[t.getDay()]} ${months[t.getMonth()]} ${String(t.getDate()).padStart(2,'0')} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
-    const tw = ctx.measureText(timeStr).width + 12;
-    ctx.fillStyle = '#2a3545';
-    ctx.fillRect(cx - tw/2, H - CHART_PAD_BOTTOM, tw, 18);
-    ctx.fillStyle = '#e8ecf2';
-    ctx.textAlign = 'center';
-    ctx.fillText(timeStr, cx, H - CHART_PAD_BOTTOM + 12);
+    // Time badge at candle X on bottom axis
+    const ht = new Date(hc.time);
+    const het = toET(ht);
+    const tStr = DAYS[het.getDay()] + ' ' + MONS[het.getMonth()] + ' ' + pad2(het.getDate()) + '  ' + pad2(het.getHours()) + ':' + pad2(het.getMinutes());
+    c.font = '10px ' + FONT;
+    const tw = c.measureText(tStr).width + 14;
+    c.fillStyle = '#2563eb';
+    c.fillRect(cx - tw/2, H - PAD_BOTTOM, tw, PAD_BOTTOM);
+    c.fillStyle = '#ffffff';
+    c.textAlign = 'center';
+    c.fillText(tStr, cx, H - PAD_BOTTOM + 15);
 
-    updateOHLC(hoverIndex, visible);
-  } else {
+    updateOHLC(hoverIdx, visible);
+  } else if (mouseX < 0) {
     updateOHLC(-1);
   }
+
+  // Copy offscreen to visible canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(offscreen, 0, 0);
 }
 
-function updateOHLC(idx, visible) {
-  const src = (selectedTF === '2m') ? candles : (historicalData[selectedTF] || []);
-  const data = (idx >= 0 && visible) ? visible[idx] : (src.length ? src[src.length-1] : null);
-  if (!data) return;
-  const prev = src.length > 1 ? src[src.length-2] : data;
-  const chg = data.c - data.o;
-  const pct = data.o ? (chg/data.o*100) : 0;
-  const cls = chg >= 0 ? 'up' : 'down';
-  document.getElementById('ohlcO').innerHTML = `O <span class="${cls}">${fmt(data.o)}</span>`;
-  document.getElementById('ohlcH').innerHTML = `H <span class="${cls}">${fmt(data.h)}</span>`;
-  document.getElementById('ohlcL').innerHTML = `L <span class="${cls}">${fmt(data.l)}</span>`;
-  document.getElementById('ohlcC').innerHTML = `C <span class="${cls}">${fmt(data.c)}</span>`;
-  document.getElementById('ohlcChg').innerHTML = `<span class="${cls}">${fmtPnl(chg)} (${fmtPnl(pct)}%)</span>`;
-}
-
-// ═══════════════════════════════════════════════════════════
-// SUPPLY/DEMAND ZONES
-// ═══════════════════════════════════════════════════════════
-function detectZones(visible) {
-  const zones = [];
-  if (visible.length < 5) return zones;
-  for (let i = 2; i < visible.length - 2; i++) {
-    const c = visible[i];
-    // Swing high -> supply zone
-    if (c.h > visible[i-1].h && c.h > visible[i-2].h && c.h > visible[i+1].h && c.h > visible[i+2].h) {
-      zones.push({type:'supply', top:c.h, bottom:Math.max(c.o, c.c), startIdx:i-1, endIdx:Math.min(i+2, visible.length-1)});
-    }
-    // Swing low -> demand zone
-    if (c.l < visible[i-1].l && c.l < visible[i-2].l && c.l < visible[i+1].l && c.l < visible[i+2].l) {
-      zones.push({type:'demand', top:Math.min(c.o, c.c), bottom:c.l, startIdx:i-1, endIdx:Math.min(i+2, visible.length-1)});
+// ── Session shading (RTH) ──
+function drawSessionShading(c, visible, candleCX, candleW, n, top, height, W) {
+  for (let i = 0; i < n; i++) {
+    const t = new Date(visible[i].time);
+    if (isRTH(t)) {
+      c.fillStyle = 'rgba(77,166,255,0.03)';
+      c.fillRect(candleCX(i) - candleW/2, top, candleW, height);
     }
   }
-  return zones;
 }
 
-function drawZones(visible, candleX, priceY, n, chartW) {
-  const zones = detectZones(visible);
-  for (const z of zones) {
-    const x1 = candleX(z.startIdx) - (chartW/n)/2;
-    const x2 = candleX(n-1) + (chartW/n)/2;  // extend to right
-    const y1 = priceY(z.top);
-    const y2 = priceY(z.bottom);
-    if (z.type === 'supply') {
-      ctx.fillStyle = 'rgba(255,59,92,0.06)';
-      ctx.strokeStyle = 'rgba(255,59,92,0.15)';
-    } else {
-      ctx.fillStyle = 'rgba(0,212,170,0.06)';
-      ctx.strokeStyle = 'rgba(0,212,170,0.15)';
+// ── Supply/Demand zones ──
+function drawZones(c, visible, candleCX, priceY, n, candleW) {
+  if (visible.length < 5) return;
+  for (let i = 2; i < n - 2; i++) {
+    const bar = visible[i];
+    // Supply (swing high)
+    if (bar.h > visible[i-1].h && bar.h > visible[i-2].h && bar.h > visible[i+1].h && bar.h > visible[i+2].h) {
+      const y1 = priceY(bar.h);
+      const y2 = priceY(Math.max(bar.o, bar.c));
+      const x1 = candleCX(i) - candleW/2;
+      const x2 = candleCX(n-1) + candleW/2;
+      c.fillStyle = 'rgba(255,59,92,0.06)';
+      c.fillRect(x1, y1, x2 - x1, y2 - y1);
+      c.strokeStyle = 'rgba(255,59,92,0.20)';
+      c.lineWidth = 1;
+      c.strokeRect(x1, y1, x2 - x1, y2 - y1);
     }
-    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    // Demand (swing low)
+    if (bar.l < visible[i-1].l && bar.l < visible[i-2].l && bar.l < visible[i+1].l && bar.l < visible[i+2].l) {
+      const y1 = priceY(Math.min(bar.o, bar.c));
+      const y2 = priceY(bar.l);
+      const x1 = candleCX(i) - candleW/2;
+      const x2 = candleCX(n-1) + candleW/2;
+      c.fillStyle = 'rgba(0,212,170,0.06)';
+      c.fillRect(x1, y1, x2 - x1, y2 - y1);
+      c.strokeStyle = 'rgba(0,212,170,0.20)';
+      c.lineWidth = 1;
+      c.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    }
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// TRADE MARKERS
-// ═══════════════════════════════════════════════════════════
-function drawTradeMarkers(visible, candleX, priceY, n) {
+// ── Trade markers ──
+function drawTradeMarkers(c, visible, candleCX, priceY, n) {
   if (!Array.isArray(activeTrades)) return;
-
-  // Match trades to visible candles by time
   for (const trade of activeTrades) {
     if (!trade.ep || !trade.entry_time) continue;
-
-    // Find entry candle index
     let entryIdx = -1;
     const entryTime = new Date(trade.entry_time).getTime();
     for (let i = 0; i < n; i++) {
-      const ct = new Date(visible[i].time).getTime();
-      if (Math.abs(ct - entryTime) < 130000) { entryIdx = i; break; } // within ~2min
+      if (Math.abs(new Date(visible[i].time).getTime() - entryTime) < 130000) { entryIdx = i; break; }
     }
     if (entryIdx < 0) continue;
 
-    const x = candleX(entryIdx);
+    const x = candleCX(entryIdx);
     const y = priceY(trade.ep);
-    const isLong = (trade.dir || '').toLowerCase() === 'long';
+    const isLong = (trade.dir||'').toUpperCase() === 'LONG';
+    const color = isLong ? '#00d4aa' : '#ff3b5c';
 
-    // Arrow marker
-    ctx.fillStyle = isLong ? '#00d4aa' : '#ff3b5c';
-    ctx.beginPath();
-    if (isLong) {
-      ctx.moveTo(x, y); ctx.lineTo(x-5, y+10); ctx.lineTo(x+5, y+10);
-    } else {
-      ctx.moveTo(x, y); ctx.lineTo(x-5, y-10); ctx.lineTo(x+5, y-10);
-    }
-    ctx.fill();
+    // Entry arrow
+    c.fillStyle = color;
+    c.beginPath();
+    if (isLong) { c.moveTo(x, y-2); c.lineTo(x-5, y+8); c.lineTo(x+5, y+8); }
+    else { c.moveTo(x, y+2); c.lineTo(x-5, y-8); c.lineTo(x+5, y-8); }
+    c.fill();
 
-    // If trade has exit info
+    // Exit info
     if (trade.exit_price && trade.exit_time) {
       let exitIdx = -1;
       const exitTime = new Date(trade.exit_time).getTime();
       for (let i = 0; i < n; i++) {
-        const ct = new Date(visible[i].time).getTime();
-        if (Math.abs(ct - exitTime) < 130000) { exitIdx = i; break; }
+        if (Math.abs(new Date(visible[i].time).getTime() - exitTime) < 130000) { exitIdx = i; break; }
       }
       if (exitIdx >= 0) {
-        const ex = candleX(exitIdx);
+        const ex = candleCX(exitIdx);
         const ey = priceY(trade.exit_price);
+        const pnl = trade.unrealized_pnl || 0;
+        const pColor = pnl >= 0 ? '#00d4aa' : '#ff3b5c';
 
-        // Dashed line
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = (trade.unrealized_pnl||0) >= 0 ? '#00d4aa' : '#ff3b5c';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
-        ctx.setLineDash([]);
+        // Connection line
+        c.setLineDash([4, 4]);
+        c.strokeStyle = pColor;
+        c.lineWidth = 1;
+        c.beginPath(); c.moveTo(x, y); c.lineTo(ex, ey); c.stroke();
+        c.setLineDash([]);
 
-        // Exit dot
-        ctx.fillStyle = '#e8ecf2';
-        ctx.beginPath(); ctx.arc(ex, ey, 3, 0, Math.PI*2); ctx.fill();
+        // Exit circle
+        c.fillStyle = pColor;
+        c.beginPath(); c.arc(ex, ey, 3, 0, Math.PI*2); c.fill();
 
         // PnL label
-        const pnl = trade.unrealized_pnl || 0;
-        const holdMs = exitTime - entryTime;
-        const holdMin = Math.round(holdMs / 60000);
-        const label = `${pnl>=0?'+':''}$${pnl.toFixed(0)} · ${holdMin}m`;
-        const mx = (x + ex) / 2;
-        const my = (y + ey) / 2 - 8;
-        ctx.fillStyle = pnl >= 0 ? '#00d4aa' : '#ff3b5c';
-        ctx.font = '9px JetBrains Mono, monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(label, mx, my);
+        const holdMin = Math.round((exitTime - entryTime) / 60000);
+        const label = (pnl>=0?'+':'')+'\u0024'+pnl.toFixed(0)+' \u00b7 '+holdMin+'m';
+        c.font = 'bold 9px ' + FONT;
+        const tw = c.measureText(label).width + 8;
+        const mx = (x+ex)/2, my = (y+ey)/2 - 10;
+        c.fillStyle = pnl >= 0 ? 'rgba(0,212,170,0.85)' : 'rgba(255,59,92,0.85)';
+        c.fillRect(mx - tw/2, my - 7, tw, 14);
+        c.fillStyle = '#ffffff';
+        c.textAlign = 'center';
+        c.fillText(label, mx, my + 3);
       }
     }
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// POSITIONS PANEL
-// ═══════════════════════════════════════════════════════════
-function updatePositions() {
-  const el = document.getElementById('positionsContainer');
-  if (!Array.isArray(activeTrades) || !activeTrades.length) {
-    el.innerHTML = '<div class="no-data">No open positions</div>';
-    return;
-  }
-  el.innerHTML = activeTrades.map(t => {
-    const isLong = (t.dir||'').toLowerCase() === 'long';
-    const pnl = t.unrealized_pnl || 0;
-    const pnlCls = pnl >= 0 ? 'positive' : 'negative';
-    const holdSec = t.entry_time ? Math.floor((Date.now() - new Date(t.entry_time).getTime()) / 1000) : 0;
-    const mm = String(Math.floor(holdSec/60)).padStart(2,'0');
-    const ss = String(holdSec%60).padStart(2,'0');
-    return `<div class="position-card">
-      <div class="pos-dir ${isLong?'long':'short'}">${(t.dir||'?').toUpperCase()} × ${t.contracts||1}</div>
-      <div class="pos-detail">Entry: ${fmt(t.ep)} | Mod: ${fmt(t.modifier||1,2)}x</div>
-      <div class="pos-pnl" style="color:var(--${pnl>=0?'green':'red'})">${fmtPnl(pnl)}</div>
-      <div class="pos-timer">${mm}:${ss}</div>
-    </div>`;
-  }).join('');
-}
-// Refresh hold timers every second
-setInterval(updatePositions, 1000);
+// ── OHLCV Overlay update ──
+function updateOHLC(idx, visible) {
+  const src = getChartCandles();
+  const data = (idx >= 0 && visible) ? visible[idx] : (src.length ? src[src.length-1] : null);
+  if (!data) return;
+  const chg = data.c - data.o;
+  const pct = data.o ? (chg/data.o*100) : 0;
+  const up = chg >= 0;
+  const cls = up ? 'ohlc-up' : 'ohlc-dn';
 
-// ═══════════════════════════════════════════════════════════
-// SAFETY RAILS
-// ═══════════════════════════════════════════════════════════
-function updateSafety() {
-  const s = safety;
-  setSafety('Daily', Math.abs(s.daily_pnl||0), s.daily_limit||500, `$${fmt(Math.abs(s.daily_pnl||0))} / $${s.daily_limit||500}`);
-  setSafety('Consec', s.consec_losses||0, s.max_consec||5, `${s.consec_losses||0} / ${s.max_consec||5}`);
-  setSafety('Pos', s.position_size||0, s.max_position||2, `${s.position_size||0} / ${s.max_position||2}`);
-  const hbAge = s.heartbeat_age_sec || 0;
-  setSafety('HB', Math.min(hbAge, 300), 300, `${fmt(hbAge, 0)}s`);
+  $('oO').textContent = fmtComma(data.o);
+  $('oO').className = cls;
+  $('oH').textContent = fmtComma(data.h);
+  $('oH').className = 'ohlc-up';
+  $('oL').textContent = fmtComma(data.l);
+  $('oL').className = 'ohlc-dn';
+  $('oC').textContent = fmtComma(data.c);
+  $('oC').className = cls;
+  $('oChg').textContent = ' ' + fmtPnl(chg) + ' (' + fmtPnl(pct) + '%)';
+  $('oChg').className = cls;
+  $('oVol').textContent = data.vol ? '  Vol ' + (data.vol||0) : '';
+  $('ohlcDot').className = up ? 'ohlc-up' : 'ohlc-dn';
 }
 
-function setSafety(name, value, max, text) {
-  const pct = max > 0 ? Math.min(100, (value/max)*100) : 0;
-  const bar = document.getElementById('safety'+name+'Bar');
-  const statusEl = document.getElementById('safety'+name+'Status');
-  const textEl = document.getElementById('safety'+name+'Text');
-  bar.style.width = pct + '%';
-  bar.className = 'safety-fill ' + (pct < 60 ? 'safety-ok' : pct < 85 ? 'safety-warn' : 'safety-alert');
-  statusEl.textContent = pct < 85 ? 'OK' : 'ALERT';
-  statusEl.className = 'safety-status ' + (pct < 60 ? 'ok' : pct < 85 ? 'warn' : 'alert');
-  if (textEl) textEl.textContent = text;
-}
-
-// ═══════════════════════════════════════════════════════════
-// MODIFIERS
-// ═══════════════════════════════════════════════════════════
-function updateModifiers() {
-  const m = modifiers;
-  const setMod = (id, obj) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = fmt(obj && obj.value !== undefined ? obj.value : 1.0, 2) + 'x';
-  };
-  setMod('modON', m.overnight);
-  setMod('modFOMC', m.fomc);
-  setMod('modGamma', m.gamma);
-  setMod('modHARRV', m.har_rv);
-  const totalEl = document.getElementById('modTotal');
-  if (totalEl) totalEl.textContent = fmt(m.total || 1.0, 2) + 'x';
-}
-
-// ═══════════════════════════════════════════════════════════
-// DECISIONS TABLE
-// ═══════════════════════════════════════════════════════════
-function updateDecisions() {
-  const body = document.getElementById('decisionsBody');
-  const countEl = document.getElementById('decisionsCount');
-  if (!Array.isArray(decisions) || !decisions.length) {
-    body.innerHTML = '<tr><td colspan="6" class="no-data">No decisions yet</td></tr>';
-    countEl.textContent = '0 approved / 0 rejected';
-    return;
-  }
-
-  const approved = decisions.filter(d => d.decision === 'APPROVED').length;
-  const rejected = decisions.filter(d => d.decision === 'REJECTED').length;
-  countEl.textContent = `${approved} approved / ${rejected} rejected`;
-
-  // Show most recent first
-  const sorted = [...decisions].reverse();
-  body.innerHTML = sorted.map(d => {
-    const t = new Date(d.timestamp);
-    const time = t.toLocaleString('en-US', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
-    const isApproved = d.decision === 'APPROVED';
-    const badge = isApproved ? '<span class="badge-approved">APPROVED</span>' : '<span class="badge-rejected">REJECTED</span>';
-    const score = d.confluence_score != null ? fmt(d.confluence_score, 2) : '--';
-    const reason = d.rejection_stage || (isApproved ? 'Signal approved' : '--');
-    return `<tr>
-      <td style="color:var(--dim)">${time}</td>
-      <td style="color:${d.signal_direction==='LONG'?'var(--green)':'var(--red)'}">${d.signal_direction||'--'}</td>
-      <td>${fmt(d.price_at_signal||0)}</td>
-      <td>${badge}</td>
-      <td>${score}</td>
-      <td style="color:var(--dim);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${reason}</td>
-    </tr>`;
-  }).join('');
-}
-
-// ═══════════════════════════════════════════════════════════
-// AUTO-REFRESH
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════
 fetchData();
 setInterval(fetchData, 3000);
+scheduleRender();
 </script>
 </body>
 </html>"""
