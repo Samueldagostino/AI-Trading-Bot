@@ -81,6 +81,7 @@ from main import TradingOrchestrator, HTF_TIMEFRAMES
 from execution.safety_rails import SafetyRails, SafetyRailsConfig
 from paper_trading_monitor import PaperTradingMonitor
 from live_dashboard import atomic_write_json
+from signals.gex_monitor import GEXMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +212,9 @@ class PaperLiveRunner:
         # Historical bars loaded flag (request ONCE on startup)
         self._historical_loaded = False
 
+        # Track last confluence score for GEX refresh urgency
+        self._last_confluence = 0.0
+
     # ──────────────────────────────────────────────────────────
     # STARTUP
     # ──────────────────────────────────────────────────────────
@@ -224,6 +228,27 @@ class PaperLiveRunner:
         self._bot = TradingOrchestrator(CONFIG)
         await self._bot.initialize(skip_db=True)
         logger.info("TradingOrchestrator initialized (skip_db=True)")
+
+        # a2. Initialize GEX Monitor and inject into modifier engine
+        try:
+            self._gex_monitor = GEXMonitor()
+            if hasattr(self._bot, '_institutional_engine'):
+                self._bot._institutional_engine.gex_monitor = self._gex_monitor
+            # Attempt first GEX fetch (will use mock if no token)
+            gex_result = self._gex_monitor.update()
+            if self._gex_monitor.enabled:
+                logger.info("GEX Monitor: LIVE (Quant Data API)")
+            else:
+                logger.info("GEX Monitor: MOCK (no token configured)")
+            if gex_result:
+                for ticker, data in gex_result.items():
+                    logger.info("  %s: net_gex=%s regime=%s",
+                                ticker.upper(),
+                                data.get("net_gex_display", "N/A"),
+                                data.get("regime", "UNKNOWN"))
+        except Exception as e:
+            logger.warning("GEX Monitor initialization failed: %s (continuing without GEX)", e)
+            self._gex_monitor = None
 
         # b. Connect TWS (or skip for dry-run)
         if not self._dry_run:
@@ -341,11 +366,29 @@ class PaperLiveRunner:
                 logger.warning("Safety rails HALTED trading: %s", status)
             return
 
+        # Refresh GEX data with urgency based on trading state
+        if self._gex_monitor is not None:
+            has_position = (
+                self._bot and self._bot.executor.has_active_trade
+            )
+            if has_position:
+                gex_urgency = "active"
+            elif self._last_confluence > 0.65:
+                gex_urgency = "preflight"
+            else:
+                gex_urgency = "idle"
+            self._gex_monitor.update(urgency=gex_urgency)
+
         # Route through process_bar()
         result = await self._bot.process_bar(bar)
 
         if result:
             action = result.get("action", "")
+
+            # Track confluence score for GEX urgency
+            score = result.get("signal_score", 0)
+            if score:
+                self._last_confluence = score
 
             if action == "entry":
                 # Clamp position size through safety guard
@@ -510,12 +553,12 @@ class PaperLiveRunner:
                 "reason": fomc.get("window", "none"),
             },
             "gamma": {
-                "value": gamma.get("position_multiplier", 1.0),
-                "reason": gamma.get("regime", "unknown"),
+                "value": gamma.get("position_multiplier", gamma.get("position", 1.0)),
+                "reason": gamma.get("reason", gamma.get("regime", "unknown")),
             },
             "har_rv": {
-                "value": vol.get("position_multiplier", 1.0),
-                "reason": vol.get("forecast_label", "normal"),
+                "value": vol.get("position_multiplier", vol.get("position", 1.0)),
+                "reason": vol.get("reason", vol.get("forecast_label", "normal")),
             },
             "total": result.position_multiplier if hasattr(result, 'position_multiplier') else 1.0,
         }
