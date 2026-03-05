@@ -21,6 +21,9 @@ Env vars:
 SECURITY: This module NEVER logs credentials or account numbers.
 """
 
+import nest_asyncio
+nest_asyncio.apply()
+
 import asyncio
 import logging
 import os
