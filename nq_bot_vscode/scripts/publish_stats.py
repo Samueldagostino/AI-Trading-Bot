@@ -47,8 +47,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 ROOT_DIR = PROJECT_DIR.parent  # AI-Trading-Bot root
 LOGS_DIR = PROJECT_DIR / "logs"
-WEBSITE_DATA_DIR = ROOT_DIR / "Website" / "data"
-OUTPUT_FILE = WEBSITE_DATA_DIR / "live_stats.json"
+DOCS_DATA_DIR = ROOT_DIR / "docs" / "data"
+OUTPUT_FILE = DOCS_DATA_DIR / "live_stats.json"
 
 # Account size for percentage calculation (not exposed)
 _ACCOUNT_SIZE = 50_000.0
@@ -177,8 +177,8 @@ def build_sanitized_stats() -> dict:
 
 
 def write_stats(stats: dict) -> None:
-    """Write stats atomically to Website/data/live_stats.json."""
-    WEBSITE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    """Write stats atomically to docs/data/live_stats.json."""
+    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp_path = OUTPUT_FILE.with_suffix(".json.tmp")
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:

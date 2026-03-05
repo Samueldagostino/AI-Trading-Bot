@@ -1,0 +1,72 @@
+{
+  "updated": "2026-03-05T03:28:33.387879+00:00",
+  "status": "LIVE",
+  "bars_processed": 38,
+  "trades_today": 0,
+  "win_rate": 0.0,
+  "profit_factor": 0.0,
+  "session_pnl_pct": 0.0,
+  "signals_rejected": 34,
+  "signals_approved": 16,
+  "htf_bias": "NEUTRAL",
+  "safety_rails": "OK",
+  "modifiers": {
+    "overnight": 1.0,
+    "fomc": 1.0,
+    "gamma": 1.0,
+    "har_rv": 1.0
+  },
+  "last_price": 24493.52,
+  "recent_decisions": [
+    {
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "direction": "LONG",
+      "decision": "APPROVED",
+      "reason": "Approved"
+    },
+    {
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "direction": "LONG",
+      "decision": "APPROVED",
+      "reason": "Approved"
+    },
+    {
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "direction": "LONG",
+      "decision": "APPROVED",
+      "reason": "Approved"
+    },
+    {
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    }
+  ]
+}
