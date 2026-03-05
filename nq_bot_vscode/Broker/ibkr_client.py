@@ -146,7 +146,7 @@ class IBKRClient:
         cid = client_id or self._client_id
 
         try:
-            await self._ib.connectAsync(h, p, clientId=cid)
+            self._ib.connect(h, p, clientId=cid)
             self._reconnect_attempts = 0
             self._last_heartbeat = time.monotonic()
             logger.info("Connected to TWS at %s:%d (clientId=%d)", h, p, cid)
@@ -244,11 +244,21 @@ class IBKRClient:
         self._last_heartbeat = time.monotonic()
         ib_bar = bars[-1]
 
+        # Extract timestamp — RealTimeBar uses .time, HistoricalBar uses .date
+        raw_ts = getattr(ib_bar, "time", None) or getattr(ib_bar, "date", None)
+        if isinstance(raw_ts, datetime):
+            ts = raw_ts.astimezone(timezone.utc) if raw_ts.tzinfo else raw_ts.replace(tzinfo=timezone.utc)
+        elif hasattr(raw_ts, "timestamp"):
+            ts = datetime.fromtimestamp(raw_ts.timestamp(), tz=timezone.utc)
+        else:
+            ts = datetime.now(timezone.utc)
+
+        # Extract open — RealTimeBar uses .open_, HistoricalBar uses .open
+        open_price = getattr(ib_bar, "open_", None) or getattr(ib_bar, "open", None)
+
         bar = Bar(
-            timestamp=datetime.fromtimestamp(
-                ib_bar.time.timestamp(), tz=timezone.utc
-            ) if hasattr(ib_bar.time, 'timestamp') else datetime.now(timezone.utc),
-            open=ib_bar.open_,
+            timestamp=ts,
+            open=open_price,
             high=ib_bar.high,
             low=ib_bar.low,
             close=ib_bar.close,
@@ -435,7 +445,7 @@ class IBKRClient:
             await asyncio.sleep(delay)
 
             try:
-                await self._ib.connectAsync(
+                self._ib.connect(
                     self._host, self._port, clientId=self._client_id
                 )
                 if self._ib.isConnected():
