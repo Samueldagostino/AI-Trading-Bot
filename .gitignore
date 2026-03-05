@@ -46,6 +46,9 @@ docs/viz_data_full.json
 # Log directories
 logs/
 
+# Website live stats (allowed — sanitized, no sensitive data)
+!Website/data/
+
 # TradingView raw data exports
 data/tradingview/*.txt
 data/tradingview/*.csv
