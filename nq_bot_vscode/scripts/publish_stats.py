@@ -137,12 +137,29 @@ def build_sanitized_stats() -> dict:
         if not safety.get("all_ok", True):
             safety_status = "ALERT"
 
-    # Sanitize modifier values (just the multiplier numbers, no reasons)
+    # Sanitize modifier values with reasons (no sensitive data exposed)
+    overnight_mod = modifiers.get("overnight", {})
+    fomc_mod = modifiers.get("fomc", {})
+    gamma_mod = modifiers.get("gamma", {})
+    har_rv_mod = modifiers.get("har_rv", {})
+
     mod_values = {
-        "overnight": round(modifiers.get("overnight", {}).get("value", 1.0), 2),
-        "fomc": round(modifiers.get("fomc", {}).get("value", 1.0), 2),
-        "gamma": round(modifiers.get("gamma", {}).get("value", 1.0), 2),
-        "har_rv": round(modifiers.get("har_rv", {}).get("value", 1.0), 2),
+        "overnight": {
+            "value": round(overnight_mod.get("value", 1.0), 2),
+            "display": f"{round(overnight_mod.get('value', 1.0), 2)}x ({overnight_mod.get('reason', 'neutral')})",
+        },
+        "fomc": {
+            "value": round(fomc_mod.get("value", 1.0), 2),
+            "display": f"{round(fomc_mod.get('value', 1.0), 2)}x ({fomc_mod.get('reason', 'none')})",
+        },
+        "gamma": {
+            "value": round(gamma_mod.get("value", 1.0), 2),
+            "display": f"{round(gamma_mod.get('value', 1.0), 2)}x ({gamma_mod.get('reason', 'unknown')})",
+        },
+        "har_rv": {
+            "value": round(har_rv_mod.get("value", 1.0), 2),
+            "display": f"{round(har_rv_mod.get('value', 1.0), 2)}x ({har_rv_mod.get('reason', 'normal')})",
+        },
     }
 
     # Sanitize recent decisions: direction + decision + reason + time
