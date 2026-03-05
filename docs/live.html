@@ -238,6 +238,7 @@ a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
           ${(d.recent_decisions||[]).length===0?'<div style="color:var(--text2);font-size:12px;padding:12px 0">No decisions yet</div>':''}
           ${(d.recent_decisions||[]).map(r=>`
             <div class="decision-row">
+              <span style="color:var(--text2);min-width:75px">${r.time||''}</span>
               <span class="dir-badge ${r.direction.toLowerCase()}">${r.direction}</span>
               <span class="dec-badge ${r.decision.toLowerCase()}">${r.decision}</span>
               <span class="dec-reason">${r.reason}</span>

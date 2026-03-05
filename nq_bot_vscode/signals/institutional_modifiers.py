@@ -298,20 +298,28 @@ class GammaRegimeModifier:
         """Return position/stop multipliers based on VIX term structure."""
         # Fallback: if VIX data unavailable, return neutral
         if vix_spot is None or vix_front_month is None or vix_second_month is None:
-            logger.warning("VIX data unavailable — gamma modifier neutral")
+            logger.debug("VIX data unavailable — gamma modifier defaults to 1.0")
             return ModifierResult(
+                position_multiplier=1.0,
+                stop_multiplier=1.0,
                 details={
                     "regime": "neutral_fallback",
                     "reason": "VIX data unavailable",
+                    "position": 1.0,
+                    "stop": 1.0,
                 },
             )
 
         if vix_front_month == 0.0:
-            logger.warning("VIX front month is zero — gamma modifier neutral")
+            logger.warning("VIX front month is zero — gamma modifier defaults to 1.0")
             return ModifierResult(
+                position_multiplier=1.0,
+                stop_multiplier=1.0,
                 details={
                     "regime": "neutral_fallback",
                     "reason": "VIX front month zero",
+                    "position": 1.0,
+                    "stop": 1.0,
                 },
             )
 
@@ -410,6 +418,7 @@ class InstitutionalModifierEngine:
         self.gamma = GammaRegimeModifier()
         self.vol_forecaster = vol_forecaster or HARRVForecaster()
         self._enabled = True
+        self._last_result: Optional[ModifierResult] = None
 
         # JSON logging
         if log_dir is None:
@@ -485,6 +494,7 @@ class InstitutionalModifierEngine:
                         "action": "stand_aside",
                     },
                 )
+                self._last_result = combined
                 self._log_calculation(
                     current_time, overnight_result, fomc_result,
                     gamma_result, vol_result, combined,
@@ -531,6 +541,7 @@ class InstitutionalModifierEngine:
             },
         )
 
+        self._last_result = combined
         self._log_calculation(
             current_time, overnight_result, fomc_result,
             gamma_result, vol_result, combined,
