@@ -27,6 +27,9 @@ Port reference:
 SECURITY: No IBKR credentials are stored in code.
 """
 
+import nest_asyncio
+nest_asyncio.apply()
+
 import argparse
 import asyncio
 import logging
@@ -43,6 +46,7 @@ from typing import Optional
 script_dir = Path(__file__).resolve().parent
 project_dir = script_dir.parent
 sys.path.insert(0, str(project_dir))
+sys.path.insert(0, str(script_dir))
 
 # ── Load .env before any project imports ──
 _env_path = project_dir / ".env"
@@ -331,7 +335,7 @@ class IBKRStartupRunner:
     async def _start_trading(self) -> None:
         """Start the paper trading runner."""
         try:
-            from scripts.run_paper_live import PaperLiveRunner
+            from run_paper_live import PaperLiveRunner
 
             self._paper_runner = PaperLiveRunner(
                 dry_run=self._dry_run,
