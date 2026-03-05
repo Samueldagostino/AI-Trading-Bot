@@ -47,8 +47,8 @@ class HARRVForecaster:
 
         # Rolling windows for RV values
         self._daily_history = deque(maxlen=22)  # stores daily RV values
-        self._forecast_history = []  # all forecasts for percentile calc
-        self._log_forecast_history = []  # log(RV) forecasts for percentile calc
+        self._forecast_history = deque(maxlen=252)  # ~1 year of trading days for percentile calc
+        self._log_forecast_history = deque(maxlen=252)
 
     # ------------------------------------------------------------------
     # Public API

@@ -226,6 +226,10 @@ class GEXMonitor:
                             "net": net_strike,
                         })
 
+            if not math.isfinite(total_net_gex):
+                logger.warning("GEX total_net_gex is NaN/Inf for %s — returning None", ticker)
+                return None
+
             display = _format_gex_display(total_net_gex)
             regime = self.classify_regime(total_net_gex)
             walls = self.find_walls(all_strike_data, spot_price)
@@ -252,6 +256,9 @@ class GEXMonitor:
     @staticmethod
     def classify_regime(net_gex: float) -> str:
         """Classify GEX regime based on net gamma exposure."""
+        if not math.isfinite(net_gex):
+            logger.warning("GEX net_gex is NaN/Inf — defaulting to UNKNOWN")
+            return "UNKNOWN"
         if net_gex > 5e9:
             return "STRONG_POSITIVE"
         elif net_gex > 0:
