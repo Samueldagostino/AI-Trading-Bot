@@ -156,8 +156,15 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 
 /* MAIN LAYOUT */
 .main{display:flex;height:calc(100vh - 42px - 52px - 250px);min-height:400px}
-.chart-area{flex:1;background:var(--panel);border-right:1px solid var(--border);position:relative;overflow:hidden}
+.chart-area{flex:1;background:var(--panel);border-right:1px solid var(--border);position:relative;overflow:hidden;display:flex;flex-direction:column}
+.chart-wrap{flex:1;position:relative;overflow:hidden}
 .sidebar{width:230px;background:var(--bg);overflow-y:auto;display:flex;flex-direction:column;gap:1px}
+
+/* TIMEFRAME SELECTOR */
+.tf-bar{display:flex;gap:4px;padding:4px 12px;background:var(--bg);border-bottom:1px solid var(--border)}
+.tf-btn{background:var(--panel);color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:2px 8px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;cursor:pointer;letter-spacing:0.5px;transition:all .15s}
+.tf-btn:hover{color:var(--white);border-color:var(--dim)}
+.tf-btn.active{color:var(--green);border-color:var(--green);background:rgba(0,212,170,0.08)}
 
 /* CHART */
 #chartCanvas{width:100%;height:100%;display:block}
@@ -236,15 +243,27 @@ tr:hover{background:rgba(77,166,255,.05)}
 <div class="main">
   <!-- CHART -->
   <div class="chart-area">
-    <div class="ohlc-overlay" id="ohlcOverlay">
-      <span class="sym">MNQ 2m</span>
-      <span id="ohlcO">O --</span>
-      <span id="ohlcH">H --</span>
-      <span id="ohlcL">L --</span>
-      <span id="ohlcC">C --</span>
-      <span id="ohlcChg">--</span>
+    <div class="tf-bar">
+      <button class="tf-btn" data-tf="1m">1m</button>
+      <button class="tf-btn active" data-tf="2m">2m</button>
+      <button class="tf-btn" data-tf="5m">5m</button>
+      <button class="tf-btn" data-tf="15m">15m</button>
+      <button class="tf-btn" data-tf="30m">30m</button>
+      <button class="tf-btn" data-tf="1H">1H</button>
+      <button class="tf-btn" data-tf="4H">4H</button>
+      <button class="tf-btn" data-tf="1D">1D</button>
     </div>
-    <canvas id="chartCanvas"></canvas>
+    <div class="chart-wrap">
+      <div class="ohlc-overlay" id="ohlcOverlay">
+        <span class="sym" id="tfLabel">MNQ 2m</span>
+        <span id="ohlcO">O --</span>
+        <span id="ohlcH">H --</span>
+        <span id="ohlcL">L --</span>
+        <span id="ohlcC">C --</span>
+        <span id="ohlcChg">--</span>
+      </div>
+      <canvas id="chartCanvas"></canvas>
+    </div>
   </div>
 
   <!-- SIDEBAR -->
@@ -301,6 +320,32 @@ tr:hover{background:rgba(77,166,255,.05)}
 let candles = [], trades = [], activeTrades = [], decisions = [];
 let status = {}, safety = {}, modifiers = {};
 let hoverIndex = -1;
+let selectedTF = '2m';
+let historicalData = {};  // {timeframe: [...candles]}
+
+// ═══════════════════════════════════════════════════════════
+// TIMEFRAME SELECTOR
+// ═══════════════════════════════════════════════════════════
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedTF = btn.dataset.tf;
+    document.getElementById('tfLabel').textContent = 'MNQ ' + selectedTF;
+    fetchHistorical(selectedTF);
+  });
+});
+
+async function fetchHistorical(tf) {
+  try {
+    const res = await fetch('/api/historical?timeframe=' + encodeURIComponent(tf));
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      historicalData[tf] = data;
+      updateChart();
+    }
+  } catch(e) { console.warn('Historical fetch error:', e); }
+}
 
 // ═══════════════════════════════════════════════════════════
 // CLOCK
@@ -318,16 +363,18 @@ updateClock();
 // ═══════════════════════════════════════════════════════════
 async function fetchData() {
   try {
-    const [sRes, dRes, cRes, tRes, mRes, sfRes] = await Promise.all([
+    const [sRes, dRes, cRes, tRes, mRes, sfRes, hRes] = await Promise.all([
       fetch('/api/status').then(r=>r.json()).catch(()=>({})),
       fetch('/api/decisions').then(r=>r.json()).catch(()=>[]),
       fetch('/api/candles').then(r=>r.json()).catch(()=>[]),
       fetch('/api/trades').then(r=>r.json()).catch(()=>[]),
       fetch('/api/modifiers').then(r=>r.json()).catch(()=>({})),
       fetch('/api/safety').then(r=>r.json()).catch(()=>({})),
+      fetch('/api/historical?timeframe=' + encodeURIComponent(selectedTF)).then(r=>r.json()).catch(()=>[]),
     ]);
     status = sRes; decisions = dRes; candles = cRes;
     activeTrades = tRes; modifiers = mRes; safety = sfRes;
+    if (Array.isArray(hRes)) historicalData[selectedTF] = hRes;
     updateUI();
   } catch(e) { console.warn('Fetch error:', e); }
 }
@@ -424,7 +471,17 @@ function drawChart() {
   const H = chartCanvas.height / (window.devicePixelRatio||1);
   ctx.clearRect(0, 0, W, H);
 
-  if (!candles.length) {
+  // Use historical data for selected TF, fall back to live candles for 2m
+  let chartCandles = (selectedTF === '2m') ? candles : (historicalData[selectedTF] || []);
+  // For 2m, merge historical + live (deduplicate by time)
+  if (selectedTF === '2m' && historicalData['2m'] && historicalData['2m'].length) {
+    const liveSet = new Set(candles.map(c => c.time));
+    const merged = [...historicalData['2m'].filter(c => !liveSet.has(c.time)), ...candles];
+    merged.sort((a,b) => new Date(a.time) - new Date(b.time));
+    chartCandles = merged;
+  }
+
+  if (!chartCandles.length) {
     ctx.fillStyle = '#5a6578';
     ctx.font = '12px JetBrains Mono, monospace';
     ctx.textAlign = 'center';
@@ -432,7 +489,7 @@ function drawChart() {
     return;
   }
 
-  const visible = candles.slice(-MAX_VISIBLE);
+  const visible = chartCandles.slice(-MAX_VISIBLE);
   const n = visible.length;
   const chartW = W - CHART_PAD_LEFT - CHART_PAD_RIGHT;
   const chartH = H - CHART_PAD_TOP - CHART_PAD_BOTTOM;
@@ -499,12 +556,11 @@ function drawChart() {
     const top = Math.min(oY, cY);
     const bodyH = Math.max(1, Math.abs(oY - cY));
     if (isUp) {
-      // Hollow green body
-      ctx.strokeStyle = '#00d4aa';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x - bodyW/2, top, bodyW, bodyH);
+      // Solid filled green body
+      ctx.fillStyle = '#00d4aa';
+      ctx.fillRect(x - bodyW/2, top, bodyW, bodyH);
     } else {
-      // Filled red body
+      // Solid filled red body
       ctx.fillStyle = '#ff3b5c';
       ctx.fillRect(x - bodyW/2, top, bodyW, bodyH);
     }
@@ -593,9 +649,10 @@ function drawChart() {
 }
 
 function updateOHLC(idx, visible) {
-  const data = (idx >= 0 && visible) ? visible[idx] : (candles.length ? candles[candles.length-1] : null);
+  const src = (selectedTF === '2m') ? candles : (historicalData[selectedTF] || []);
+  const data = (idx >= 0 && visible) ? visible[idx] : (src.length ? src[src.length-1] : null);
   if (!data) return;
-  const prev = candles.length > 1 ? candles[candles.length-2] : data;
+  const prev = src.length > 1 ? src[src.length-2] : data;
   const chg = data.c - data.o;
   const pct = data.o ? (chg/data.o*100) : 0;
   const cls = chg >= 0 ? 'up' : 'down';
@@ -862,10 +919,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        path = self.path.split("?")[0]
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        path = parsed.path
 
         if path == "/":
             self._send_html(DASHBOARD_HTML)
+            return
+
+        if path == "/api/historical":
+            params = parse_qs(parsed.query)
+            tf = params.get("timeframe", ["2m"])[0]
+            # Sanitize timeframe to prevent path traversal
+            allowed_tfs = {"1m", "2m", "5m", "15m", "30m", "1H", "4H", "1D"}
+            if tf not in allowed_tfs:
+                self._send_json([])
+                return
+            filepath = LOGS_DIR / f"historical_bars_{tf}.json"
+            data = _read_json_file(filepath, "candles", False) if filepath.exists() else []
+            self._send_json(data)
             return
 
         if path in FILE_MAP:
