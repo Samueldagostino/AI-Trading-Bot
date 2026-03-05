@@ -1,7 +1,7 @@
 {
-  "updated": "2026-03-05T12:50:07.585841+00:00",
+  "updated": "2026-03-05T12:51:09.281431+00:00",
   "status": "LIVE",
-  "bars_processed": 70,
+  "bars_processed": 82,
   "trades_today": 0,
   "win_rate": 0.0,
   "profit_factor": 0.0,
@@ -16,7 +16,7 @@
     "gamma": 1.0,
     "har_rv": 1.0
   },
-  "last_price": 25074.25,
+  "last_price": 25066.25,
   "recent_decisions": [
     {
       "direction": "SHORT",
