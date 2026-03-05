@@ -36,6 +36,9 @@ Port reference:
 Requires TWS / IB Gateway running with API access enabled.
 """
 
+import nest_asyncio
+nest_asyncio.apply()
+
 import argparse
 import asyncio
 import json
@@ -56,6 +59,7 @@ from zoneinfo import ZoneInfo
 script_dir = Path(__file__).resolve().parent
 project_dir = script_dir.parent
 sys.path.insert(0, str(project_dir))
+sys.path.insert(0, str(script_dir))
 
 # ── Load .env before any project imports ──
 _env_path = project_dir / ".env"
@@ -74,8 +78,8 @@ from config.settings import CONFIG
 from features.engine import Bar
 from main import TradingOrchestrator, HTF_TIMEFRAMES
 from execution.safety_rails import SafetyRails, SafetyRailsConfig
-from scripts.paper_trading_monitor import PaperTradingMonitor
-from scripts.live_dashboard import atomic_write_json
+from paper_trading_monitor import PaperTradingMonitor
+from live_dashboard import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -731,7 +735,7 @@ All circuit breakers require manual restart after tripping.
     # Use ibkr_startup flow when not in dry-run mode for automated startup
     if not args.dry_run:
         try:
-            from scripts.ibkr_startup import IBKRStartupRunner
+            from ibkr_startup import IBKRStartupRunner
             startup_runner = IBKRStartupRunner(
                 dry_run=False,
                 max_daily_loss=args.max_daily_loss,

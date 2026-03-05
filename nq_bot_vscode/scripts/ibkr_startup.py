@@ -27,6 +27,9 @@ Port reference:
 SECURITY: No IBKR credentials are stored in code.
 """
 
+import nest_asyncio
+nest_asyncio.apply()
+
 import argparse
 import asyncio
 import logging
@@ -43,6 +46,7 @@ from typing import Optional
 script_dir = Path(__file__).resolve().parent
 project_dir = script_dir.parent
 sys.path.insert(0, str(project_dir))
+sys.path.insert(0, str(script_dir))
 
 # ── Load .env before any project imports ──
 _env_path = project_dir / ".env"
@@ -85,25 +89,21 @@ def check_tws_connection(host: str = "127.0.0.1", port: int = 7497, client_id: i
         from Broker.ibkr_client import IBKRClient
 
         client = IBKRClient(host=host, port=port, client_id=client_id)
-        loop = asyncio.new_event_loop()
-        try:
-            connected = loop.run_until_complete(client.connect())
-            if connected:
-                result = {
-                    "connected": True,
-                    "account_type": None,
-                    "error": None,
-                }
-                client.disconnect()
-                return result
-            else:
-                return {
-                    "connected": False,
-                    "account_type": None,
-                    "error": "Connection refused",
-                }
-        finally:
-            loop.close()
+        client._ib.connect(host, port, clientId=client_id)
+        if client._ib.isConnected():
+            result = {
+                "connected": True,
+                "account_type": None,
+                "error": None,
+            }
+            client.disconnect()
+            return result
+        else:
+            return {
+                "connected": False,
+                "account_type": None,
+                "error": "Connection refused",
+            }
     except Exception as e:
         return {
             "connected": False,
@@ -331,7 +331,7 @@ class IBKRStartupRunner:
     async def _start_trading(self) -> None:
         """Start the paper trading runner."""
         try:
-            from scripts.run_paper_live import PaperLiveRunner
+            from run_paper_live import PaperLiveRunner
 
             self._paper_runner = PaperLiveRunner(
                 dry_run=self._dry_run,
@@ -516,7 +516,7 @@ Port reference:
         port=args.port,
     )
 
-    loop = asyncio.new_event_loop()
+    loop = asyncio.get_event_loop()
 
     def _signal_handler():
         logger.info("Shutdown signal received")
@@ -533,8 +533,6 @@ Port reference:
     except Exception:
         logger.critical("UNHANDLED EXCEPTION:\n%s", traceback.format_exc())
         sys.exit(1)
-    finally:
-        loop.close()
 
 
 if __name__ == "__main__":

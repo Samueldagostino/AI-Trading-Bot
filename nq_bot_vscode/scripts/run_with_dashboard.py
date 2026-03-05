@@ -10,6 +10,9 @@ Usage:
     python scripts/run_with_dashboard.py --dry-run --dashboard-port 9090
 """
 
+import nest_asyncio
+nest_asyncio.apply()
+
 import argparse
 import signal
 import subprocess
@@ -21,6 +24,11 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
+
+# Ensure the project root and scripts dir are on sys.path so imports work
+# when running from the nq_bot_vscode directory
+sys.path.insert(0, str(PROJECT_DIR))
+sys.path.insert(0, str(SCRIPT_DIR))
 
 
 def main():
@@ -37,7 +45,7 @@ def main():
     args = parser.parse_args()
 
     # Start dashboard server in background thread
-    from scripts.live_dashboard import DashboardServer
+    from live_dashboard import DashboardServer
 
     dashboard = DashboardServer(port=args.dashboard_port)
     dashboard.start(blocking=False)
