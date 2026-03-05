@@ -1,13 +1,13 @@
 {
-  "updated": "2026-03-05T03:28:33.387879+00:00",
+  "updated": "2026-03-05T12:48:04.422513+00:00",
   "status": "LIVE",
-  "bars_processed": 38,
+  "bars_processed": 45,
   "trades_today": 0,
   "win_rate": 0.0,
   "profit_factor": 0.0,
   "session_pnl_pct": 0.0,
-  "signals_rejected": 34,
-  "signals_approved": 16,
+  "signals_rejected": 50,
+  "signals_approved": 0,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
@@ -16,55 +16,55 @@
     "gamma": 1.0,
     "har_rv": 1.0
   },
-  "last_price": 24493.52,
+  "last_price": 25090.0,
   "recent_decisions": [
     {
-      "direction": "LONG",
+      "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "direction": "LONG",
+      "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "direction": "LONG",
+      "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "direction": "LONG",
+      "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "direction": "LONG",
+      "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "direction": "LONG",
+      "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
     },
     {
-      "direction": "LONG",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     }
