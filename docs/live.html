@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NQ.BOT — Live Status</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0e17;--surface:#111827;--surface2:#1a2332;
+  --border:#1e293b;--text:#94a3b8;--text2:#64748b;
+  --white:#e2e8f0;--green:#22c55e;--green-dim:rgba(34,197,94,.12);
+  --red:#ef4444;--red-dim:rgba(239,68,68,.12);
+  --blue:#3b82f6;--amber:#f59e0b;--amber-dim:rgba(245,158,11,.12);
+  --mono:'JetBrains Mono','Fira Code','Consolas',monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5;min-height:100vh}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+
+/* NAV */
+.nav{position:fixed;top:0;left:0;right:0;height:48px;background:#111317;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:100}
+.nav-logo{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--white);letter-spacing:1.5px}
+.nav-links{display:flex;gap:0}
+.nav-link{font-family:var(--mono);font-size:12px;color:var(--text2);padding:14px 16px;text-decoration:none;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+.nav-link:hover{color:var(--white);text-decoration:none}
+.nav-link.active{color:var(--white);border-bottom-color:var(--green)}
+
+/* LAYOUT */
+.container{max-width:1100px;margin:0 auto;padding:72px 24px 48px}
+
+/* HEADER */
+.live-header{display:flex;align-items:center;gap:16px;margin-bottom:32px;flex-wrap:wrap}
+.live-header h1{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--white);letter-spacing:1px}
+.status-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 14px;border-radius:20px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:1px}
+.status-pill.live{background:var(--green-dim);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+.status-pill.offline{background:rgba(100,116,139,.1);color:var(--text2);border:1px solid var(--border)}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.offline-dot{width:8px;height:8px;border-radius:50%;background:var(--text2)}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{opacity:.6;box-shadow:0 0 0 8px rgba(34,197,94,0)}}
+.updated-label{color:var(--text2);font-family:var(--mono);font-size:11px;margin-left:auto}
+
+/* PRICE BANNER */
+.price-banner{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px 32px;margin-bottom:24px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.price-banner .symbol{font-family:var(--mono);font-size:12px;color:var(--text2);letter-spacing:1px}
+.price-banner .price{font-family:var(--mono);font-size:36px;font-weight:700;color:var(--white);font-variant-numeric:tabular-nums}
+.price-banner .pnl{font-family:var(--mono);font-size:16px;font-weight:600}
+.price-banner .pnl.pos{color:var(--green)}.price-banner .pnl.neg{color:var(--red)}.price-banner .pnl.flat{color:var(--text2)}
+
+/* KPI GRID */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;text-align:center}
+.kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);font-family:var(--mono);margin-bottom:4px}
+.kpi-value{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--white);font-variant-numeric:tabular-nums}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.amber{color:var(--amber)}.kpi-value.blue{color:var(--blue)}
+
+/* PANELS */
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}
+.panel h3{font-family:var(--mono);font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+
+/* MODIFIERS */
+.mod-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(30,41,59,.5)}
+.mod-row:last-child{border-bottom:none}
+.mod-name{color:var(--text);font-family:var(--mono);font-size:12px}
+.mod-val{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--white)}
+
+/* DECISIONS */
+.decision-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(30,41,59,.3);font-family:var(--mono);font-size:11px}
+.decision-row:last-child{border-bottom:none}
+.dir-badge{padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.5px}
+.dir-badge.long{background:var(--green-dim);color:var(--green)}
+.dir-badge.short{background:var(--red-dim);color:var(--red)}
+.dec-badge{padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600}
+.dec-badge.approved{background:var(--green-dim);color:var(--green)}
+.dec-badge.rejected{background:var(--red-dim);color:var(--red)}
+.dec-reason{color:var(--text2);font-size:10px}
+
+/* SAFETY */
+.safety-ok{color:var(--green);font-weight:700}.safety-alert{color:var(--red);font-weight:700}
+
+/* HTF BIAS */
+.bias-badge{display:inline-block;padding:2px 10px;border-radius:4px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px}
+.bias-badge.bullish{background:var(--green-dim);color:var(--green)}
+.bias-badge.bearish{background:var(--red-dim);color:var(--red)}
+.bias-badge.neutral{background:var(--amber-dim);color:var(--amber)}
+
+/* REFRESH BAR */
+.refresh-bar{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.refresh-bar .info{font-family:var(--mono);font-size:11px;color:var(--text2)}
+.refresh-bar .countdown{font-family:var(--mono);font-size:11px;color:var(--text)}
+.progress-track{width:100px;height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-left:12px;display:inline-block;vertical-align:middle}
+.progress-fill{height:100%;background:var(--green);transition:width 1s linear;border-radius:2px}
+
+/* FOOTER */
+.footer{padding:24px 0;margin-top:32px;border-top:1px solid var(--border);color:var(--text2);font-size:11px;text-align:center;font-family:var(--mono)}
+
+/* LOADING */
+.loading{text-align:center;padding:80px 0;color:var(--text2);font-family:var(--mono);font-size:14px}
+.spinner{display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  .panels{grid-template-columns:1fr}
+  .kpi-grid{grid-template-columns:repeat(3,1fr)}
+  .price-banner .price{font-size:28px}
+  .live-header{flex-direction:column;align-items:flex-start;gap:8px}
+  .updated-label{margin-left:0}
+}
+@media(max-width:480px){
+  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .container{padding:64px 16px 32px}
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-logo">NQ TRADING SYSTEM</span>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link">Overview</a>
+    <a href="live.html" class="nav-link active">Live</a>
+    <a href="weekly-dashboard.html" class="nav-link">Weekly</a>
+    <a href="analyzer.html" class="nav-link">Analyzer</a>
+  </div>
+</nav>
+
+<div class="container">
+  <div id="app">
+    <div class="loading"><div class="spinner"></div><br>Connecting to live data...</div>
+  </div>
+  <footer class="footer">
+    Data refreshes every 30s from publish_stats.py &middot; Sanitized: no account numbers, no dollar amounts, no order IDs
+  </footer>
+</div>
+
+<script>
+(function(){
+  const DATA_URL = 'data/live_stats.json';
+  const POLL_INTERVAL = 30; // seconds
+  let countdown = POLL_INTERVAL;
+  let data = null;
+
+  function $(id){ return document.getElementById(id); }
+
+  function formatTime(iso){
+    if(!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZoneName:'short'});
+  }
+
+  function pnlClass(v){ return v > 0 ? 'pos' : v < 0 ? 'neg' : 'flat'; }
+  function pnlSign(v){ return v > 0 ? '+' : ''; }
+
+  function render(d){
+    const isLive = d.status === 'LIVE';
+    const app = $('app');
+    app.innerHTML = `
+      <div class="live-header">
+        <h1>LIVE STATUS</h1>
+        <span class="status-pill ${isLive?'live':'offline'}">
+          <span class="${isLive?'live-dot':'offline-dot'}"></span>
+          ${d.status}
+        </span>
+        <span class="updated-label">Updated: ${formatTime(d.updated)}</span>
+      </div>
+
+      <div class="refresh-bar">
+        <span class="info">Auto-refresh every ${POLL_INTERVAL}s &middot; publish_stats.py pushes every 60s</span>
+        <span class="countdown">Next refresh: <span id="cd">${countdown}</span>s
+          <span class="progress-track"><span class="progress-fill" id="pbar" style="width:100%"></span></span>
+        </span>
+      </div>
+
+      <div class="price-banner">
+        <span class="symbol">MNQ LAST</span>
+        <span class="price">${d.last_price ? d.last_price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</span>
+        <span class="pnl ${pnlClass(d.session_pnl_pct)}">Session: ${pnlSign(d.session_pnl_pct)}${d.session_pnl_pct.toFixed(3)}%</span>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Trades Today</div>
+          <div class="kpi-value">${d.trades_today}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Win Rate</div>
+          <div class="kpi-value ${d.win_rate>=55?'green':d.win_rate>=45?'amber':'red'}">${d.win_rate.toFixed(1)}%</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Profit Factor</div>
+          <div class="kpi-value ${d.profit_factor>=1.5?'green':d.profit_factor>=1.0?'amber':'red'}">${d.profit_factor.toFixed(2)}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Bars Processed</div>
+          <div class="kpi-value blue">${d.bars_processed}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Signals Approved</div>
+          <div class="kpi-value green">${d.signals_approved}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Signals Rejected</div>
+          <div class="kpi-value red">${d.signals_rejected}</div>
+        </div>
+      </div>
+
+      <div class="panels">
+        <div class="panel">
+          <h3>System Status</h3>
+          <div class="mod-row">
+            <span class="mod-name">HTF Bias</span>
+            <span class="bias-badge ${d.htf_bias.toLowerCase()}">${d.htf_bias}</span>
+          </div>
+          <div class="mod-row">
+            <span class="mod-name">Safety Rails</span>
+            <span class="${d.safety_rails==='OK'?'safety-ok':'safety-alert'}">${d.safety_rails}</span>
+          </div>
+          <div class="mod-row">
+            <span class="mod-name">Approval Rate</span>
+            <span class="mod-val">${d.signals_approved+d.signals_rejected>0?((d.signals_approved/(d.signals_approved+d.signals_rejected))*100).toFixed(1):'0.0'}%</span>
+          </div>
+          <div style="margin-top:16px">
+            <h3>Modifiers</h3>
+            ${Object.entries(d.modifiers||{}).map(([k,v])=>`
+              <div class="mod-row">
+                <span class="mod-name">${k}</span>
+                <span class="mod-val" style="color:${v!==1.0?'var(--amber)':'var(--white)'}">${v.toFixed(2)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Recent Decisions (last ${(d.recent_decisions||[]).length})</h3>
+          ${(d.recent_decisions||[]).length===0?'<div style="color:var(--text2);font-size:12px;padding:12px 0">No decisions yet</div>':''}
+          ${(d.recent_decisions||[]).map(r=>`
+            <div class="decision-row">
+              <span class="dir-badge ${r.direction.toLowerCase()}">${r.direction}</span>
+              <span class="dec-badge ${r.decision.toLowerCase()}">${r.decision}</span>
+              <span class="dec-reason">${r.reason}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function fetchData(){
+    fetch(DATA_URL + '?t=' + Date.now())
+      .then(r=>{
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      })
+      .then(d=>{
+        data = d;
+        countdown = POLL_INTERVAL;
+        render(d);
+      })
+      .catch(e=>{
+        console.error('Fetch error:',e);
+        if(!data){
+          $('app').innerHTML = `
+            <div class="loading" style="color:var(--red)">
+              Unable to load live data.<br>
+              <span style="font-size:12px;color:var(--text2)">Make sure publish_stats.py is running and has pushed data to docs/data/live_stats.json</span>
+            </div>`;
+        }
+      });
+  }
+
+  // Countdown timer
+  setInterval(function(){
+    countdown--;
+    var el = document.getElementById('cd');
+    var bar = document.getElementById('pbar');
+    if(el) el.textContent = Math.max(countdown,0);
+    if(bar) bar.style.width = Math.max((countdown/POLL_INTERVAL)*100,0)+'%';
+    if(countdown <= 0){
+      countdown = POLL_INTERVAL;
+      fetchData();
+    }
+  }, 1000);
+
+  // Initial fetch
+  fetchData();
+})();
+</script>
+</body>
+</html>
