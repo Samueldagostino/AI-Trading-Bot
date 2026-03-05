@@ -84,6 +84,21 @@ from live_dashboard import atomic_write_json
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
+# HISTORICAL BACKFILL CONFIGURATION
+# ═══════════════════════════════════════════════════════════════
+HISTORICAL_TF_CONFIG = {
+    "1m":  {"durationStr": "3600 S",  "barSizeSetting": "1 min"},
+    "2m":  {"durationStr": "7200 S",  "barSizeSetting": "2 mins"},
+    "5m":  {"durationStr": "1 D",     "barSizeSetting": "5 mins"},
+    "15m": {"durationStr": "2 D",     "barSizeSetting": "15 mins"},
+    "30m": {"durationStr": "5 D",     "barSizeSetting": "30 mins"},
+    "1H":  {"durationStr": "10 D",    "barSizeSetting": "1 hour"},
+    "4H":  {"durationStr": "30 D",    "barSizeSetting": "4 hours"},
+    "1D":  {"durationStr": "180 D",   "barSizeSetting": "1 day"},
+}
+HISTORICAL_BARS_COUNT = 200
+
+# ═══════════════════════════════════════════════════════════════
 # PATHS
 # ═══════════════════════════════════════════════════════════════
 LOGS_DIR = project_dir / "logs"
@@ -192,6 +207,9 @@ class PaperLiveRunner:
         self._candle_buffer: list = []
         self._candle_buffer_max = 200
 
+        # Historical bars loaded flag (request ONCE on startup)
+        self._historical_loaded = False
+
     # ──────────────────────────────────────────────────────────
     # STARTUP
     # ──────────────────────────────────────────────────────────
@@ -226,7 +244,11 @@ class PaperLiveRunner:
         # d. Monitor already initialized in __init__
         logger.info("Paper trading monitor initialized")
 
-        # e. Start main loop
+        # e. Historical data backfill (ONCE on startup)
+        logger.info("Loading historical bars for dashboard...")
+        await self._backfill_historical_bars()
+
+        # f. Start main loop
         logger.info("=" * 60)
         logger.info("  PAPER TRADING ACTIVE")
         logger.info("=" * 60)
@@ -382,6 +404,9 @@ class PaperLiveRunner:
         # Append candle to buffer for dashboard
         self._append_candle(bar)
 
+        # Append to historical 2m file (so dashboard has seamless data)
+        self._append_live_bar_to_historical(bar)
+
         # Write dashboard state files (lightweight, atomic)
         self._write_dashboard_state(bar)
 
@@ -508,6 +533,138 @@ class PaperLiveRunner:
             "heartbeat_age_sec": round(sr.heartbeat.seconds_since_last, 1),
             "all_ok": sr.check_all(),
         }
+
+    # ──────────────────────────────────────────────────────────
+    # HISTORICAL DATA BACKFILL
+    # ──────────────────────────────────────────────────────────
+
+    async def _backfill_historical_bars(self) -> None:
+        """
+        Request historical bars from IBKR for each timeframe.
+        Called ONCE on startup. Stores results in logs/historical_bars_{tf}.json.
+        """
+        if self._historical_loaded:
+            return
+
+        if self._dry_run:
+            logger.info("Dry-run mode: generating synthetic historical bars")
+            self._generate_synthetic_historical()
+            self._historical_loaded = True
+            return
+
+        if not self._ibkr_client:
+            logger.warning("No IBKR client — skipping historical backfill")
+            self._historical_loaded = True
+            return
+
+        try:
+            ib = self._ibkr_client._ib  # Access underlying ib_insync.IB instance
+            from ib_insync import Future
+
+            contract = Future("MNQ", exchange="CME")
+            ib.qualifyContracts(contract)
+
+            for tf_name, tf_cfg in HISTORICAL_TF_CONFIG.items():
+                try:
+                    logger.info("Requesting historical bars: %s (%s, %s)",
+                                tf_name, tf_cfg["durationStr"], tf_cfg["barSizeSetting"])
+
+                    bars = ib.reqHistoricalData(
+                        contract,
+                        endDateTime="",
+                        durationStr=tf_cfg["durationStr"],
+                        barSizeSetting=tf_cfg["barSizeSetting"],
+                        whatToShow="TRADES",
+                        useRTH=False,
+                        formatDate=1,
+                    )
+
+                    candle_list = []
+                    for b in bars[-HISTORICAL_BARS_COUNT:]:
+                        candle_list.append({
+                            "time": str(b.date) if hasattr(b, 'date') else str(b.time),
+                            "o": round(float(b.open), 2),
+                            "h": round(float(b.high), 2),
+                            "l": round(float(b.low), 2),
+                            "c": round(float(b.close), 2),
+                            "vol": int(b.volume) if b.volume >= 0 else 0,
+                        })
+
+                    filepath = LOGS_DIR / f"historical_bars_{tf_name}.json"
+                    atomic_write_json(filepath, candle_list)
+                    logger.info("  %s: %d bars saved to %s", tf_name, len(candle_list), filepath.name)
+
+                    # Brief pause to avoid IBKR pacing violations
+                    await asyncio.sleep(1.0)
+
+                except Exception as e:
+                    logger.warning("Failed to fetch historical %s: %s", tf_name, e)
+
+        except ImportError:
+            logger.warning("ib_insync not available — skipping historical backfill")
+        except Exception as e:
+            logger.warning("Historical backfill error: %s", e)
+
+        self._historical_loaded = True
+        logger.info("Historical backfill complete")
+
+    def _generate_synthetic_historical(self) -> None:
+        """Generate synthetic historical data for dry-run mode."""
+        import math
+
+        base_price = 24500.0
+
+        for tf_name in HISTORICAL_TF_CONFIG:
+            candle_list = []
+            price = base_price
+            for i in range(HISTORICAL_BARS_COUNT):
+                move = random.gauss(0, 6.0) + math.sin(i * 0.05) * 2.0
+                price += move
+                o = round(price, 2)
+                h = round(o + abs(random.gauss(0, 4.0)), 2)
+                l = round(o - abs(random.gauss(0, 4.0)), 2)
+                c = round(o + random.gauss(0, 3.0), 2)
+                h = max(h, o, c)
+                l = min(l, o, c)
+                vol = max(100, int(random.gauss(1500, 500)))
+                # Create plausible timestamps going backwards
+                ts = datetime.now(timezone.utc) - timedelta(minutes=(HISTORICAL_BARS_COUNT - i) * 2)
+                candle_list.append({
+                    "time": ts.isoformat(),
+                    "o": o, "h": h, "l": l, "c": c, "vol": vol,
+                })
+
+            filepath = LOGS_DIR / f"historical_bars_{tf_name}.json"
+            atomic_write_json(filepath, candle_list)
+            logger.info("  %s: %d synthetic bars saved", tf_name, len(candle_list))
+
+    def _append_live_bar_to_historical(self, bar: Bar) -> None:
+        """Append a new live 2m bar to the historical_bars_2m.json file."""
+        filepath = LOGS_DIR / "historical_bars_2m.json"
+        try:
+            if filepath.exists():
+                text = filepath.read_text(encoding="utf-8").strip()
+                data = json.loads(text) if text else []
+            else:
+                data = []
+
+            candle = {
+                "time": bar.timestamp.isoformat(),
+                "o": round(bar.open, 2),
+                "h": round(bar.high, 2),
+                "l": round(bar.low, 2),
+                "c": round(bar.close, 2),
+                "vol": bar.volume,
+            }
+            data.append(candle)
+
+            # Keep only last 500 bars to prevent unbounded growth
+            if len(data) > 500:
+                data = data[-500:]
+
+            atomic_write_json(filepath, data)
+        except Exception as e:
+            logger.debug("Error appending live bar to historical: %s", e)
 
     # ──────────────────────────────────────────────────────────
     # MAIN LOOP
