@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 
 from config.fomc_calendar import hours_until_next_fomc
 from signals.volatility_forecast import HARRVForecaster
+from signals.gex_monitor import GEXMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -412,13 +413,17 @@ class InstitutionalModifierEngine:
         atr_for_runner = atr * result.runner_multiplier
     """
 
-    def __init__(self, log_dir: Optional[str] = None, vol_forecaster: Optional[HARRVForecaster] = None):
+    def __init__(self, log_dir: Optional[str] = None,
+                 vol_forecaster: Optional[HARRVForecaster] = None,
+                 gex_monitor: Optional[GEXMonitor] = None):
         self.overnight = OvernightBiasModifier()
         self.fomc = FOMCDriftModifier()
         self.gamma = GammaRegimeModifier()
         self.vol_forecaster = vol_forecaster or HARRVForecaster()
+        self.gex_monitor = gex_monitor or GEXMonitor()
         self._enabled = True
         self._last_result: Optional[ModifierResult] = None
+        self._last_diagnostic_time: Optional[float] = None
 
         # JSON logging
         if log_dir is None:
@@ -426,6 +431,7 @@ class InstitutionalModifierEngine:
         self._log_dir = log_dir
         self._log_path = Path(log_dir) / "institutional_modifiers_log.json"
         self._decision_log_path = Path(log_dir) / "modifier_decisions.json"
+        self._diagnostics_path = Path(log_dir) / "modifier_diagnostics.json"
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -468,6 +474,26 @@ class InstitutionalModifierEngine:
         gamma_result = self.gamma.calculate(
             current_time, vix_spot, vix_front_month, vix_second_month,
         )
+
+        # GEX-based gamma overlay: if GEX monitor has data, use it to
+        # produce the gamma modifier value (overrides VIX-proxy when available)
+        gex_mod = self.gex_monitor.get_modifier_value()
+        if gex_mod["value"] != 1.0 or "unavailable" not in gex_mod.get("reason", "unavailable"):
+            # GEX data available — use it for gamma position multiplier
+            gex_result = self.gex_monitor.get_cached()
+            gamma_result = ModifierResult(
+                position_multiplier=gex_mod["value"],
+                stop_multiplier=1.0,
+                details={
+                    "regime": (gex_result or {}).get("qqq", {}).get("regime",
+                              (gex_result or {}).get("spy", {}).get("regime", "unknown")),
+                    "reason": gex_mod["reason"],
+                    "gex_source": "quantdata",
+                    "position": gex_mod["value"],
+                    "stop": 1.0,
+                },
+            )
+
         vol_mod = self.vol_forecaster.get_volatility_modifier()
         vol_result = ModifierResult(
             position_multiplier=vol_mod["position"],
@@ -476,6 +502,9 @@ class InstitutionalModifierEngine:
                 "position": vol_mod["position"],
                 "stop": vol_mod["stop"],
                 "has_enough_data": self.vol_forecaster.has_enough_data,
+                "reason": vol_mod.get("reason", "normal"),
+                "percentile": vol_mod.get("percentile"),
+                "log_rv": vol_mod.get("log_rv"),
             },
         )
 
@@ -618,3 +647,61 @@ class InstitutionalModifierEngine:
                 f.write(json.dumps(decision_entry) + "\n")
         except OSError as e:
             logger.warning(f"Failed to write modifier decision log: {e}")
+
+        # Write modifier diagnostics every 5 minutes
+        import time as _time
+        now = _time.time()
+        if self._last_diagnostic_time is None or (now - self._last_diagnostic_time) >= 300:
+            self._last_diagnostic_time = now
+            self._write_diagnostics(current_time, overnight, fomc, gamma, vol, combined)
+
+    def _write_diagnostics(
+        self,
+        current_time: datetime,
+        overnight: ModifierResult,
+        fomc: ModifierResult,
+        gamma: ModifierResult,
+        vol: ModifierResult,
+        combined: ModifierResult,
+    ) -> None:
+        """Write detailed modifier diagnostics with reasons to logs/modifier_diagnostics.json."""
+        gex_cached = self.gex_monitor.get_cached() if self.gex_monitor else None
+
+        diag = {
+            "timestamp": current_time.isoformat(),
+            "har_rv": {
+                "value": round(vol.position_multiplier, 2),
+                "reason": vol.details.get("reason", "normal"),
+                "rv_daily": round(self.vol_forecaster.rv_daily, 4) if self.vol_forecaster else 0,
+                "rv_weekly": round(self.vol_forecaster.rv_weekly, 4) if self.vol_forecaster else 0,
+                "rv_monthly": round(self.vol_forecaster.rv_monthly, 4) if self.vol_forecaster else 0,
+                "percentile": vol.details.get("percentile"),
+            },
+            "fomc": {
+                "value": round(fomc.position_multiplier, 2) if not fomc.stand_aside else 0,
+                "reason": f"Window: {fomc.details.get('window', 'n/a')}, hours: {fomc.details.get('hours_until_fomc', 'n/a')}",
+            },
+            "overnight": {
+                "value": round(overnight.position_multiplier, 2),
+                "reason": f"{overnight.details.get('classification', 'neutral')}, "
+                          f"gap {overnight.details.get('overnight_bps', 0):.0f}bps",
+            },
+            "gamma": {
+                "value": round(gamma.position_multiplier, 2),
+                "reason": gamma.details.get("reason", gamma.details.get("regime", "unknown")),
+                "spy_net_gex": (gex_cached or {}).get("spy", {}).get("net_gex"),
+                "qqq_net_gex": (gex_cached or {}).get("qqq", {}).get("net_gex"),
+                "regime": gamma.details.get("regime", "unknown"),
+                "gamma_flip": (gex_cached or {}).get("qqq", {}).get("gamma_flip_strike"),
+            },
+            "total": {
+                "value": round(combined.position_multiplier, 2),
+                "reason": "Product of all modifiers",
+            },
+        }
+
+        try:
+            with open(self._diagnostics_path, "a") as f:
+                f.write(json.dumps(diag) + "\n")
+        except OSError as e:
+            logger.warning(f"Failed to write modifier diagnostics: {e}")

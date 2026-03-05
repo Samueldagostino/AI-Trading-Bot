@@ -186,6 +186,23 @@ async def get_health():
     return JSONResponse(DEMO_STATE["health"])
 
 
+@app.get("/api/gamma")
+async def get_gamma():
+    """Gamma exposure (GEX) data from Quant Data API."""
+    gamma_state = DEMO_STATE.get("gamma", {
+        "enabled": False,
+        "regime": "UNKNOWN",
+        "net_gex": 0,
+        "net_gex_display": "N/A",
+        "gamma_flip": None,
+        "call_wall": None,
+        "put_wall": None,
+        "modifier_value": 1.0,
+        "last_update": None,
+    })
+    return JSONResponse(gamma_state)
+
+
 @app.post("/api/kill-switch", dependencies=[Depends(_require_token)])
 async def toggle_kill_switch():
     """Manually activate kill switch (requires Bearer token)."""

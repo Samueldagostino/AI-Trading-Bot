@@ -99,6 +99,56 @@ def _read_json_file(filepath: Path, default_key: str, is_jsonl: bool = False, li
         return DEFAULTS[default_key]
 
 
+def _get_gamma_data() -> dict:
+    """Read latest GEX data from gamma_levels.json for the /api/gamma endpoint."""
+    default = {
+        "enabled": False,
+        "regime": "UNKNOWN",
+        "net_gex": 0,
+        "net_gex_display": "N/A",
+        "gamma_flip": None,
+        "call_wall": None,
+        "put_wall": None,
+        "modifier_value": 1.0,
+        "last_update": None,
+    }
+    gamma_path = LOGS_DIR / "gamma_levels.json"
+    modifier_path = LOGS_DIR / "modifier_state.json"
+
+    try:
+        # Read latest gamma levels entry
+        if gamma_path.exists():
+            text = gamma_path.read_text(encoding="utf-8").strip()
+            if text:
+                lines = text.split("\n")
+                last_line = lines[-1].strip()
+                if last_line:
+                    entry = json.loads(last_line)
+                    # Prefer QQQ (MNQ relevance), fall back to SPY
+                    data = entry.get("qqq", entry.get("spy", {}))
+                    if data:
+                        default["enabled"] = True
+                        default["regime"] = data.get("regime", "UNKNOWN")
+                        default["net_gex"] = data.get("net_gex", 0)
+                        default["net_gex_display"] = data.get("net_gex_display", "N/A")
+                        default["gamma_flip"] = data.get("gamma_flip_strike")
+                        default["call_wall"] = data.get("nearest_call_wall")
+                        default["put_wall"] = data.get("nearest_put_wall")
+                        default["last_update"] = data.get("timestamp")
+
+        # Read modifier value from modifier_state
+        if modifier_path.exists():
+            mod_text = modifier_path.read_text(encoding="utf-8").strip()
+            if mod_text:
+                mod_data = json.loads(mod_text)
+                default["modifier_value"] = mod_data.get("gamma", {}).get("value", 1.0)
+
+    except (json.JSONDecodeError, OSError, KeyError) as e:
+        logger.warning("Error reading gamma data: %s", e)
+
+    return default
+
+
 def atomic_write_json(filepath: Path, data) -> None:
     """Write JSON atomically: write to .tmp then rename."""
     tmp_path = filepath.with_suffix(".json.tmp")
@@ -1176,6 +1226,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             filepath = LOGS_DIR / f"historical_bars_{tf}.json"
             data = _read_json_file(filepath, "candles", False) if filepath.exists() else []
             self._send_json(data)
+            return
+
+        if path == "/api/gamma":
+            self._send_json(_get_gamma_data())
             return
 
         if path in FILE_MAP:

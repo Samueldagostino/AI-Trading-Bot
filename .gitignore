@@ -53,3 +53,9 @@ logs/
 data/tradingview/*.txt
 data/tradingview/*.csv
 *.txt
+
+# Quant Data API credentials (NEVER commit)
+config/quantdata_token.txt
+config/quantdata_instance_id.txt
+logs/gamma_levels.json
+logs/modifier_diagnostics.json
