@@ -181,10 +181,23 @@ class IBKRClient:
     def get_contract(self, symbol: str = "MNQ", exchange: str = "CME") -> Contract:
         """
         Get MNQ futures contract definition.
-        Auto-rolls to front month via qualifyContracts.
+        Requests all available expiries via reqContractDetails, then picks the
+        front month (nearest lastTradeDateOrContractMonth) to avoid the
+        "Ambiguous contract" error from TWS.
         """
-        contract = Future(symbol, exchange=exchange)
-        qualified = self._ib.qualifyContracts(contract)
+        # Use an under-specified contract to fetch all available expiries
+        generic = Future(symbol, exchange=exchange)
+        details_list = self._ib.reqContractDetails(generic)
+
+        if not details_list:
+            raise ValueError(f"Could not find contract details for {symbol} on {exchange}")
+
+        # Sort by expiry and pick the nearest (front month)
+        details_list.sort(key=lambda d: d.contract.lastTradeDateOrContractMonth)
+        front = details_list[0].contract
+
+        # Qualify the specific front-month contract
+        qualified = self._ib.qualifyContracts(front)
         if qualified:
             self._contract = qualified[0]
             logger.info(

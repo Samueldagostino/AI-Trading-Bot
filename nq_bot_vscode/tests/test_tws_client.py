@@ -68,10 +68,19 @@ def mock_ib():
     ib.isConnected.return_value = True
     ib.connectAsync = AsyncMock()
     ib.disconnect = MagicMock()
-    ib.qualifyContracts = MagicMock(return_value=[MagicMock(
+    front_contract = MagicMock(
         symbol="MNQ", exchange="CME", conId=12345,
         lastTradeDateOrContractMonth="202603", localSymbol="MNQH6",
-    )])
+    )
+    back_contract = MagicMock(
+        symbol="MNQ", exchange="CME", conId=12346,
+        lastTradeDateOrContractMonth="202606", localSymbol="MNQM6",
+    )
+    ib.reqContractDetails = MagicMock(return_value=[
+        MagicMock(contract=front_contract),
+        MagicMock(contract=back_contract),
+    ])
+    ib.qualifyContracts = MagicMock(return_value=[front_contract])
     ib.reqRealTimeBars = MagicMock()
     ib.placeOrder = MagicMock()
     ib.cancelOrder = MagicMock()
@@ -392,17 +401,45 @@ class TestOrderSubmission:
 
 class TestContract:
     def test_qualify_mnq(self, tws_client, mock_ib):
-        """Contract qualification for MNQ."""
+        """Contract qualification for MNQ picks front month."""
         contract = tws_client.get_contract("MNQ", "CME")
         assert contract.symbol == "MNQ"
         assert contract.exchange == "CME"
+        assert contract.lastTradeDateOrContractMonth == "202603"
+        mock_ib.reqContractDetails.assert_called_once()
         mock_ib.qualifyContracts.assert_called_once()
+
+    def test_picks_nearest_expiry(self, tws_client, mock_ib):
+        """Front month is selected even when details arrive out of order."""
+        front = MagicMock(
+            symbol="MNQ", exchange="CME", conId=12345,
+            lastTradeDateOrContractMonth="202603",
+        )
+        back = MagicMock(
+            symbol="MNQ", exchange="CME", conId=12346,
+            lastTradeDateOrContractMonth="202606",
+        )
+        # Return in reverse order — back month first
+        mock_ib.reqContractDetails.return_value = [
+            MagicMock(contract=back),
+            MagicMock(contract=front),
+        ]
+        mock_ib.qualifyContracts.return_value = [front]
+
+        contract = tws_client.get_contract("MNQ", "CME")
+        assert contract.lastTradeDateOrContractMonth == "202603"
+
+    def test_no_details_raises(self, tws_client, mock_ib):
+        """Raises ValueError if no contract details found."""
+        mock_ib.reqContractDetails.return_value = []
+        with pytest.raises(ValueError, match="Could not find contract details"):
+            tws_client.get_contract("INVALID", "CME")
 
     def test_qualify_fails(self, tws_client, mock_ib):
         """Raises ValueError if qualification fails."""
         mock_ib.qualifyContracts.return_value = []
         with pytest.raises(ValueError, match="Could not qualify"):
-            tws_client.get_contract("INVALID", "CME")
+            tws_client.get_contract("MNQ", "CME")
 
 
 # ================================================================
