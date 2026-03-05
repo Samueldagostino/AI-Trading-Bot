@@ -76,6 +76,7 @@ if _env_path.exists():
 
 from config.settings import CONFIG
 from features.engine import Bar
+from features.htf_engine import HTFBar
 from main import TradingOrchestrator, HTF_TIMEFRAMES
 from execution.safety_rails import SafetyRails, SafetyRailsConfig
 from paper_trading_monitor import PaperTradingMonitor
@@ -542,6 +543,8 @@ class PaperLiveRunner:
         """
         Request historical bars from IBKR for each timeframe.
         Called ONCE on startup. Stores results in logs/historical_bars_{tf}.json.
+        Also feeds bars through the HTF engine to seed multi-timeframe bias,
+        initializes HAR-RV from daily bars, and seeds overnight modifier.
         """
         if self._historical_loaded:
             return
@@ -550,6 +553,7 @@ class PaperLiveRunner:
             logger.info("Dry-run mode: generating synthetic historical bars")
             self._generate_synthetic_historical()
             self._historical_loaded = True
+            self._log_htf_biases()
             return
 
         if not self._ibkr_client:
@@ -580,9 +584,11 @@ class PaperLiveRunner:
                     )
 
                     candle_list = []
+                    htf_bars_fed = 0
                     for b in bars[-HISTORICAL_BARS_COUNT:]:
+                        bar_time = b.date if hasattr(b, 'date') else b.time
                         candle_list.append({
-                            "time": str(b.date) if hasattr(b, 'date') else str(b.time),
+                            "time": str(bar_time),
                             "o": round(float(b.open), 2),
                             "h": round(float(b.high), 2),
                             "l": round(float(b.low), 2),
@@ -590,9 +596,25 @@ class PaperLiveRunner:
                             "vol": int(b.volume) if b.volume >= 0 else 0,
                         })
 
+                        # Feed through HTF engine if this is an HTF timeframe
+                        self._feed_htf_bar(tf_name, bar_time,
+                                           float(b.open), float(b.high),
+                                           float(b.low), float(b.close),
+                                           int(b.volume) if b.volume >= 0 else 0)
+                        htf_bars_fed += 1
+
                     filepath = LOGS_DIR / f"historical_bars_{tf_name}.json"
                     atomic_write_json(filepath, candle_list)
-                    logger.info("  %s: %d bars saved to %s", tf_name, len(candle_list), filepath.name)
+                    logger.info("  %s: %d bars saved, %d fed to HTF engine",
+                                tf_name, len(candle_list), htf_bars_fed)
+
+                    # Initialize HAR-RV from daily bars
+                    if tf_name == "1D" and self._bot and candle_list:
+                        self._init_har_rv_from_daily(candle_list)
+
+                    # Initialize overnight modifier from daily bars
+                    if tf_name == "1D" and self._bot and candle_list:
+                        self._init_overnight_from_daily(candle_list)
 
                     # Brief pause to avoid IBKR pacing violations
                     await asyncio.sleep(1.0)
@@ -606,17 +628,114 @@ class PaperLiveRunner:
             logger.warning("Historical backfill error: %s", e)
 
         self._historical_loaded = True
-        logger.info("Historical backfill complete")
+        self._log_htf_biases()
+
+    def _feed_htf_bar(self, tf_name: str, bar_time, o: float, h: float,
+                      l: float, c: float, vol: int) -> None:
+        """Feed a single historical bar into the HTF engine."""
+        if not self._bot:
+            return
+
+        # Convert timestamp
+        if isinstance(bar_time, datetime):
+            ts = bar_time if bar_time.tzinfo else bar_time.replace(tzinfo=timezone.utc)
+        elif isinstance(bar_time, str):
+            try:
+                ts = datetime.fromisoformat(bar_time)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                ts = datetime.now(timezone.utc)
+        else:
+            ts = datetime.now(timezone.utc)
+
+        htf_bar = HTFBar(
+            timestamp=ts,
+            open=round(o, 2),
+            high=round(max(h, o, c), 2),
+            low=round(min(l, o, c), 2),
+            close=round(c, 2),
+            volume=max(vol, 1),
+        )
+        try:
+            self._bot.htf_engine.update_bar(tf_name, htf_bar)
+        except Exception as e:
+            logger.debug("HTF feed error for %s: %s", tf_name, e)
+
+    def _init_har_rv_from_daily(self, daily_candles: list) -> None:
+        """Initialize the HAR-RV forecaster from historical daily bars."""
+        try:
+            forecaster = self._bot._institutional_engine.vol_forecaster
+            import math
+            for i in range(1, len(daily_candles)):
+                prev_c = daily_candles[i - 1].get("c", 0)
+                curr_c = daily_candles[i].get("c", 0)
+                if prev_c > 0 and curr_c > 0:
+                    log_return = math.log(curr_c / prev_c)
+                    daily_rv = log_return ** 2
+                    forecaster.update(daily_rv)
+            if forecaster.has_enough_data:
+                forecast = forecaster.forecast()
+                logger.info("HAR-RV initialized: %d days of data, forecast=%.6f",
+                            len(forecaster._daily_history), forecast)
+            else:
+                logger.info("HAR-RV seeded with %d days (need %d for forecasting)",
+                            len(forecaster._daily_history), forecaster.MIN_HISTORY)
+        except Exception as e:
+            logger.warning("HAR-RV initialization failed: %s", e)
+
+    def _init_overnight_from_daily(self, daily_candles: list) -> None:
+        """Seed the overnight modifier with the most recent previous close."""
+        try:
+            if len(daily_candles) >= 2:
+                overnight = self._bot._institutional_engine.overnight
+                prev_close = daily_candles[-2].get("c", 0)
+                if prev_close > 0:
+                    overnight._prev_day_close = prev_close
+                    # Use yesterday's date
+                    try:
+                        ts_str = daily_candles[-2].get("time", "")
+                        prev_date = datetime.fromisoformat(str(ts_str)).date()
+                    except (ValueError, TypeError):
+                        prev_date = (datetime.now(ET_TZ) - timedelta(days=1)).date()
+                    overnight._prev_close_date = prev_date
+                    logger.info("Overnight modifier seeded: prev_close=%.2f", prev_close)
+        except Exception as e:
+            logger.warning("Overnight modifier initialization failed: %s", e)
+
+    def _log_htf_biases(self) -> None:
+        """Log HTF biases after backfill."""
+        if not self._bot:
+            return
+        try:
+            bias = self._bot.htf_engine.get_bias(datetime.now(timezone.utc))
+            bias_parts = []
+            for tf in ["1D", "4H", "1H", "30m", "15m", "5m"]:
+                b = bias.tf_biases.get(tf, "N/A")
+                bias_parts.append(f"{tf}={b.upper() if b != 'N/A' else 'N/A'}")
+            logger.info("HTF backfill complete: %s", ", ".join(bias_parts))
+            logger.info("HTF consensus: %s (strength=%.2f)",
+                         bias.consensus_direction.upper(), bias.consensus_strength)
+            # Cache the bias on the bot
+            self._bot._htf_bias = bias
+        except Exception as e:
+            logger.warning("HTF bias summary failed: %s", e)
 
     def _generate_synthetic_historical(self) -> None:
         """Generate synthetic historical data for dry-run mode."""
         import math
 
         base_price = 24500.0
+        # Timeframe-specific intervals in minutes for timestamp generation
+        tf_minutes = {
+            "1m": 1, "2m": 2, "5m": 5, "15m": 15, "30m": 30,
+            "1H": 60, "4H": 240, "1D": 1440,
+        }
 
         for tf_name in HISTORICAL_TF_CONFIG:
             candle_list = []
             price = base_price
+            interval = tf_minutes.get(tf_name, 2)
             for i in range(HISTORICAL_BARS_COUNT):
                 move = random.gauss(0, 6.0) + math.sin(i * 0.05) * 2.0
                 price += move
@@ -628,15 +747,27 @@ class PaperLiveRunner:
                 l = min(l, o, c)
                 vol = max(100, int(random.gauss(1500, 500)))
                 # Create plausible timestamps going backwards
-                ts = datetime.now(timezone.utc) - timedelta(minutes=(HISTORICAL_BARS_COUNT - i) * 2)
+                ts = datetime.now(timezone.utc) - timedelta(
+                    minutes=(HISTORICAL_BARS_COUNT - i) * interval)
                 candle_list.append({
                     "time": ts.isoformat(),
                     "o": o, "h": h, "l": l, "c": c, "vol": vol,
                 })
 
+                # Feed through HTF engine
+                self._feed_htf_bar(tf_name, ts, o, h, l, c, vol)
+
             filepath = LOGS_DIR / f"historical_bars_{tf_name}.json"
             atomic_write_json(filepath, candle_list)
-            logger.info("  %s: %d synthetic bars saved", tf_name, len(candle_list))
+            logger.info("  %s: %d synthetic bars saved + fed to HTF engine", tf_name, len(candle_list))
+
+            # Initialize HAR-RV from daily bars
+            if tf_name == "1D" and self._bot and candle_list:
+                self._init_har_rv_from_daily(candle_list)
+
+            # Initialize overnight modifier from daily bars
+            if tf_name == "1D" and self._bot and candle_list:
+                self._init_overnight_from_daily(candle_list)
 
     def _append_live_bar_to_historical(self, bar: Bar) -> None:
         """Append a new live 2m bar to the historical_bars_2m.json file."""

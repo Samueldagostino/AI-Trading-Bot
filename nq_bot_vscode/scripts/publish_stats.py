@@ -145,11 +145,26 @@ def build_sanitized_stats() -> dict:
         "har_rv": round(modifiers.get("har_rv", {}).get("value", 1.0), 2),
     }
 
-    # Sanitize recent decisions: direction + decision + reason ONLY
-    # NO prices, NO order IDs, NO trade IDs, NO timestamps with seconds
+    # Sanitize recent decisions: direction + decision + reason + time
+    # NO prices, NO order IDs, NO trade IDs
     recent_decisions = []
     for d in decisions[-10:]:
+        # Extract timestamp and format as HH:MM:SS ET
+        ts_str = d.get("timestamp", "")
+        time_et = ""
+        if ts_str:
+            try:
+                from zoneinfo import ZoneInfo
+                dt = datetime.fromisoformat(ts_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                et = dt.astimezone(ZoneInfo("America/New_York"))
+                time_et = et.strftime("%H:%M:%S ET")
+            except (ValueError, TypeError):
+                time_et = ""
+
         sanitized = {
+            "time": time_et,
             "direction": d.get("signal_direction", ""),
             "decision": d.get("decision", ""),
             "reason": d.get("rejection_stage", "Signal approved")
