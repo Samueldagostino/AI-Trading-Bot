@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T09:02:17.258913+00:00",
+  "updated": "2026-03-06T09:03:55.687557+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 6,
@@ -28,64 +28,64 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25070.75,
+  "last_price": 25058.25,
   "recent_decisions": [
     {
-      "time": "04:00:20 ET",
+      "time": "04:02:30 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "04:00:25 ET",
+      "time": "04:02:35 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "04:00:30 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "04:00:36 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "04:00:50 ET",
+      "time": "04:02:50 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "04:01:05 ET",
+      "time": "04:02:55 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "04:03:00 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "04:01:20 ET",
+      "time": "04:03:05 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "04:03:35 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "04:01:45 ET",
+      "time": "04:03:40 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "04:01:55 ET",
+      "time": "04:03:45 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "04:02:01 ET",
+      "time": "04:03:50 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
