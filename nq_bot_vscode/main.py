@@ -132,6 +132,7 @@ class TradingOrchestrator:
         self._htf_bars_processed = 0
         self._current_regime = "unknown"
         self._execution_tf = "2m"     # Default execution timeframe
+        self._last_trading_date = None  # Track session boundaries for VWAP reset
 
         # Shadow-trade rejection capture (set by ReplaySimulator)
         self._last_rejection = None   # Populated at each rejection point
@@ -238,6 +239,14 @@ class TradingOrchestrator:
         self._last_bar = bar
         self._last_rejection = None  # Clear previous rejection
         action_result = None
+
+        # === SESSION BOUNDARY DETECTION — reset VWAP at new trading day ===
+        bar_et = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
+        bar_date = bar_et.date()
+        if self._last_trading_date is not None and bar_date != self._last_trading_date:
+            self.feature_engine.reset_session()
+            logger.info("Session boundary: VWAP/delta reset for new day %s", bar_date)
+        self._last_trading_date = bar_date
 
         # === 0. INSTITUTIONAL MODIFIER STATE UPDATE (every bar) ===
         if self._modifiers_enabled:
@@ -400,8 +409,11 @@ class TradingOrchestrator:
             entry_direction = "long" if sweep_signal.direction == "LONG" else "short"
             entry_score = sweep_signal.score
             entry_source = "sweep"
-            # Use sweep's stop price for tighter risk
-            sweep_stop_override = abs(bar.close - sweep_signal.stop_price)
+            # Use sweep's stop price for tighter risk — validate first
+            if sweep_signal.stop_price and sweep_signal.stop_price > 0:
+                sweep_stop_override = abs(bar.close - sweep_signal.stop_price)
+            else:
+                sweep_stop_override = None  # Fall back to ATR-based stop
             logger.info(
                 f"SWEEP SIGNAL: {entry_direction} | "
                 f"Score: {sweep_signal.score:.2f} | "

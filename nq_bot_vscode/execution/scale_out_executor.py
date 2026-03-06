@@ -265,8 +265,8 @@ class ScaleOutExecutor:
 
         trade.entry_price = fill_price
         trade.entry_time = now
-        trade.c1_best_price = fill_price
-        trade.c2_best_price = fill_price
+        trade.c1_best_price = fill_price  # Initialize to entry price
+        trade.c2_best_price = fill_price  # Initialize to entry price
         trade._set_phase(ScaleOutPhase.PHASE_1)
 
     async def _live_enter(self, trade: ScaleOutTrade) -> None:
@@ -283,6 +283,9 @@ class ScaleOutExecutor:
 
         if result.get("success"):
             trade._set_phase(ScaleOutPhase.PHASE_1)
+            # Initialize best prices to entry price
+            trade.c1_best_price = trade.entry_price
+            trade.c2_best_price = trade.entry_price
             # Store order IDs for modification later
             c1_order = result.get("c1_order", {})
             c2_order = result.get("c2_order", {})
@@ -350,8 +353,6 @@ class ScaleOutExecutor:
         if direction == "long":
             trade.c1_best_price = max(trade.c1_best_price, price)
         else:
-            if trade.c1_best_price == 0:
-                trade.c1_best_price = price
             trade.c1_best_price = min(trade.c1_best_price, price)
 
         # --- Compute unrealized C1 profit ---
@@ -390,7 +391,7 @@ class ScaleOutExecutor:
         if direction == "long":
             trade.c2_best_price = max(trade.c2_best_price, price)
         else:
-            trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
+            trade.c2_best_price = min(trade.c2_best_price, price)
 
         return None
 
@@ -469,7 +470,7 @@ class ScaleOutExecutor:
         if direction == "long":
             trade.c2_best_price = max(trade.c2_best_price, price)
         else:
-            trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
+            trade.c2_best_price = min(trade.c2_best_price, price)
         return None
 
     async def _manage_runner(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
@@ -487,28 +488,36 @@ class ScaleOutExecutor:
         if direction == "long":
             trade.c2_best_price = max(trade.c2_best_price, price)
         else:
-            if trade.c2_best_price == 0:
-                trade.c2_best_price = price
             trade.c2_best_price = min(trade.c2_best_price, price)
 
         # --- Update trailing stop ---
         if cfg.c2_trailing_stop_enabled:
             new_trail = self._compute_trailing_stop(trade, price)
-            
-            # Trail only moves in favorable direction
-            if direction == "long" and new_trail > trade.c2.stop_price:
-                trade.c2.stop_price = round(new_trail, 2)
-                trade.c2_trailing_stop = trade.c2.stop_price
-                
-                if not self.config.execution.paper_trading and self.broker and trade.c2.stop_order_id:
-                    await self.broker.modify_stop(trade.c2.stop_order_id, trade.c2.stop_price)
-                    
-            elif direction == "short" and (new_trail < trade.c2.stop_price or trade.c2.stop_price == 0):
-                trade.c2.stop_price = round(new_trail, 2)
-                trade.c2_trailing_stop = trade.c2.stop_price
 
+            # Trail only moves in favorable direction
+            should_update = False
+            if direction == "long" and new_trail > trade.c2.stop_price:
+                should_update = True
+            elif direction == "short" and new_trail < trade.c2.stop_price:
+                should_update = True
+
+            if should_update:
+                new_stop_rounded = round(new_trail, 2)
+
+                # Update broker FIRST — only update local state on success
                 if not self.config.execution.paper_trading and self.broker and trade.c2.stop_order_id:
-                    await self.broker.modify_stop(trade.c2.stop_order_id, trade.c2.stop_price)
+                    try:
+                        await self.broker.modify_stop(trade.c2.stop_order_id, new_stop_rounded)
+                    except Exception as e:
+                        logger.warning(
+                            "Broker stop modification failed — skipping local update: %s", e
+                        )
+                        # Skip local update to avoid split-brain
+                        should_update = False
+
+                if should_update:
+                    trade.c2.stop_price = new_stop_rounded
+                    trade.c2_trailing_stop = trade.c2.stop_price
 
         # --- Check C2 STOP ---
         stop_hit = False

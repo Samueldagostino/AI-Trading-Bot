@@ -335,31 +335,39 @@ class RiskEngine:
 
     def _compute_size_multiplier(self, vix: float, current_time: datetime) -> float:
         """
-        Compute a multiplicative factor to reduce position size
-        based on current conditions. Always <= 1.0.
+        Compute a reduction factor for position size based on current
+        conditions. Always <= 1.0.
+
+        Uses min(factors) instead of multiplying all factors together.
+        Multiplicative chaining was too aggressive — worst case produced
+        0.01875 which rounds to 0 contracts, killing the strategy.
+        Taking the single worst factor prevents compounding.
         """
-        multiplier = 1.0
+        factors = []
 
         # Overnight reduction
         if self.state.is_overnight and self.config.reduce_size_overnight:
-            multiplier *= 0.5
+            factors.append(0.5)
 
         # VIX-based reduction
         if vix > self.config.max_vix_for_full_size:
             vix_factor = max(0.3, 1.0 - (vix - self.config.max_vix_for_full_size) / 30)
-            multiplier *= vix_factor
+            factors.append(vix_factor)
 
         # Loss streak reduction (gradual)
         if self.state.consecutive_losses >= 3:
             streak_factor = max(0.25, 1.0 - (self.state.consecutive_losses - 2) * 0.15)
-            multiplier *= streak_factor
+            factors.append(streak_factor)
 
         # Drawdown reduction
         if self.state.current_drawdown_pct >= 5.0:
             dd_factor = max(0.25, 1.0 - (self.state.current_drawdown_pct - 5.0) / 10)
-            multiplier *= dd_factor
+            factors.append(dd_factor)
 
-        return round(min(multiplier, 1.0), 2)
+        if not factors:
+            return 1.0
+
+        return round(min(factors), 2)
 
     # ================================================================
     # Trade Outcome Recording
@@ -414,12 +422,29 @@ class RiskEngine:
         logger.critical(f"Resume at: {self.state.kill_switch_resume_at}")
 
     def _deactivate_kill_switch(self) -> None:
-        """Deactivate kill switch after cooldown."""
+        """Deactivate kill switch after cooldown.
+
+        Only reset consecutive_losses if that was the trigger.
+        If triggered by drawdown, the drawdown condition may still be
+        true and resetting losses would cause an immediate re-trigger
+        loop when the drawdown check fires again on the next
+        evaluate_trade() call.  Instead, reset the peak equity to
+        current equity so the drawdown percentage resets.
+        """
+        triggered_by_losses = "Consecutive losses" in self.state.kill_switch_reason
         self.state.kill_switch_active = False
         self.state.kill_switch_reason = ""
         self.state.kill_switch_resume_at = None
-        # Reset consecutive losses to prevent immediate re-trigger
-        self.state.consecutive_losses = 0
+        if triggered_by_losses:
+            # Reset consecutive losses to prevent immediate re-trigger
+            self.state.consecutive_losses = 0
+        else:
+            # Drawdown-triggered: reset peak equity to current equity
+            # so the drawdown percentage starts fresh after cooldown
+            self.state.peak_equity = self.state.current_equity
+            self.state.current_drawdown_pct = 0.0
+            self.state.max_drawdown_pct = max(self.state.max_drawdown_pct,
+                                               self.state.current_drawdown_pct)
 
     def _can_resume(self, current_time: datetime) -> bool:
         """Check if kill switch cooldown has elapsed."""
