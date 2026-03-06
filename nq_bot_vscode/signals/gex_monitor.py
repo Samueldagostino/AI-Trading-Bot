@@ -1,9 +1,14 @@
 """
-GEX Monitor — Quant Data API Integration
-==========================================
-Fetches and processes Gamma Exposure (GEX) data from Quant Data API.
-When no API token is configured, operates in MOCK mode with realistic
+GEX Monitor — IBKR Options Chain + Quant Data API Fallback
+============================================================
+Computes Gamma Exposure (GEX) from IBKR SPX options chain data.
+Falls back to Quant Data API when IBKR is unavailable.
+When neither is available, operates in MOCK mode with realistic
 synthetic data for dry-run testing.
+
+GEX computation (naive):
+  Per-strike GEX = gamma * OI * 100 * spot^2 * 0.01
+  Net GEX = sum(call GEX) - sum(put GEX) across strikes within 5% of spot
 
 GEX regime classification drives the gamma modifier:
   - STRONG_POSITIVE:  dealers dampen moves   -> reduce size (0.80x)
@@ -87,13 +92,14 @@ def _format_gex_display(net_gex: float) -> str:
 
 
 class GEXMonitor:
-    """Fetches and processes Gamma Exposure data from Quant Data API."""
+    """Computes Gamma Exposure from IBKR options chain or Quant Data API."""
 
     def __init__(
         self,
         token_file: str = TOKEN_FILE,
         instance_id_file: str = INSTANCE_ID_FILE,
         log_dir: Optional[str] = None,
+        ibkr_client=None,
     ):
         self._token = self._load_file(token_file)
         self._instance_id = self._load_file(instance_id_file)
@@ -104,6 +110,7 @@ class GEXMonitor:
             and self._token != ""
         )
         self._mock_cycle = 0
+        self._ibkr_client = ibkr_client
 
         # Log directory for gamma_levels.json
         if log_dir is None:
@@ -112,9 +119,13 @@ class GEXMonitor:
         self._gamma_log_path = Path(log_dir) / "gamma_levels.json"
         Path(log_dir).mkdir(parents=True, exist_ok=True)
 
+    def set_ibkr_client(self, ibkr_client) -> None:
+        """Set or update the IBKR client reference for options chain queries."""
+        self._ibkr_client = ibkr_client
+
     @property
     def enabled(self) -> bool:
-        return self._enabled
+        return self._enabled or self._ibkr_client is not None
 
     @staticmethod
     def _load_file(path: str) -> str:
@@ -144,6 +155,173 @@ class GEXMonitor:
             "Origin": "https://v3.quantdata.us",
         }
 
+    # ── IBKR Options Chain GEX ──────────────────────────────────
+
+    def fetch_gex_from_ibkr(self) -> Optional[dict]:
+        """
+        Fetch SPX options chain from IBKR and compute naive GEX locally.
+
+        GEX per strike = gamma * OI * 100 * spot^2 * 0.01
+        Net GEX = sum(call GEX) - sum(put GEX) across strikes within 5% of spot.
+        """
+        if not self._ibkr_client:
+            return None
+
+        try:
+            ib = self._ibkr_client._ib
+            if not ib.isConnected():
+                logger.warning("IBKR not connected — skipping GEX from options chain")
+                return None
+
+            from ib_insync import Index, Option
+
+            # Request SPX spot price
+            spx = Index("SPX", "CBOE")
+            ib.qualifyContracts(spx)
+            [ticker] = ib.reqTickers(spx)
+            spot = ticker.marketPrice()
+            if not spot or not math.isfinite(spot) or spot <= 0:
+                spot = ticker.close
+            if not spot or not math.isfinite(spot) or spot <= 0:
+                logger.warning("Could not get SPX spot price for GEX computation")
+                return None
+            spot = float(spot)
+
+            # Get option chains for SPX
+            chains = ib.reqSecDefOptParams(spx.symbol, "", spx.secType, spx.conId)
+            if not chains:
+                logger.warning("No option chains returned for SPX")
+                return None
+
+            # Pick CBOE/SMART chain with nearest expirations
+            chain = None
+            for c in chains:
+                if c.exchange in ("CBOE", "SMART"):
+                    chain = c
+                    break
+            if chain is None:
+                chain = chains[0]
+
+            # Filter strikes within 5% of spot
+            strike_min = spot * (1 - STRIKE_RANGE_PCT)
+            strike_max = spot * (1 + STRIKE_RANGE_PCT)
+            valid_strikes = sorted(
+                s for s in chain.strikes if strike_min <= s <= strike_max
+            )
+
+            if not valid_strikes:
+                logger.warning("No SPX strikes within %.0f%% of spot %.2f",
+                               STRIKE_RANGE_PCT * 100, spot)
+                return None
+
+            # Pick nearest expirations
+            sorted_expirations = sorted(chain.expirations)[:NEAREST_EXPIRATIONS]
+
+            # Build option contracts for all strike/expiry combos
+            contracts = []
+            for exp in sorted_expirations:
+                for strike in valid_strikes:
+                    for right in ("C", "P"):
+                        opt = Option("SPX", exp, strike, right, "CBOE")
+                        contracts.append(opt)
+
+            # Qualify in batch
+            qualified = ib.qualifyContracts(*contracts)
+
+            if not qualified:
+                logger.warning("Could not qualify any SPX option contracts")
+                return None
+
+            # Request market data for all qualified contracts
+            tickers = ib.reqTickers(*qualified)
+
+            total_call_gex = 0.0
+            total_put_gex = 0.0
+            strikes_analyzed = 0
+            all_strike_data = []
+            strike_gex_map: Dict[float, float] = {}
+
+            for t in tickers:
+                contract = t.contract
+                gamma = None
+                oi = None
+
+                # Get gamma from model greeks or last greeks
+                greeks = t.modelGreeks or t.lastGreeks
+                if greeks:
+                    gamma = greeks.gamma
+                    oi = greeks.undPrice  # Not OI — we need OI from summary
+
+                # Try to get open interest from the ticker summary
+                if hasattr(t, 'openInterest') and t.openInterest:
+                    oi_val = float(t.openInterest)
+                else:
+                    # Fallback: use volume as proxy if OI not available
+                    oi_val = float(t.volume) if t.volume and t.volume > 0 else 0.0
+
+                if gamma is None or not math.isfinite(gamma) or oi_val <= 0:
+                    continue
+
+                # Naive GEX: gamma * OI * 100 * spot^2 * 0.01
+                strike_gex = float(gamma) * oi_val * 100.0 * (spot ** 2) * 0.01
+                strike_price = float(contract.strike)
+                strikes_analyzed += 1
+
+                if contract.right == "C":
+                    total_call_gex += strike_gex
+                else:  # Put
+                    total_put_gex += strike_gex
+
+                # Accumulate per-strike for wall/flip detection
+                if strike_price not in strike_gex_map:
+                    strike_gex_map[strike_price] = 0.0
+                if contract.right == "C":
+                    strike_gex_map[strike_price] += strike_gex
+                else:
+                    strike_gex_map[strike_price] -= strike_gex
+
+            # Net GEX = sum(call GEX) - sum(put GEX)
+            net_gex = total_call_gex - total_put_gex
+
+            if not math.isfinite(net_gex):
+                logger.warning("IBKR GEX computation resulted in NaN/Inf")
+                return None
+
+            for strike_price, net in sorted(strike_gex_map.items()):
+                all_strike_data.append({"strike": strike_price, "net": net})
+
+            display = _format_gex_display(net_gex)
+            regime = self.classify_regime(net_gex)
+            walls = self.find_walls(all_strike_data, spot)
+            gamma_flip = self.find_gamma_flip(all_strike_data, spot)
+
+            logger.info(
+                "IBKR GEX computed: SPX spot=%.2f, net_gex=%s, regime=%s, "
+                "strikes=%d, expirations=%d",
+                spot, display, regime, strikes_analyzed, len(sorted_expirations),
+            )
+
+            return {
+                "ticker": "SPX",
+                "spot_price": round(spot, 2),
+                "net_gex": net_gex,
+                "net_gex_display": display,
+                "regime": regime,
+                "gamma_flip_strike": gamma_flip,
+                "nearest_call_wall": walls.get("call_wall"),
+                "nearest_put_wall": walls.get("put_wall"),
+                "expirations_included": len(sorted_expirations),
+                "strikes_analyzed": strikes_analyzed,
+                "source": "ibkr",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except Exception as e:
+            logger.warning("IBKR GEX computation failed: %s", e)
+            return None
+
+    # ── Quant Data API (fallback) ───────────────────────────────
+
     def fetch_gex_data(self, ticker: str = "SPY") -> Optional[dict]:
         """
         Fetch raw GEX data from Quant Data API.
@@ -163,9 +341,9 @@ class GEXMonitor:
                 timeout=10,
             )
 
-            if resp.status_code in (401, 403):
+            if resp.status_code in (401, 403, 404):
                 logger.warning(
-                    "GEX API auth failed (HTTP %d) for %s — returning None",
+                    "GEX API failed (HTTP %d) for %s — returning None",
                     resp.status_code, ticker,
                 )
                 return None
@@ -246,6 +424,7 @@ class GEXMonitor:
                 "nearest_put_wall": walls.get("put_wall"),
                 "expirations_included": len(nearest),
                 "strikes_analyzed": strikes_analyzed,
+                "source": "quantdata",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -278,8 +457,12 @@ class GEXMonitor:
         if not self._last_result:
             return {"value": 1.0, "reason": "GEX data unavailable"}
 
-        # Use QQQ as primary if available, else SPY
-        result = self._last_result.get("qqq") or self._last_result.get("spy")
+        # Use SPX (IBKR) if available, else QQQ/SPY from Quant Data
+        result = (
+            self._last_result.get("spx")
+            or self._last_result.get("qqq")
+            or self._last_result.get("spy")
+        )
         if not result:
             return {"value": 1.0, "reason": "GEX data unavailable"}
 
@@ -341,6 +524,12 @@ class GEXMonitor:
     def update(self, urgency: str = "idle") -> Optional[dict]:
         """
         Fetch fresh GEX data if refresh interval has elapsed.
+
+        Priority:
+          1. IBKR options chain (SPX) — primary
+          2. Quant Data API (SPY/QQQ) — fallback
+          3. Mock data — dry-run
+
         Returns cached result if too soon. Caches and logs result.
 
         Args:
@@ -356,11 +545,18 @@ class GEXMonitor:
             return self._last_result
 
         results = {}
-        for ticker in TICKERS:
-            raw = self.fetch_gex_data(ticker)
-            computed = self.compute_net_gex(raw, ticker)
-            if computed:
-                results[ticker.lower()] = computed
+
+        # Primary: try IBKR options chain for SPX
+        ibkr_result = self.fetch_gex_from_ibkr()
+        if ibkr_result:
+            results["spx"] = ibkr_result
+        else:
+            # Fallback: Quant Data API for SPY/QQQ
+            for ticker in TICKERS:
+                raw = self.fetch_gex_data(ticker)
+                computed = self.compute_net_gex(raw, ticker)
+                if computed:
+                    results[ticker.lower()] = computed
 
         if results:
             self._last_result = results
