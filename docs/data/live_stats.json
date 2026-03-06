@@ -1,13 +1,13 @@
 {
-  "updated": "2026-03-06T08:09:38.006317+00:00",
+  "updated": "2026-03-06T08:11:18.728098+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 4,
   "win_rate": 50.0,
   "profit_factor": 0.53,
   "session_pnl_pct": -0.024,
-  "signals_rejected": 50,
-  "signals_approved": 0,
+  "signals_rejected": 49,
+  "signals_approved": 1,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
@@ -28,14 +28,8 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25095.5,
+  "last_price": 25102.25,
   "recent_decisions": [
-    {
-      "time": "03:07:45 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
     {
       "time": "03:08:10 ET",
       "direction": "LONG",
@@ -89,6 +83,12 @@
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
+    },
+    {
+      "time": "03:10:35 ET",
+      "direction": "LONG",
+      "decision": "APPROVED",
+      "reason": "Approved"
     }
   ]
 }
