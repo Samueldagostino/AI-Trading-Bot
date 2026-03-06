@@ -50,6 +50,8 @@ from config.constants import (
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS, HTF_TIMEFRAMES,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
 )
+from data_feeds.market_context import MarketContext
+from data_feeds.quantdata_client import QuantDataClient
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,12 @@ class IBKRLivePipeline:
         # ── Active trade tracking ──
         self._active_group_id: Optional[str] = None
 
+        # ── QuantData market context (LOG-ONLY) ──
+        self._quantdata_client = QuantDataClient()
+        self._market_context: Optional[MarketContext] = None
+        self._last_context_refresh: Optional[datetime] = None
+        self._context_refresh_minutes = 30
+
     # ──────────────────────────────────────────────────────────
     # LIFECYCLE
     # ──────────────────────────────────────────────────────────
@@ -180,6 +188,20 @@ class IBKRLivePipeline:
             # 5. Reset daily counters
             self._executor.reset_daily()
             self._position_manager.reset_daily()
+
+            # 6. Initial market context refresh (LOG-ONLY, non-blocking)
+            try:
+                self._market_context = await self._quantdata_client.get_market_context()
+                self._last_context_refresh = datetime.now(timezone.utc)
+                logger.info(
+                    "Market context loaded: gamma=%s, flow=%s, source=%s",
+                    self._market_context.gamma_regime,
+                    self._market_context.flow_direction,
+                    self._market_context.source,
+                )
+            except Exception as e:
+                logger.warning("Initial market context refresh failed (non-fatal): %s", e)
+                self._market_context = None
 
             self._state = PipelineState.RUNNING
             logger.info("IBKR Live Pipeline RUNNING")
@@ -262,6 +284,9 @@ class IBKRLivePipeline:
 
         self._bars_processed += 1
         self._last_bar = bar
+
+        # === 0b. MARKET CONTEXT REFRESH (every 30 min, LOG-ONLY) ===
+        await self._refresh_market_context_if_needed()
 
         # === 1. FEATURES ===
         features = self._feature_engine.update(bar)
@@ -503,6 +528,8 @@ class IBKRLivePipeline:
             )
             self._position_manager.mark_partial_fill(group_id, "C2")
 
+        # Build market context snapshot for logging
+        ctx = self._market_context
         action_result = {
             "action": "entry",
             "timestamp": bar.timestamp.isoformat(),
@@ -519,6 +546,15 @@ class IBKRLivePipeline:
             "regime": self._current_regime,
             "group_id": group_id,
             "metadata": bridge_result.metadata,
+            # QuantData market context (LOG-ONLY)
+            "market_context": ctx.to_dict() if ctx else None,
+            "gamma_regime_at_entry": ctx.gamma_regime if ctx else "unknown",
+            "flow_aligned_with_trade": (
+                ctx.aligns_with_direction(entry_direction) if ctx else None
+            ),
+            "favorable_for_momentum": (
+                ctx.is_favorable_for_momentum() if ctx else None
+            ),
         }
 
         logger.info(
@@ -570,6 +606,31 @@ class IBKRLivePipeline:
                 self._active_group_id = None
 
     # ──────────────────────────────────────────────────────────
+    # MARKET CONTEXT REFRESH (LOG-ONLY)
+    # ──────────────────────────────────────────────────────────
+
+    async def _refresh_market_context_if_needed(self) -> None:
+        """Refresh market context every 30 minutes during RTH."""
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_context_refresh is None
+            or (now - self._last_context_refresh).total_seconds()
+            >= self._context_refresh_minutes * 60
+        ):
+            try:
+                self._market_context = (
+                    await self._quantdata_client.get_market_context()
+                )
+                self._last_context_refresh = now
+            except Exception as e:
+                logger.warning("Market context refresh failed (non-fatal): %s", e)
+
+    @property
+    def market_context(self) -> Optional[MarketContext]:
+        """Current market context snapshot (may be None)."""
+        return self._market_context
+
+    # ──────────────────────────────────────────────────────────
     # HTF BAR ROUTING
     # ──────────────────────────────────────────────────────────
 
@@ -618,4 +679,7 @@ class IBKRLivePipeline:
                 "rejections": self._bridge.rejections,
             },
             "data_feed": self._data_feed.get_status(),
+            "market_context": (
+                self._market_context.to_dict() if self._market_context else None
+            ),
         }
