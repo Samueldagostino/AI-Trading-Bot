@@ -574,6 +574,43 @@ class TradingOrchestrator:
                 f"boosted={cs.boosted_score:.3f} | bars={cs.bars_to_confirm}"
             )
 
+        # -- HTF DIRECTIONAL GATE (choke-point — ALL signal sources pass through) --
+        # This gate catches sweep-only and UCL-confirmed entries that bypass
+        # the aggregator's HTF check. When HTF is bearish, ZERO longs pass.
+        # When HTF is bullish, ZERO shorts pass. Period.
+        if entry_direction is not None and htf_bias is not None:
+            if entry_direction == "long" and not htf_bias.htf_allows_long:
+                logger.info(
+                    "HTF GATE BLOCK: %s entry blocked — HTF %s (strength %.2f) "
+                    "disallows longs [source=%s]",
+                    entry_direction, htf_bias.consensus_direction,
+                    htf_bias.consensus_strength, entry_source,
+                )
+                _set_rejection(entry_direction, entry_score, None,
+                               features.atr_14,
+                               f"HTF {htf_bias.consensus_direction} blocks long", 1)
+                return None
+            if entry_direction == "short" and not htf_bias.htf_allows_short:
+                logger.info(
+                    "HTF GATE BLOCK: %s entry blocked — HTF %s (strength %.2f) "
+                    "disallows shorts [source=%s]",
+                    entry_direction, htf_bias.consensus_direction,
+                    htf_bias.consensus_strength, entry_source,
+                )
+                _set_rejection(entry_direction, entry_score, None,
+                               features.atr_14,
+                               f"HTF {htf_bias.consensus_direction} blocks short", 1)
+                return None
+        elif entry_direction is not None and htf_bias is None:
+            # Fail-safe: no HTF data → block all trades
+            logger.warning(
+                "HTF GATE BLOCK: %s entry blocked — no HTF data available "
+                "[source=%s]", entry_direction, entry_source,
+            )
+            _set_rejection(entry_direction, entry_score, None,
+                           features.atr_14, "No HTF data — fail-safe block", 1)
+            return None
+
         # -- HIGH-CONVICTION GATE 1: Signal Score --
         if entry_direction is not None and entry_score < HIGH_CONVICTION_MIN_SCORE:
             logger.debug(

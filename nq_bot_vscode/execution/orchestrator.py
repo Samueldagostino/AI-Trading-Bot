@@ -357,6 +357,33 @@ class IBKRLivePipeline:
         if entry_direction is None:
             return None
 
+        # === HTF DIRECTIONAL GATE (choke-point — ALL signal sources) ===
+        # Catches sweep entries that bypass the aggregator's HTF check.
+        if htf_bias is not None:
+            if entry_direction == "long" and not htf_bias.htf_allows_long:
+                logger.info(
+                    "HTF GATE BLOCK: long entry blocked — HTF %s (%.2f) "
+                    "[source=%s]",
+                    htf_bias.consensus_direction,
+                    htf_bias.consensus_strength, entry_source,
+                )
+                return None
+            if entry_direction == "short" and not htf_bias.htf_allows_short:
+                logger.info(
+                    "HTF GATE BLOCK: short entry blocked — HTF %s (%.2f) "
+                    "[source=%s]",
+                    htf_bias.consensus_direction,
+                    htf_bias.consensus_strength, entry_source,
+                )
+                return None
+        else:
+            # Fail-safe: no HTF data → block all trades
+            logger.warning(
+                "HTF GATE BLOCK: %s blocked — no HTF data [source=%s]",
+                entry_direction, entry_source,
+            )
+            return None
+
         # === NaN GUARD — NaN comparisons always return False, bypassing gates ===
         if not math.isfinite(entry_score):
             logger.error("HC REJECT: entry_score is NaN/Inf — blocking trade")
