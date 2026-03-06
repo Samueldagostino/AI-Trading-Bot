@@ -18,6 +18,9 @@ from typing import Optional, List, Tuple
 from enum import Enum
 from zoneinfo import ZoneInfo
 
+from monitoring.alerting import get_alert_manager
+from monitoring.alert_templates import AlertTemplates
+
 logger = logging.getLogger(__name__)
 
 
@@ -398,6 +401,23 @@ class RiskEngine:
             f"Equity=${self.state.current_equity:.2f} | DD={self.state.current_drawdown_pct:.2f}%"
         )
 
+        # Alert on consecutive losses (>= 3)
+        mgr = get_alert_manager()
+        if mgr and self.state.consecutive_losses >= 3:
+            mgr.enqueue(AlertTemplates.consecutive_loss_streak(
+                consecutive_losses=self.state.consecutive_losses,
+                avg_loss=self.state.daily_pnl / max(self.state.daily_losses, 1),
+                total_loss=self.state.daily_pnl,
+            ))
+
+        # Alert on drawdown approaching limit (>= 50% of max)
+        if mgr and self.state.current_drawdown_pct >= self.config.max_total_drawdown_pct * 0.5:
+            mgr.enqueue(AlertTemplates.drawdown_warning(
+                current_drawdown_pct=self.state.current_drawdown_pct,
+                max_drawdown_pct=self.config.max_total_drawdown_pct,
+                daily_pnl=self.state.daily_pnl,
+            ))
+
     def reset_daily_state(self) -> None:
         """Call at the start of each trading day."""
         self.state.daily_starting_equity = self.state.current_equity
@@ -420,6 +440,18 @@ class RiskEngine:
         )
         logger.critical(f"KILL SWITCH ACTIVATED: {reason}")
         logger.critical(f"Resume at: {self.state.kill_switch_resume_at}")
+
+        # Fire EMERGENCY alert (bypasses rate limit)
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.kill_switch_triggered(reason, {
+                "equity": self.state.current_equity,
+                "drawdown_pct": self.state.current_drawdown_pct,
+                "consecutive_losses": self.state.consecutive_losses,
+                "daily_pnl": self.state.daily_pnl,
+                "resume_at": self.state.kill_switch_resume_at.isoformat()
+                    if self.state.kill_switch_resume_at else "",
+            }))
 
     def _deactivate_kill_switch(self) -> None:
         """Deactivate kill switch after cooldown.

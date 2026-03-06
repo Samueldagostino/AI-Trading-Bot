@@ -37,6 +37,9 @@ from typing import Optional, List, Dict
 from enum import Enum
 import uuid
 
+from monitoring.alerting import get_alert_manager
+from monitoring.alert_templates import AlertTemplates
+
 logger = logging.getLogger(__name__)
 
 
@@ -240,6 +243,18 @@ class ScaleOutExecutor:
             f"Score: {signal_score:.2f} | Regime: {regime}"
         )
 
+        # Fire trade entry alert
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.trade_entry(
+                direction=direction,
+                contracts=self.scale_config.total_contracts,
+                entry_price=trade.entry_price,
+                stop_loss=trade.initial_stop,
+                take_profit=0.0,  # No fixed target in scale-out
+                signal_confidence=signal_score,
+            ))
+
         return trade
 
     async def _paper_enter(self, trade: ScaleOutTrade, price: float) -> None:
@@ -433,6 +448,16 @@ class ScaleOutExecutor:
             f"C2 stop moved to BE+1: {trade.c2.stop_price:.2f}"
         )
 
+        # Fire partial exit alert for C1
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.partial_exit(
+                contracts_exited=trade.c1.contracts,
+                remaining_contracts=trade.c2.contracts,
+                exit_price=exit_price,
+                pnl=trade.c1.net_pnl,
+            ))
+
         trade._set_phase(ScaleOutPhase.RUNNING)
 
         return {
@@ -606,6 +631,20 @@ class ScaleOutExecutor:
             f"C2: {trade.c2.exit_reason} ({c2_pts:.1f}pts ${trade.c2.net_pnl:.2f}) | "
             f"TOTAL: ${trade.total_net_pnl:.2f}"
         )
+
+        # Fire trade exit alert
+        mgr = get_alert_manager()
+        if mgr:
+            exit_price = trade.c2.exit_price or trade.c1.exit_price or 0.0
+            exit_reason = trade.c2.exit_reason or trade.c1.exit_reason or "unknown"
+            mgr.enqueue(AlertTemplates.trade_exit(
+                direction=trade.direction,
+                contracts=self.scale_config.total_contracts,
+                exit_price=exit_price,
+                entry_price=trade.entry_price,
+                pnl=trade.total_net_pnl,
+                exit_reason=exit_reason,
+            ))
 
         return {
             "action": "trade_closed",
