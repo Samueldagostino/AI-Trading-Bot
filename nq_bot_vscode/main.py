@@ -35,6 +35,7 @@ from config.validator import validate_config
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
+from features.session_volatility import SessionVolatilityScaler
 from signals.aggregator import SignalAggregator, SignalDirection
 from signals.liquidity_sweep import LiquiditySweepDetector, SweepSignal
 from signals.fvg_detector import FVGDetector
@@ -113,6 +114,10 @@ class TradingOrchestrator:
         self._fvg_detector = FVGDetector()
         self._watch_manager = WatchStateManager()
         self._ucl_enabled = True  # Can be toggled for A/B testing
+
+        # Session Volatility Scaler — U-shaped intraday ATR adjustment
+        # Enabled via SESSION_VOLATILITY_SCALING env var (default: OFF)
+        self._session_scaler = SessionVolatilityScaler()
 
         # Institutional Modifier Layer — Phase 1
         self._institutional_engine = InstitutionalModifierEngine()
@@ -632,10 +637,14 @@ class TradingOrchestrator:
             if structural_stop_dist <= 0:
                 structural_stop_dist = None
 
+        # Session-aware ATR scaling for stop/target calculation.
+        # C2 trail uses raw ATR (adapts in real-time, not locked to entry session).
+        scaled_atr = self._session_scaler.scale_atr(features.atr_14, bar.timestamp)
+
         risk_assessment = self.risk_engine.evaluate_trade(
             direction=entry_direction,
             entry_price=bar.close,
-            atr=features.atr_14,
+            atr=scaled_atr,
             vix=features.vix_level or 0,
             current_time=bar.timestamp,
             structural_stop_distance=structural_stop_dist,
@@ -685,7 +694,8 @@ class TradingOrchestrator:
             return None
 
         # -- Min R:R Check --
-        target_distance = features.atr_14 * self.config.risk.atr_multiplier_target
+        # Uses session-scaled ATR (consistent with stop calculation)
+        target_distance = scaled_atr * self.config.risk.atr_multiplier_target
         if raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
             logger.debug(
                 f"HC REJECT: R:R {target_distance / raw_stop:.2f} "
@@ -707,6 +717,8 @@ class TradingOrchestrator:
             # Applied AFTER all gates pass, BEFORE trade execution.
             # Adjusts position size, stop width, C2 runner trail.
             modifier_result = None
+            # C2 trail uses RAW ATR (not session-scaled) — the trail needs to
+            # adapt to real-time conditions, not be locked to entry session vol.
             atr_for_entry = features.atr_14
             if self._modifiers_enabled:
                 htf_dir = htf_bias.consensus_direction if htf_bias else None
