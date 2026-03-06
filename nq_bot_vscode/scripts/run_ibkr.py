@@ -339,12 +339,11 @@ class IBKRLiveRunner:
             self._on_session_transition(self._last_session, current_session)
         self._last_session = current_session
 
-        # Warmup phase — feed bars to prime indicators, but don't trade
+        # Warmup phase — feed bars to feature engine only, do NOT trade
         if not self._warmup_complete:
             if self._warmup_bar_count < self.WARMUP_BARS:
-                # Feed through pipeline for indicator warmup only
-                # The pipeline won't trade because we set it to
-                # a non-RUNNING state during warmup
+                # Feed to feature engine only — do NOT call original_on_bar
+                # or process_bar, which would allow trades during warmup
                 self._pipeline._feature_engine.update(bar)
                 if self._warmup_bar_count % 10 == 0:
                     logger.info(
