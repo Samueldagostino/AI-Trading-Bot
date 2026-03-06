@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T06:47:33.902439+00:00",
+  "updated": "2026-03-06T06:49:08.425580+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 0,
@@ -28,67 +28,67 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 25115.25,
+  "last_price": 25109.25,
   "recent_decisions": [
     {
-      "time": "01:44:11 ET",
+      "time": "01:48:00 ET",
       "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "MIN_RR"
+      "reason": "CONFLUENCE"
     },
     {
-      "time": "01:44:46 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "MIN_RR"
-    },
-    {
-      "time": "01:45:21 ET",
+      "time": "01:48:05 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "01:45:25 ET",
+      "time": "01:48:11 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "01:48:16 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:45:40 ET",
+      "time": "01:48:22 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "01:48:26 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:46:16 ET",
+      "time": "01:48:30 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:46:21 ET",
+      "time": "01:48:36 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:46:26 ET",
+      "time": "01:48:41 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:46:31 ET",
-      "direction": "LONG",
+      "time": "01:49:00 ET",
+      "direction": "SHORT",
       "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "01:46:36 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
+      "reason": "HTF_GATE"
     }
   ]
 }
