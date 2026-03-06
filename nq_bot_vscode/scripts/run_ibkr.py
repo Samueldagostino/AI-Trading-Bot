@@ -219,6 +219,8 @@ class IBKRLiveRunner:
 
         # ── Contract rollover check (before pipeline start) ──
         roller = ContractRoller()
+        self._roller = roller
+        self._daily_roll_checked = False
         schedule = roller.get_roll_schedule(self._ibkr_config.symbol)
         logger.info(
             "Roll schedule: %s expires %s, roll date %s, next contract %s (expires %s)",
@@ -229,6 +231,18 @@ class IBKRLiveRunner:
             schedule["next_expiry"],
         )
         self._log_decision("roll_schedule", schedule)
+
+        # Print full 4-quarter roll schedule
+        full_schedule = ContractRoller.get_roll_schedule_next_4_quarters(
+            self._ibkr_config.symbol
+        )
+        logger.info("Roll Schedule (next 4 quarters):")
+        for entry in full_schedule:
+            logger.info(
+                "  %s -> %s: roll by %s (expiry %s)",
+                entry["current"], entry["next"],
+                entry["roll_date"], entry["expiry"],
+            )
 
         # Build pipeline
         self._pipeline = IBKRLivePipeline(
@@ -434,9 +448,40 @@ class IBKRLiveRunner:
             "to": new.value,
         })
 
+        if new == SessionType.RTH and old == SessionType.ETH:
+            # RTH open — daily contract rollover check
+            self._check_daily_roll()
+
         if new == SessionType.ETH and old == SessionType.RTH:
             # RTH ended — reset daily counters for new session
+            self._daily_roll_checked = False
             self._on_daily_reset()
+
+    def _check_daily_roll(self) -> None:
+        """Daily rollover check at RTH open (9:30 ET). Runs once per session."""
+        if self._daily_roll_checked:
+            return
+        self._daily_roll_checked = True
+
+        if not hasattr(self, '_roller') or not self._pipeline:
+            return
+
+        if self._roller.should_roll(self._ibkr_config.symbol):
+            next_contract = self._roller.get_next_contract(self._ibkr_config.symbol)
+            logger.critical(
+                "DAILY ROLL CHECK: Roll needed %s -> %s. "
+                "Halting trading — manual intervention or restart required.",
+                self._ibkr_config.symbol, next_contract,
+            )
+            self._log_decision("daily_roll_needed", {
+                "current": self._ibkr_config.symbol,
+                "target": next_contract,
+            })
+            # Halt the executor — do not attempt automatic roll mid-session
+            self._pipeline._executor._state.is_halted = True
+            self._pipeline._executor._state.halt_reason = (
+                f"Contract roll needed: {self._ibkr_config.symbol} -> {next_contract}"
+            )
 
     def _on_daily_reset(self) -> None:
         """Reset daily PnL and counters at session boundary."""

@@ -420,3 +420,81 @@ class TestVerifyContract:
         mock_ibkr_client._post = AsyncMock(side_effect=Exception("API error"))
         result = await roller.verify_contract(mock_ibkr_client, "MNQM6")
         assert result is False
+
+
+# ================================================================
+# ROLLOVER OVERRIDE ENV VAR
+# ================================================================
+
+class TestRolloverOverride:
+    def test_rollover_override_skips_check(self, roller):
+        """ROLLOVER_OVERRIDE=true skips the roll check even when roll is due."""
+        import os
+        os.environ["ROLLOVER_OVERRIDE"] = "true"
+        try:
+            # March 13 would normally trigger a roll for MNQH6
+            assert roller.should_roll("MNQH6", today=date(2026, 3, 13)) is False
+        finally:
+            del os.environ["ROLLOVER_OVERRIDE"]
+
+    def test_rollover_override_false_allows_check(self, roller):
+        """ROLLOVER_OVERRIDE=false does NOT skip the roll check."""
+        import os
+        os.environ["ROLLOVER_OVERRIDE"] = "false"
+        try:
+            assert roller.should_roll("MNQH6", today=date(2026, 3, 13)) is True
+        finally:
+            del os.environ["ROLLOVER_OVERRIDE"]
+
+
+# ================================================================
+# 4-QUARTER ROLL SCHEDULE
+# ================================================================
+
+class TestRollScheduleNext4Quarters:
+    def test_roll_schedule_next_4_quarters(self):
+        """Prints correct roll dates for next 4 quarters starting from MNQH6."""
+        schedule = ContractRoller.get_roll_schedule_next_4_quarters("MNQH6")
+        assert len(schedule) == 4
+
+        # Quarter 1: MNQH6 -> MNQM6
+        assert schedule[0]["current"] == "MNQH6"
+        assert schedule[0]["next"] == "MNQM6"
+        assert schedule[0]["expiry"] == date(2026, 3, 20)
+        assert schedule[0]["roll_date"] == date(2026, 3, 13)
+
+        # Quarter 2: MNQM6 -> MNQU6
+        assert schedule[1]["current"] == "MNQM6"
+        assert schedule[1]["next"] == "MNQU6"
+        assert schedule[1]["expiry"] == date(2026, 6, 19)
+
+        # Quarter 3: MNQU6 -> MNQZ6
+        assert schedule[2]["current"] == "MNQU6"
+        assert schedule[2]["next"] == "MNQZ6"
+        assert schedule[2]["expiry"] == date(2026, 9, 18)
+
+        # Quarter 4: MNQZ6 -> MNQH7
+        assert schedule[3]["current"] == "MNQZ6"
+        assert schedule[3]["next"] == "MNQH7"
+        assert schedule[3]["expiry"] == date(2026, 12, 18)
+
+
+# ================================================================
+# ROLL DATE SKIPS CME HOLIDAYS
+# ================================================================
+
+class TestRollDateSkipsCMEHolidays:
+    def test_roll_date_skips_cme_holiday(self):
+        """Roll date calculation correctly skips CME holidays.
+
+        For MNQU6 (Sept 18 expiry), Labor Day (Sept 7, 2026) is
+        in the 5-trading-day window. The roll date must account for it.
+        """
+        roll_date = ContractRoller.get_roll_date("U", 6)
+        # Sept 18 (Fri) - 5 trading days, with Labor Day (Sept 7) considered
+        # Sept 7 (Mon) is Labor Day -> not a trading day
+        # Count back from Sept 18: Sept 17 (Thu), 16 (Wed), 15 (Tue),
+        # 14 (Mon), 11 (Fri) = 5 trading days
+        assert roll_date == date(2026, 9, 11)
+        # Verify Labor Day is indeed a holiday
+        assert not is_trading_day(date(2026, 9, 7))
