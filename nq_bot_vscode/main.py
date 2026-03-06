@@ -44,6 +44,8 @@ from risk.regime_detector import RegimeDetector
 from execution.scale_out_executor import ScaleOutExecutor
 from monitoring.engine import MonitoringEngine
 from monitoring.trade_decision_logger import TradeDecisionLogger
+from monitoring.alerting import AlertManager, set_alert_manager, get_alert_manager
+from monitoring.alert_templates import AlertTemplates
 from data_pipeline.pipeline import (
     DataPipeline, BarData, MultiTimeframeIterator,
     bardata_to_bar, bardata_to_htfbar, MINUTES_TO_LABEL,
@@ -123,6 +125,13 @@ class TradingOrchestrator:
         # Execution - scale-out is the primary executor
         self.executor = ScaleOutExecutor(config)
 
+        # Alerting — real-time notifications via console/Discord/Telegram
+        self._alert_manager = AlertManager(
+            config.alerting,
+            rate_limit_seconds=config.alerting.rate_limit_seconds,
+        )
+        set_alert_manager(self._alert_manager)
+
         # Tradovate client (initialized on connect)
         self.broker_client = None
 
@@ -192,11 +201,20 @@ class TradingOrchestrator:
         self.monitoring.update_health("signals", "healthy")
         self.monitoring.update_health("risk", "healthy")
         self.monitoring.update_health("execution", "healthy")
+
+        # Start alert manager background worker
+        await self._alert_manager.start()
+        self._alert_manager.enqueue(AlertTemplates.startup_complete(
+            environment=self.config.environment,
+            broker=self.config.tradovate.environment,
+        ))
+
         logger.info("Orchestrator initialized")
 
     async def shutdown(self) -> None:
         """Graceful shutdown - flatten positions first."""
         logger.info("Initiating shutdown...")
+        self._alert_manager.enqueue(AlertTemplates.shutdown_initiated("orchestrator_shutdown"))
         self._running = False
 
         if self.executor.has_active_trade:
@@ -208,6 +226,7 @@ class TradingOrchestrator:
             await self.broker_client.disconnect()
 
         await self.db.close()
+        await self._alert_manager.stop()
         logger.info("Shutdown complete")
 
     # ================================================================

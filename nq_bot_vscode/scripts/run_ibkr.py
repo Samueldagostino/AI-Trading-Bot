@@ -71,6 +71,8 @@ if _env_path.exists():
                 os.environ.setdefault(key.strip(), val)
 
 from config.settings import CONFIG
+from monitoring.alerting import AlertManager, set_alert_manager, get_alert_manager
+from monitoring.alert_templates import AlertTemplates
 from Broker.ibkr_client_portal import (
     IBKRConfig,
     IBKRClient,
@@ -241,10 +243,22 @@ class IBKRLiveRunner:
             lambda bar: self._on_bar_wrapper(bar, original_on_bar)
         )
 
+        # Initialize AlertManager for live runner
+        alert_mgr = AlertManager(
+            CONFIG.alerting,
+            rate_limit_seconds=CONFIG.alerting.rate_limit_seconds,
+        )
+        set_alert_manager(alert_mgr)
+        await alert_mgr.start()
+        self._alert_manager = alert_mgr
+
         # Start the pipeline (connect, resolve contract, data feed, recon)
         started = await self._pipeline.start()
         if not started:
             logger.critical("Pipeline failed to start — exiting")
+            mgr = get_alert_manager()
+            if mgr:
+                mgr.enqueue(AlertTemplates.connection_loss("IBKRPipeline", "Failed to start"))
             sys.exit(1)
 
         # ── Execute roll if needed ──
@@ -298,6 +312,14 @@ class IBKRLiveRunner:
         })
 
         logger.info("Pipeline started — waiting for bars")
+
+        # Fire startup complete alert
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.startup_complete(
+                environment=self._ibkr_config.account_type,
+                broker="IBKR",
+            ))
 
         # Main loop
         await self._run_loop()
@@ -431,6 +453,36 @@ class IBKRLiveRunner:
             "new_date": self._session_date,
             "final_status": status,
         })
+
+        # Fire daily summary alert at RTH close
+        mgr = get_alert_manager()
+        if mgr:
+            pm = self._pipeline._position_manager
+            pm_status = pm.get_status()
+            wins = sum(1 for p in pm._closed_positions if p.net_pnl > 0)
+            losses = sum(1 for p in pm._closed_positions if p.net_pnl < 0)
+            total = wins + losses
+            win_rate = (wins / total * 100) if total > 0 else 0.0
+            daily_pnl = pm_status.get("daily_realized_pnl", 0.0)
+            pnls = [p.net_pnl for p in pm._closed_positions]
+            winning_pnls = [p for p in pnls if p > 0]
+            losing_pnls = [p for p in pnls if p < 0]
+            gross_wins = sum(winning_pnls) if winning_pnls else 0.0
+            gross_losses = abs(sum(losing_pnls)) if losing_pnls else 0.0
+            pf = gross_wins / gross_losses if gross_losses > 0 else 0.0
+            largest_win = max(pnls) if pnls else 0.0
+            largest_loss = min(pnls) if pnls else 0.0
+
+            mgr.enqueue(AlertTemplates.daily_summary(
+                total_trades=total,
+                winning_trades=wins,
+                losing_trades=losses,
+                daily_pnl=daily_pnl,
+                win_rate=win_rate,
+                profit_factor=pf,
+                largest_win=largest_win,
+                largest_loss=largest_loss,
+            ))
 
         self._pipeline._executor.reset_daily()
         self._pipeline._position_manager.reset_daily()
@@ -674,6 +726,11 @@ class IBKRLiveRunner:
         logger.info("  SHUTDOWN INITIATED")
         logger.info("=" * 60)
 
+        # Fire shutdown alert
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.shutdown_initiated("ibkr_runner_shutdown"))
+
         # 1. Flatten positions
         pm = self._pipeline._position_manager
         if pm.open_position_count > 0:
@@ -715,6 +772,10 @@ class IBKRLiveRunner:
         # 5. Flush logs
         self._trade_log.flush()
         self._decision_log.flush()
+
+        # 6. Stop alert manager
+        if hasattr(self, '_alert_manager') and self._alert_manager:
+            await self._alert_manager.stop()
 
         logger.info("Shutdown complete — all positions flat, logs flushed")
         self._pipeline = None

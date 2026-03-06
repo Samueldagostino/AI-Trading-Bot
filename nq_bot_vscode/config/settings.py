@@ -260,6 +260,16 @@ class SignalConfig:
 
 
 @dataclass
+class AlertConfig:
+    """Real-time alerting configuration."""
+    enabled_channels: List[str] = field(default_factory=lambda: ["console"])
+    discord_webhook_url: str = os.getenv("ALERT_DISCORD_WEBHOOK_URL", "")
+    telegram_bot_token: str = os.getenv("ALERT_TELEGRAM_BOT_TOKEN", "")
+    telegram_chat_id: str = os.getenv("ALERT_TELEGRAM_CHAT_ID", "")
+    rate_limit_seconds: int = 300  # 5 min per event type (EMERGENCY bypasses)
+
+
+@dataclass
 class DataPipelineConfig:
     """
     Primary: Tradovate WebSocket live bars
@@ -285,6 +295,7 @@ class BotConfig:
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     signals: SignalConfig = field(default_factory=SignalConfig)
     data_pipeline: DataPipelineConfig = field(default_factory=DataPipelineConfig)
+    alerting: AlertConfig = field(default_factory=AlertConfig)
     log_level: str = "INFO"
     environment: str = "paper"
     heartbeat_interval_seconds: int = 5
