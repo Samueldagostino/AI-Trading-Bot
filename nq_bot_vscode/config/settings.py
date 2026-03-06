@@ -217,6 +217,30 @@ class RiskConfig:
     kill_switch_max_consecutive_losses: int = 5
     kill_switch_cooldown_minutes: int = 60
 
+    def get_point_value(self, instrument: str = "MNQ") -> float:
+        """Get point value for an instrument, falling back to MNQ defaults."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).point_value
+        except Exception:
+            return self.nq_point_value_micro if self.use_micro else self.nq_point_value_mini
+
+    def get_tick_size(self, instrument: str = "MNQ") -> float:
+        """Get tick size for an instrument, falling back to MNQ defaults."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).tick_size
+        except Exception:
+            return 0.25
+
+    def get_commission(self, instrument: str = "MNQ") -> float:
+        """Get commission per contract for an instrument."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).commission_per_contract
+        except Exception:
+            return self.commission_per_contract
+
 
 @dataclass
 class FeatureConfig:
@@ -299,6 +323,31 @@ class BotConfig:
     log_level: str = "INFO"
     environment: str = "paper"
     heartbeat_interval_seconds: int = 5
+    instrument: str = "MNQ"  # Supported: MNQ, MES, MYM, M2K
+
+    @property
+    def instrument_spec(self):
+        """Get the InstrumentSpec for the configured instrument."""
+        from config.instruments import InstrumentSpec
+        return InstrumentSpec.from_symbol(self.instrument)
+
+    @property
+    def point_value(self) -> float:
+        """Instrument point value (delegates to InstrumentSpec if available)."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(self.instrument).point_value
+        except Exception:
+            return self.risk.nq_point_value_micro
+
+    @property
+    def tick_size(self) -> float:
+        """Instrument tick size."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(self.instrument).tick_size
+        except Exception:
+            return 0.25
 
 
 CONFIG = BotConfig()

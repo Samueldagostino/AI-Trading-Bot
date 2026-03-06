@@ -149,12 +149,13 @@ class ScaleOutExecutor:
     - Live: Routes through TradovateClient
     """
 
-    def __init__(self, config, tradovate_client=None, execution_analytics=None):
+    def __init__(self, config, tradovate_client=None, execution_analytics=None, instrument: str = "MNQ"):
         self.config = config
         self.scale_config = config.scale_out
         self.risk_config = config.risk
         self.broker = tradovate_client
         self._analytics = execution_analytics
+        self._instrument = instrument
 
         self._active_trade: Optional[ScaleOutTrade] = None
         self._trade_history: List[ScaleOutTrade] = []
@@ -239,7 +240,7 @@ class ScaleOutExecutor:
         c1_thresh = self.scale_config.c1_profit_threshold_pts
         c1_trail = self.scale_config.c1_trail_distance_pts
         logger.info(
-            f"SCALE-OUT ENTRY: {direction.upper()} 2x MNQ @ {entry_price:.2f} | "
+            f"SCALE-OUT ENTRY: {direction.upper()} 2x {self._instrument} @ {entry_price:.2f} | "
             f"Stop: {stop_price:.2f} | C1: trail from +{c1_thresh}pts (trail {c1_trail}pts) | "
             f"Score: {signal_score:.2f} | Regime: {regime}"
         )
@@ -277,7 +278,7 @@ class ScaleOutExecutor:
             leg.entry_time = now
             leg.is_filled = True
             leg.is_open = True
-            leg.commission = self.risk_config.commission_per_contract
+            leg.commission = self.risk_config.get_commission(self._instrument)
 
         trade.entry_price = fill_price
         trade.entry_time = now
@@ -737,9 +738,9 @@ class ScaleOutExecutor:
         """Compute gross PnL for one leg in dollars."""
         if not leg.exit_price or not leg.entry_price:
             return 0.0
-        
-        point_value = self.risk_config.nq_point_value_micro  # Always MNQ
-        
+
+        point_value = self.risk_config.get_point_value(self._instrument)
+
         if direction == "long":
             points = leg.exit_price - leg.entry_price
         else:
