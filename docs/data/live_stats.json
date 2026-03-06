@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T05:56:16.962300+00:00",
+  "updated": "2026-03-06T05:57:18.366618+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 0,
@@ -28,7 +28,7 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 25119.5,
+  "last_price": 25120.5,
   "recent_decisions": [
     {
       "time": "00:50:20 ET",
