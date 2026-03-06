@@ -1,7 +1,7 @@
 {
-  "updated": "2026-03-06T05:51:26.818019+00:00",
+  "updated": "2026-03-06T05:52:58.135735+00:00",
   "status": "LIVE",
-  "bars_processed": 197,
+  "bars_processed": 200,
   "trades_today": 0,
   "win_rate": 0.0,
   "profit_factor": 0.0,
@@ -28,7 +28,7 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 25114.0,
+  "last_price": 25113.25,
   "recent_decisions": [
     {
       "time": "00:50:20 ET",
