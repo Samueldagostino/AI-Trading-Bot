@@ -2208,6 +2208,26 @@ async def run_backtest(
         print(f"  [{status}] {check_name}: {check['description']}")
     print()
 
+    # ── Validation milestone check ──
+    n_trades = aggregate.get("total_trades", 0)
+    pf_value = aggregate.get("profit_factor", 0)
+    if isinstance(pf_value, str):
+        pf_value = float("inf")
+    if n_trades >= 200 and pf_value > 1.2:
+        instrument = "MNQ"  # Default; extend for multi-instrument backtests
+        print("-" * 72)
+        print(
+            f"  VALIDATION MILESTONE: {instrument} reached {n_trades} trades, "
+            f"PF={aggregate['profit_factor']}. Consider setting validated=True."
+        )
+        print("-" * 72)
+        logger.info(
+            "VALIDATION MILESTONE: %s reached %d trades, PF=%s. "
+            "Consider setting validated=True.",
+            instrument, n_trades, aggregate["profit_factor"],
+        )
+        print()
+
     # ── Shadow-trade summary ──
     print_shadow_summary(shadow_analysis)
 

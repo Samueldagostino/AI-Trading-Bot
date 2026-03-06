@@ -37,6 +37,7 @@ class InstrumentSpec:
     expiry_cycle: str             # "HMUZ" for quarterly futures
     contract_months: Dict[str, str] = field(default_factory=dict)
     commission_per_contract: float = 1.29  # Default Tradovate commission
+    validated: bool = False       # True only after 200+ trade backtest validation
 
     @property
     def ticks_per_point(self) -> float:
@@ -116,6 +117,7 @@ INSTRUMENT_SPECS: Dict[str, InstrumentSpec] = {
         expiry_cycle="HMUZ",
         contract_months=_QUARTERLY_MONTHS,
         commission_per_contract=1.29,
+        validated=True,            # 14,848 trades, 4.5 years, PF 1.53
     ),
     "MES": InstrumentSpec(
         symbol="MES",
@@ -175,9 +177,16 @@ def get_instrument(symbol: str) -> InstrumentSpec:
 
 def print_all_specs() -> None:
     """Print a formatted table of all supported instruments."""
-    print(f"\n{'Symbol':<8} {'Name':<30} {'Tick':<6} {'$/Tick':<8} {'$/Pt':<8} {'Margin':<10}")
-    print("-" * 78)
+    print(f"\n{'Symbol':<8} {'Name':<30} {'Tick':<6} {'$/Tick':<8} {'$/Pt':<8} {'Margin':<10} {'Status':<12}")
+    print("-" * 90)
     for sym in sorted(INSTRUMENT_SPECS):
         s = INSTRUMENT_SPECS[sym]
-        print(f"{s.symbol:<8} {s.full_name:<30} {s.tick_size:<6.2f} ${s.tick_value:<7.2f} ${s.point_value:<7.2f} ${s.margin_requirement:>8,.0f}")
+        status = "VALIDATED" if s.validated else "UNVALIDATED"
+        print(f"{s.symbol:<8} {s.full_name:<30} {s.tick_size:<6.2f} ${s.tick_value:<7.2f} ${s.point_value:<7.2f} ${s.margin_requirement:>8,.0f}  {status}")
     print()
+
+
+def check_instrument_validated(symbol: str) -> bool:
+    """Check if an instrument has been validated for live/paper trading."""
+    spec = InstrumentSpec.from_symbol(symbol)
+    return spec.validated
