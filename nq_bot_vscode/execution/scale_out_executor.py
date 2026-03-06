@@ -143,18 +143,19 @@ class ScaleOutTrade:
 class ScaleOutExecutor:
     """
     Manages the full lifecycle of 2-contract scale-out trades.
-    
+
     Works in two modes:
     - Paper: Simulated fills (default)
     - Live: Routes through TradovateClient
     """
 
-    def __init__(self, config, tradovate_client=None):
+    def __init__(self, config, tradovate_client=None, execution_analytics=None):
         self.config = config
         self.scale_config = config.scale_out
         self.risk_config = config.risk
         self.broker = tradovate_client
-        
+        self._analytics = execution_analytics
+
         self._active_trade: Optional[ScaleOutTrade] = None
         self._trade_history: List[ScaleOutTrade] = []
 
@@ -283,6 +284,22 @@ class ScaleOutExecutor:
         trade.c1_best_price = fill_price  # Initialize to entry price
         trade.c2_best_price = fill_price  # Initialize to entry price
         trade._set_phase(ScaleOutPhase.PHASE_1)
+
+        # Analytics: record entry fills with slippage
+        if self._analytics:
+            side = "BUY" if trade.direction == "long" else "SELL"
+            direction = "long_entry" if trade.direction == "long" else "short_entry"
+            for leg_label in ["C1", "C2"]:
+                oid = f"{trade.trade_id}-{leg_label}-entry"
+                self._analytics.record_order_sent(
+                    order_id=oid, side=side, size=1,
+                    expected_price=price, timestamp=now,
+                    order_type="market", direction=direction,
+                )
+                self._analytics.record_fill(
+                    order_id=oid, fill_price=fill_price,
+                    fill_size=1, fill_timestamp=now,
+                )
 
     async def _live_enter(self, trade: ScaleOutTrade) -> None:
         """Live entry through Tradovate."""
@@ -618,6 +635,23 @@ class ScaleOutExecutor:
         trade.total_net_pnl = trade.total_gross_pnl - trade.total_commission
         trade.closed_at = time
         trade._set_phase(ScaleOutPhase.DONE)
+
+        # Analytics: record exit fills with slippage
+        if self._analytics:
+            exit_side = "SELL" if trade.direction == "long" else "BUY"
+            direction = "long_exit" if trade.direction == "long" else "short_exit"
+            for leg, label in [(trade.c1, "C1"), (trade.c2, "C2")]:
+                if leg.exit_price:
+                    oid = f"{trade.trade_id}-{label}-exit"
+                    self._analytics.record_order_sent(
+                        order_id=oid, side=exit_side, size=leg.contracts,
+                        expected_price=leg.stop_price or leg.target_price or leg.entry_price,
+                        timestamp=time, order_type="market", direction=direction,
+                    )
+                    self._analytics.record_fill(
+                        order_id=oid, fill_price=leg.exit_price,
+                        fill_size=leg.contracts, fill_timestamp=time,
+                    )
 
         self._trade_history.append(trade)
         self._active_trade = None
