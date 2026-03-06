@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T09:00:39.243377+00:00",
+  "updated": "2026-03-06T09:02:17.258913+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 6,
@@ -28,44 +28,8 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25077.75,
+  "last_price": 25070.75,
   "recent_decisions": [
-    {
-      "time": "03:58:36 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "03:58:50 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "03:58:55 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "03:59:00 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "03:59:05 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "MIN_RR"
-    },
-    {
-      "time": "04:00:15 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
     {
       "time": "04:00:20 ET",
       "direction": "LONG",
@@ -89,6 +53,42 @@
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
+    },
+    {
+      "time": "04:00:50 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "04:01:05 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "04:01:20 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "04:01:45 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "04:01:55 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "04:02:01 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
     }
   ]
 }
