@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T07:39:42.909536+00:00",
+  "updated": "2026-03-06T07:41:16.875260+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 4,
@@ -28,64 +28,64 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25129.0,
+  "last_price": 25127.75,
   "recent_decisions": [
     {
-      "time": "02:38:50 ET",
+      "time": "02:40:26 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:38:55 ET",
+      "time": "02:40:31 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:39:01 ET",
+      "time": "02:40:35 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:39:06 ET",
+      "time": "02:40:41 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:39:10 ET",
+      "time": "02:40:46 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:39:16 ET",
+      "time": "02:40:51 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:39:21 ET",
+      "time": "02:40:56 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:39:30 ET",
+      "time": "02:41:00 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:39:36 ET",
+      "time": "02:41:11 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "02:39:41 ET",
+      "time": "02:41:16 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
