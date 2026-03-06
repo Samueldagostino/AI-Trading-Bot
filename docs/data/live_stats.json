@@ -1,13 +1,13 @@
 {
-  "updated": "2026-03-06T08:31:10.149182+00:00",
+  "updated": "2026-03-06T08:32:48.815746+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 5,
   "win_rate": 60.0,
   "profit_factor": 0.83,
   "session_pnl_pct": -0.009,
-  "signals_rejected": 48,
-  "signals_approved": 1,
+  "signals_rejected": 47,
+  "signals_approved": 2,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
@@ -28,32 +28,8 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25046.75,
+  "last_price": 25073.75,
   "recent_decisions": [
-    {
-      "time": "03:20:25 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "MIN_RR"
-    },
-    {
-      "time": "03:20:30 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "MIN_RR"
-    },
-    {
-      "time": "03:20:36 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "MIN_RR"
-    },
-    {
-      "time": "03:21:01 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
     {
       "time": "03:21:05 ET",
       "direction": "LONG",
@@ -89,6 +65,30 @@
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
+    },
+    {
+      "time": "03:31:15 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "03:31:20 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "03:31:25 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "03:31:30 ET",
+      "direction": "LONG",
+      "decision": "APPROVED",
+      "reason": "Approved"
     }
   ]
 }
