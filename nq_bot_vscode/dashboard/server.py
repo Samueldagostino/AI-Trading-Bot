@@ -149,10 +149,29 @@ async def serve_dashboard():
 
 @app.get("/api/status")
 async def get_status():
-    """Full system status snapshot."""
+    """Full system status snapshot — includes trade metrics from OrderManager."""
     DEMO_STATE["uptime_seconds"] = int(
         (datetime.now(timezone.utc) - _start_time).total_seconds()
     )
+    # Overlay live trade metrics from OrderManager if available
+    order_mgr = app.state.__dict__.get("order_manager")
+    if order_mgr is not None:
+        try:
+            metrics = order_mgr.get_trade_metrics()
+            DEMO_STATE["performance"]["total_trades"] = metrics["total_trades"]
+            DEMO_STATE["performance"]["win_rate"] = metrics["win_rate"]
+            DEMO_STATE["performance"]["total_pnl"] = metrics["total_pnl"]
+            DEMO_STATE["risk_state"]["daily_pnl"] = metrics["daily_pnl"]
+            DEMO_STATE["risk_state"]["equity"] = metrics["current_equity"]
+            DEMO_STATE["risk_state"]["peak_equity"] = metrics["peak_equity"]
+            DEMO_STATE["risk_state"]["consecutive_losses"] = metrics["consecutive_losses"]
+            DEMO_STATE["execution_stats"]["avg_slippage_points"] = metrics["avg_slippage"]
+            DEMO_STATE["has_open_position"] = metrics["active_positions"] > 0
+            DEMO_STATE["open_position"] = (
+                order_mgr.get_active_positions()[0] if metrics["active_positions"] > 0 else None
+            )
+        except Exception:
+            pass
     return JSONResponse(DEMO_STATE)
 
 
@@ -170,7 +189,19 @@ async def get_performance():
 
 @app.get("/api/trades")
 async def get_trades():
-    """Recent trade history."""
+    """Recent trade history — returns live position data from OrderManager if available."""
+    # Try to get live data from OrderManager
+    order_mgr = app.state.__dict__.get("order_manager")
+    if order_mgr is not None:
+        try:
+            active = order_mgr.get_active_positions()
+            history = order_mgr.get_trade_history()[-20:]  # Last 20 trades
+            return JSONResponse({
+                "active_positions": active,
+                "recent_trades": history,
+            })
+        except Exception:
+            pass
     return JSONResponse(DEMO_STATE["recent_trades"])
 
 
