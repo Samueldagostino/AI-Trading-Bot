@@ -1,0 +1,122 @@
+{
+  "generated": "2026-03-06T15:41:57.615999+00:00",
+  "summary": "Complete signal source map for confluence engine forensic analysis",
+  "entry_sources": {
+    "signal": {
+      "description": "Aggregator-combined technical signals",
+      "file": "signals/aggregator.py",
+      "function": "SignalAggregator.aggregate()",
+      "htf_gated": true,
+      "hc_score_filtered": true,
+      "max_stop_gated": true,
+      "contributing_signals": [
+        "bullish/bearish_order_block (0.75)",
+        "bullish/bearish_fvg (0.70)",
+        "buy/sell_side_sweep (0.80, from FeatureEngine)",
+        "vwap_above/below (0.4-0.8)",
+        "delta_divergence (0.65)",
+        "trend_up/down (0.5-0.8)"
+      ],
+      "weight_scheme": "Technical 50%, Discord 25% (deprecated), ML 25% (None)",
+      "min_aligned_signals": 2
+    },
+    "sweep": {
+      "description": "Liquidity sweep detector standalone entry",
+      "file": "signals/liquidity_sweep.py",
+      "function": "LiquiditySweepDetector.update_bar()",
+      "htf_gated": true,
+      "hc_score_filtered": true,
+      "max_stop_gated": true,
+      "min_score": 0.7,
+      "key_levels": [
+        "PDH/PDL",
+        "Session H/L",
+        "PWH/PWL",
+        "VWAP",
+        "Round numbers"
+      ]
+    },
+    "confluence": {
+      "description": "Signal + sweep fire same direction \u2192 +0.05 HC boost",
+      "file": "main.py",
+      "function": "TradingOrchestrator.process_bar()",
+      "htf_gated": true,
+      "hc_score_filtered": true,
+      "max_stop_gated": true,
+      "score_boost": 0.05
+    },
+    "ucl_confirmed": {
+      "description": "Wide-stop sweep rescued via UCL confirmation",
+      "file": "signals/watch_state.py",
+      "function": "WatchStateManager.update()",
+      "htf_gated": true,
+      "hc_score_filtered": true,
+      "max_stop_gated": true,
+      "confirmation_boost": 0.1
+    }
+  },
+  "institutional_modifiers": {
+    "overnight_bias": {
+      "file": "signals/institutional_modifiers.py",
+      "type": "post-gate"
+    },
+    "fomc_drift": {
+      "file": "signals/institutional_modifiers.py",
+      "type": "post-gate"
+    },
+    "gamma_regime": {
+      "file": "signals/institutional_modifiers.py",
+      "type": "post-gate"
+    },
+    "volatility_forecast": {
+      "file": "signals/volatility_forecast.py",
+      "type": "post-gate"
+    }
+  },
+  "session_context": {
+    "session_profiler": {
+      "file": "signals/session_profiler.py",
+      "type": "modifier"
+    },
+    "initial_balance": {
+      "file": "signals/initial_balance.py",
+      "type": "classification"
+    },
+    "overnight_levels": {
+      "file": "signals/overnight_levels.py",
+      "type": "classification"
+    }
+  },
+  "architecture": {
+    "pattern": "HYBRID",
+    "description": "The confluence engine uses a HYBRID architecture:\n\n1. AGGREGATOR (MULTIPLICATIVE context): OB, FVG, sweep, VWAP, delta, trend\n   signals are combined INTERNALLY into a single weighted score. They are NOT\n   independent trigger sources \u2014 they must collectively reach >= 0.75 to fire.\n   Individual signal types CANNOT independently generate trades through the\n   aggregator path. Weight distribution: Technical 50%, Discord 25%, ML 25%.\n   Minimum 2 aligned signals required.\n\n2. SWEEP DETECTOR (ADDITIVE trigger): The LiquiditySweepDetector runs in\n   PARALLEL to the aggregator and CAN independently generate trades when\n   sweep score >= 0.70 and passes HC filter >= 0.75. This is the ONLY\n   signal source that operates as an additive trigger.\n\n3. Three entry modes:\n   - signal-only: aggregator fires, no sweep \u2192 entry_source='signal'\n   - sweep-only: sweep fires, no aggregator signal \u2192 entry_source='sweep'\n   - confluence: both fire same direction \u2192 +0.05 HC boost, entry_source='confluence'\n\nKnowledge base design (Section 19: HTF 30%, PA 25%, Vol 15%, ML 30%) is\nNOT what was implemented. Actual weights: Technical 50%, Discord 25%, ML 25%.\nDiscord signals are deprecated (HTF Bias Engine replaced them).\nML predictor is None (placeholder). So effective weight is 100% technical.\n\nCRITICAL: The 'FVG', 'order_block', 'structure_shift', 'session',\n'displacement' signal types referenced in the task do NOT exist as\nindependent trigger sources. They are INTERNAL to the aggregator's\n_extract_technical_signals() method. The actual individual technical\nsignals are: bullish/bearish_order_block, bullish/bearish_fvg,\nbuy/sell_side_sweep, vwap_above/below, delta_divergence, trend_up/down.\nThese combine into the aggregated 'signal' entry source.",
+    "matches_knowledge_base": false,
+    "knowledge_base_weights": "HTF 30%, Price Action 25%, Volatility 15%, ML 30%",
+    "actual_weights": "Technical 50%, Discord 25% (deprecated), ML 25% (placeholder=None)",
+    "effective_weights": "Technical 100% (only active category)",
+    "signal_types": {
+      "additive_triggers": [
+        "sweep (LiquiditySweepDetector)"
+      ],
+      "multiplicative_context": [
+        "bullish/bearish_order_block (strength 0.75)",
+        "bullish/bearish_fvg (strength 0.70)",
+        "buy/sell_side_sweep (strength 0.80, via FeatureEngine not SweepDetector)",
+        "vwap_above/below (strength 0.4-0.8, proportional to deviation)",
+        "delta_divergence (strength 0.65)",
+        "trend_up/down (strength 0.5-0.8, proportional to trend_strength)"
+      ],
+      "institutional_modifiers": [
+        "overnight_bias (position/stop/runner multiplier)",
+        "fomc_drift (position/stop multiplier, stand-aside gate)",
+        "gamma_regime (position multiplier from VIX term structure)",
+        "volatility_forecast (HAR-RV position/stop multiplier)"
+      ],
+      "session_modifiers": [
+        "session_profiler (position/stop multiplier by time-of-day phase)",
+        "initial_balance (day-type classification, contextual)",
+        "overnight_levels (gap direction/fill, contextual)"
+      ]
+    }
+  }
+}
