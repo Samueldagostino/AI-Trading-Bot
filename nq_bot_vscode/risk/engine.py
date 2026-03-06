@@ -90,14 +90,15 @@ class RiskAssessment:
 class RiskEngine:
     """
     Independent risk management engine.
-    
+
     CRITICAL: This engine has absolute authority over position sizing
     and trade approval. No signal, regardless of confidence, can
     override risk limits.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, instrument: str = "MNQ"):
         self.config = config.risk
+        self._instrument = instrument
         self.state = RiskState(
             starting_equity=self.config.account_size,
             current_equity=self.config.account_size,
@@ -105,6 +106,16 @@ class RiskEngine:
             daily_starting_equity=self.config.account_size,
         )
         self._economic_events: List[dict] = []
+
+    @property
+    def _point_value(self) -> float:
+        """Get point value for the configured instrument."""
+        return self.config.get_point_value(self._instrument)
+
+    @property
+    def _tick_size(self) -> float:
+        """Get tick size for the configured instrument."""
+        return self.config.get_tick_size(self._instrument)
 
     # ================================================================
     # Primary Risk Assessment
@@ -238,10 +249,10 @@ class RiskEngine:
             stop_distance, entry_price, size_multiplier
         )
 
-        # Dollar risk calculation
-        point_value = (self.config.nq_point_value_micro if self.config.use_micro 
-                      else self.config.nq_point_value_mini)
-        risk_per_contract = stop_distance * point_value + self.config.commission_per_contract
+        # Dollar risk calculation — instrument-aware
+        point_value = self._point_value
+        commission = self.config.get_commission(self._instrument)
+        risk_per_contract = stop_distance * point_value + commission
         total_risk = risk_per_contract * max_contracts
 
         adjustments = []
@@ -284,14 +295,15 @@ class RiskEngine:
         Contracts = risk_budget / (stop_distance * point_value + commission)
         """
         risk_budget = self.state.current_equity * (self.config.max_risk_per_trade_pct / 100)
-        
-        point_value = (self.config.nq_point_value_micro if self.config.use_micro 
-                      else self.config.nq_point_value_mini)
+
+        point_value = self._point_value
+        tick_size = self._tick_size
+        commission = self.config.get_commission(self._instrument)
 
         # Include slippage in risk calculation
-        slippage_cost = self.config.max_slippage_ticks * 0.25 * point_value  # ticks -> points -> dollars
-        cost_per_contract = (stop_distance * point_value 
-                           + self.config.commission_per_contract 
+        slippage_cost = self.config.max_slippage_ticks * tick_size * point_value  # ticks -> points -> dollars
+        cost_per_contract = (stop_distance * point_value
+                           + commission
                            + slippage_cost)
 
         if cost_per_contract <= 0:

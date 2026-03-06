@@ -49,9 +49,9 @@ logger = logging.getLogger(__name__)
 # CONSTANTS — SAFETY LIMITS (NOT CONFIGURABLE)
 # ═══════════════════════════════════════════════════════════════
 MAX_CONTRACTS = 2                   # ABSOLUTE MAXIMUM — no exceptions
-MNQ_POINT_VALUE = 2.0               # $2.00 per point per contract
-MNQ_TICK_SIZE = 0.25                # Minimum price increment
-ENTRY_CHASE_TICKS = 2               # 2 ticks = 0.50 pts chase allowance
+MNQ_POINT_VALUE = 2.0               # $2.00 per point per contract (default, overridden by instrument)
+MNQ_TICK_SIZE = 0.25                # Minimum price increment (default, overridden by instrument)
+ENTRY_CHASE_TICKS = 2               # 2 ticks chase allowance
 ENTRY_TIMEOUT_SECONDS = 5.0         # Cancel entry if not filled
 ORDER_WATCHDOG_SECONDS = 30.0       # Cancel any order stuck > 30s
 DAILY_LOSS_LIMIT = 500.0            # Reject new entries if daily PnL <= -$500
@@ -87,19 +87,31 @@ class OrderManager:
     and enforces all safety rails before every order submission.
     """
 
-    def __init__(self, ib_client, config=None, log_dir: str = "logs"):
+    def __init__(self, ib_client, config=None, log_dir: str = "logs", instrument: str = "MNQ"):
         """
         Args:
             ib_client: IBKRClient instance (from Broker.ibkr_client)
             config: Optional config dict with overrides
             log_dir: Directory for order/trade logs
+            instrument: Instrument symbol for point value / tick size lookup
         """
         self.ib = ib_client._ib             # ib_insync IB instance
-        self.contract = ib_client._contract  # Qualified MNQ contract
+        self.contract = ib_client._contract  # Qualified contract
         self._ib_client = ib_client
         self._config = config or {}
         self._log_dir = Path(log_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._instrument = instrument.upper()
+
+        # Instrument-aware point value and tick size
+        try:
+            from config.instruments import InstrumentSpec
+            spec = InstrumentSpec.from_symbol(self._instrument)
+            self._point_value = spec.point_value
+            self._tick_size = spec.tick_size
+        except Exception:
+            self._point_value = MNQ_POINT_VALUE
+            self._tick_size = MNQ_TICK_SIZE
 
         # State
         self._active_orders: Dict[int, dict] = {}
@@ -367,7 +379,7 @@ class OrderManager:
         num_contracts = min(num_contracts, MAX_CONTRACTS)
 
         # Calculate limit price with chase
-        chase = ENTRY_CHASE_TICKS * MNQ_TICK_SIZE  # 0.50 pts
+        chase = ENTRY_CHASE_TICKS * self._tick_size  # 0.50 pts
         if action == "BUY":
             limit_price = round(entry_price + chase, 2)
         else:
@@ -650,9 +662,9 @@ class OrderManager:
 
         # Calculate C1 PnL
         if direction == "LONG":
-            c1_pnl = (fill_price - entry_price) * MNQ_POINT_VALUE
+            c1_pnl = (fill_price - entry_price) * self._point_value
         else:
-            c1_pnl = (entry_price - fill_price) * MNQ_POINT_VALUE
+            c1_pnl = (entry_price - fill_price) * self._point_value
 
         # Verify PnL sign
         c1_pnl = self._verify_pnl_sign(direction, entry_price, fill_price, c1_pnl)
@@ -832,9 +844,9 @@ class OrderManager:
 
         # Calculate C2 PnL
         if direction == "LONG":
-            c2_pnl = (exit_price - entry_price) * MNQ_POINT_VALUE
+            c2_pnl = (exit_price - entry_price) * self._point_value
         else:
-            c2_pnl = (entry_price - exit_price) * MNQ_POINT_VALUE
+            c2_pnl = (entry_price - exit_price) * self._point_value
 
         c2_pnl = self._verify_pnl_sign(direction, entry_price, exit_price, c2_pnl)
 
@@ -880,9 +892,9 @@ class OrderManager:
 
         # Calculate PnL for each unfilled leg
         if direction == "LONG":
-            pnl_per = (fill_price - entry_price) * MNQ_POINT_VALUE
+            pnl_per = (fill_price - entry_price) * self._point_value
         else:
-            pnl_per = (entry_price - fill_price) * MNQ_POINT_VALUE
+            pnl_per = (entry_price - fill_price) * self._point_value
 
         # Close C1 if still open
         if trade["c1_status"] == "OPEN":
@@ -1044,9 +1056,9 @@ class OrderManager:
         entry_price = trade["entry_price"]
 
         if direction == "LONG":
-            pnl_per = (price - entry_price) * MNQ_POINT_VALUE
+            pnl_per = (price - entry_price) * self._point_value
         else:
-            pnl_per = (entry_price - price) * MNQ_POINT_VALUE
+            pnl_per = (entry_price - price) * self._point_value
 
         if trade["c1_status"] == "OPEN":
             trade["c1_status"] = "FILLED"
@@ -1300,9 +1312,9 @@ class OrderManager:
             remaining += 1
 
         if direction == "LONG":
-            pnl = (current - entry_price) * MNQ_POINT_VALUE * remaining
+            pnl = (current - entry_price) * self._point_value * remaining
         else:
-            pnl = (entry_price - current) * MNQ_POINT_VALUE * remaining
+            pnl = (entry_price - current) * self._point_value * remaining
 
         return round(pnl, 2)
 
@@ -1317,17 +1329,17 @@ class OrderManager:
             logger.error("PNL_SIGN_ERROR: direction=%s entry=%.2f exit=%.2f pnl=%.2f — recalculating",
                          direction, entry, exit, pnl)
             if direction == "LONG":
-                return round((exit - entry) * MNQ_POINT_VALUE, 2)
+                return round((exit - entry) * self._point_value, 2)
             else:
-                return round((entry - exit) * MNQ_POINT_VALUE, 2)
+                return round((entry - exit) * self._point_value, 2)
 
         if not expected_positive and pnl > 0 and entry != exit:
             logger.error("PNL_SIGN_ERROR: direction=%s entry=%.2f exit=%.2f pnl=%.2f — recalculating",
                          direction, entry, exit, pnl)
             if direction == "LONG":
-                return round((exit - entry) * MNQ_POINT_VALUE, 2)
+                return round((exit - entry) * self._point_value, 2)
             else:
-                return round((entry - exit) * MNQ_POINT_VALUE, 2)
+                return round((entry - exit) * self._point_value, 2)
 
         return pnl
 

@@ -180,7 +180,7 @@ class IBKRClient:
 
     def get_contract(self, symbol: str = "MNQ", exchange: str = "CME") -> Contract:
         """
-        Get MNQ futures contract definition.
+        Get futures contract definition for any supported CME Micro instrument.
         Requests all available expiries via reqContractDetails, then picks the
         front month (nearest lastTradeDateOrContractMonth) to avoid the
         "Ambiguous contract" error from TWS.
@@ -220,7 +220,7 @@ class IBKRClient:
         exchange: str = "CME",
     ) -> bool:
         """
-        Subscribe to real-time bars for MNQ.
+        Subscribe to real-time bars for a CME Micro futures instrument.
 
         Uses reqRealTimeBars for 5-second bars.
         Each completed bar fires on_bar_update callbacks.

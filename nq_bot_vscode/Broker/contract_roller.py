@@ -1,10 +1,11 @@
 """
-MNQ Contract Rollover Manager
-==============================
-Automatically switches from the expiring MNQ contract to the next front month
+CME Micro Futures Contract Rollover Manager
+=============================================
+Automatically switches from the expiring contract to the next front month
 before expiry. Rolls 5 trading days before expiration.
 
-MNQ expiry cycle: H (March), M (June), U (September), Z (December)
+Supported instruments: MNQ, MES, MYM, M2K (any CME quarterly futures).
+Expiry cycle: H (March), M (June), U (September), Z (December)
 Expiry = 3rd Friday of the expiry month.
 
 Safety rules:
@@ -178,13 +179,15 @@ def third_friday(year: int, month: int) -> date:
 
 class ContractRoller:
     """
-    Manages automatic MNQ contract rollover.
+    Manages automatic contract rollover for CME Micro futures.
 
+    Supports MNQ, MES, MYM, M2K and any symbol using the HMUZ quarterly cycle.
     Rolls 5 trading days before the 3rd Friday of the expiry month.
     Uses the H→M→U→Z quarterly cycle with year rollover on Z→H.
     """
 
-    def __init__(self):
+    def __init__(self, instrument: str = "MNQ"):
+        self._instrument = instrument.upper()
         self._current_symbol: Optional[str] = None
         self._roll_executed: bool = False
 
@@ -460,6 +463,47 @@ class ContractRoller:
         self._current_symbol = next_symbol
         self._roll_executed = True
         return True
+
+    @staticmethod
+    def build_symbol(base: str, month_code: str, year_digit: int) -> str:
+        """
+        Build a contract symbol from components.
+
+        Examples:
+            build_symbol("MES", "H", 6) -> "MESH6"
+            build_symbol("M2K", "M", 6) -> "M2KM6"
+        """
+        return f"{base}{month_code}{year_digit}"
+
+    @staticmethod
+    def get_front_month(base: str, ref_date: Optional[date] = None) -> str:
+        """
+        Determine the current front-month symbol for any instrument.
+
+        Args:
+            base: Instrument base symbol (e.g., "MNQ", "MES", "MYM", "M2K")
+            ref_date: Reference date (default: today)
+
+        Returns:
+            Front-month symbol, e.g., "MNQM6"
+        """
+        if ref_date is None:
+            ref_date = date.today()
+
+        # Find the nearest quarterly expiry that hasn't passed the roll date
+        for year_offset in range(2):
+            year = ref_date.year + year_offset
+            year_digit = year % 10
+            for code in CYCLE_ORDER:
+                month = MONTH_CODES[code]
+                expiry = third_friday(year, month)
+                roll_date = subtract_trading_days(expiry, ROLL_DAYS_BEFORE_EXPIRY)
+                if ref_date < roll_date:
+                    return f"{base}{code}{year_digit}"
+
+        # Fallback: should not reach here
+        year_digit = ref_date.year % 10
+        return f"{base}{CYCLE_ORDER[0]}{year_digit + 1}"
 
     def get_roll_schedule(self, symbol: str) -> dict:
         """
