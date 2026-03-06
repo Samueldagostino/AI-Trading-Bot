@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T06:26:15.608241+00:00",
+  "updated": "2026-03-06T06:27:17.126157+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 0,
@@ -28,26 +28,8 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 25116.25,
+  "last_price": 25111.5,
   "recent_decisions": [
-    {
-      "time": "01:22:10 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "01:22:15 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "01:22:31 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
     {
       "time": "01:23:16 ET",
       "direction": "LONG",
@@ -86,6 +68,24 @@
     },
     {
       "time": "01:26:05 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "01:26:45 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "01:26:51 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "01:27:00 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
