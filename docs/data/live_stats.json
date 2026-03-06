@@ -1,13 +1,13 @@
 {
-  "updated": "2026-03-06T08:39:22.595903+00:00",
+  "updated": "2026-03-06T08:41:01.510061+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 6,
   "win_rate": 66.7,
   "profit_factor": 2.37,
   "session_pnl_pct": 0.069,
-  "signals_rejected": 48,
-  "signals_approved": 1,
+  "signals_rejected": 49,
+  "signals_approved": 0,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
@@ -28,64 +28,64 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25077.25,
+  "last_price": 25079.5,
   "recent_decisions": [
     {
-      "time": "03:38:36 ET",
+      "time": "03:40:10 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:38:40 ET",
+      "time": "03:40:15 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:38:45 ET",
+      "time": "03:40:20 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:38:50 ET",
+      "time": "03:40:26 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:38:55 ET",
+      "time": "03:40:30 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:39:00 ET",
+      "time": "03:40:36 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:39:05 ET",
+      "time": "03:40:40 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:39:10 ET",
+      "time": "03:40:45 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:39:15 ET",
+      "time": "03:40:51 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:39:20 ET",
+      "time": "03:40:55 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
