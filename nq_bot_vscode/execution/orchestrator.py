@@ -48,6 +48,7 @@ from config.settings import BotConfig, CONFIG
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS, HTF_TIMEFRAMES,
+    CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
 )
 
 logger = logging.getLogger(__name__)
@@ -314,7 +315,7 @@ class IBKRLivePipeline:
             current_time=bar.timestamp,
         )
 
-        # Determine entry source (identical to main.py logic)
+        # PATH C: Sweep-only trigger architecture (mirrors main.py)
         has_signal = signal and signal.should_trade
         has_sweep = (
             sweep_signal is not None
@@ -325,35 +326,33 @@ class IBKRLivePipeline:
         entry_score = 0.0
         entry_source = None
 
-        if has_signal and has_sweep:
-            direction_str = (
-                "long" if signal.direction == SignalDirection.LONG
-                else "short"
-            )
-            sweep_dir = (
-                "long" if sweep_signal.direction == "LONG" else "short"
-            )
-            if direction_str == sweep_dir:
-                entry_direction = direction_str
-                entry_score = signal.combined_score + SWEEP_CONFLUENCE_BONUS
-                entry_source = "confluence"
-            else:
-                entry_direction = direction_str
-                entry_score = signal.combined_score
-                entry_source = "signal"
-        elif has_signal:
-            entry_direction = (
-                "long" if signal.direction == SignalDirection.LONG
-                else "short"
-            )
-            entry_score = signal.combined_score
-            entry_source = "signal"
-        elif has_sweep:
+        if has_sweep:
             entry_direction = (
                 "long" if sweep_signal.direction == "LONG" else "short"
             )
             entry_score = sweep_signal.score
             entry_source = "sweep"
+            # Layer 2 context boost from aggregator alignment
+            if has_signal:
+                signal_dir = (
+                    "long" if signal.direction == SignalDirection.LONG
+                    else "short"
+                )
+                if signal_dir == entry_direction:
+                    entry_score += CONTEXT_AGGREGATOR_BOOST
+            # Layer 2 structural context boosts
+            if features:
+                if entry_direction == "long":
+                    if getattr(features, 'near_bullish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bullish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+                elif entry_direction == "short":
+                    if getattr(features, 'near_bearish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bearish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+        # Aggregator alone cannot trigger (PATH C)
 
         if entry_direction is None:
             return None

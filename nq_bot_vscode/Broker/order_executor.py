@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -219,6 +220,7 @@ class IBKROrderExecutor:
         limit_price: float = 0.0,
         stop_loss: float = 0.0,
         c1_take_profit: float = 0.0,
+        instrument: str = "MNQ",
     ) -> Dict[str, OrderRecord]:
         """
         Place the standard 2-contract scale-out entry.
@@ -227,6 +229,19 @@ class IBKROrderExecutor:
         C2: 1 contract as runner (trailing stop managed externally).
         Both share the same initial stop-loss.
         """
+        # ── INSTRUMENT VALIDATION GATE ──
+        rejection = self._check_instrument_validated(instrument)
+        if rejection:
+            now = datetime.now(timezone.utc)
+            rejected = OrderRecord(
+                timestamp=now, side=direction, order_type="MKT",
+                contracts=2, price=limit_price, tag="BLOCKED",
+                accepted=False, rejection_reason=rejection,
+                state=OrderState.REJECTED,
+            )
+            self._log_order(rejected)
+            return {"c1": rejected, "c2": rejected}
+
         side = OrderSide.BUY if direction == "long" else OrderSide.SELL
         order_type = (IBKROrderType.LIMIT if limit_price > 0
                       else IBKROrderType.MARKET)
@@ -574,6 +589,41 @@ class IBKROrderExecutor:
     # ──────────────────────────────────────────────────────────
     # HELPERS
     # ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _check_instrument_validated(instrument: str) -> Optional[str]:
+        """
+        Check if an instrument has been backtested and validated.
+
+        Returns None if clear, or a rejection reason string.
+        Instruments without 200+ trade backtest validation are blocked
+        unless ALLOW_UNVALIDATED=true is set (for paper testing only).
+        """
+        try:
+            from config.instruments import InstrumentSpec
+            spec = InstrumentSpec.from_symbol(instrument)
+        except (ValueError, ImportError):
+            return f"UNKNOWN_INSTRUMENT: '{instrument}' not found in InstrumentSpec registry"
+
+        if not spec.validated:
+            if os.getenv("ALLOW_UNVALIDATED", "false").lower() == "true":
+                logger.warning(
+                    "OVERRIDE: %s is unvalidated but ALLOW_UNVALIDATED=true. "
+                    "Use for PAPER TESTING ONLY.", instrument
+                )
+                return None
+            logger.error(
+                "BLOCKED: %s has not been backtested. "
+                "Run 200+ trade validation before deploying. "
+                "Set ALLOW_UNVALIDATED=true to override (PAPER ONLY).",
+                instrument,
+            )
+            return (
+                f"UNVALIDATED_INSTRUMENT: {instrument} has not been backtested. "
+                f"Run 200+ trade validation before deploying. "
+                f"Set ALLOW_UNVALIDATED=true to override (PAPER ONLY)."
+            )
+        return None
 
     def _schedule_cancel_all(self) -> None:
         """Schedule cancel_all_open_orders on the event loop.

@@ -29,6 +29,7 @@ from config.constants import (
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
     HTF_STRENGTH_GATE,
     UCL_FVG_CONFLUENCE_BOOST,
+    CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
 )
 from config.validator import validate_config
 from database.connection import DatabaseManager
@@ -384,47 +385,25 @@ class TradingOrchestrator:
             current_time=bar.timestamp,
         )
 
-        # Determine effective signal source: existing, sweep, or both
+        # === PATH C: 4-LAYER DECISION ENGINE ===
+        # Layer 1: HTF Gate (hard filter — enforced in aggregator)
+        # Layer 2: Structural context (aggregator, OB, FVG — boost sweep score)
+        # Layer 3: Entry trigger (SWEEP ONLY — only sweeps generate trades)
+        # Layer 4: Risk calibration (downstream HC gates + risk engine)
+        #
+        # Non-sweep signal sources are demoted to contextual score modifiers.
+        # The aggregator alone CANNOT trigger trades.
         has_signal = signal and signal.should_trade
         has_sweep = (sweep_signal is not None and
                      sweep_signal.score >= SWEEP_MIN_SCORE)
 
-        # Build entry parameters from whichever signal source(s) fired
         entry_direction = None
         entry_score = 0.0
-        entry_source = None  # "signal", "sweep", "confluence"
-        sweep_stop_override = None  # sweep may provide tighter stop
+        entry_source = None  # "sweep" or "ucl_confirmed_*" only
+        sweep_stop_override = None
 
-        if has_signal and has_sweep:
-            # Both fire: use existing signal direction, boost score
-            direction_str = "long" if signal.direction == SignalDirection.LONG else "short"
-            sweep_dir = "long" if sweep_signal.direction == "LONG" else "short"
-
-            if direction_str == sweep_dir:
-                # Same direction -> confluence bonus
-                entry_direction = direction_str
-                entry_score = signal.combined_score + SWEEP_CONFLUENCE_BONUS
-                entry_source = "confluence"
-                logger.info(
-                    f"SWEEP CONFLUENCE: {direction_str} | "
-                    f"signal={signal.combined_score:.3f} + "
-                    f"sweep={sweep_signal.score:.2f} -> "
-                    f"boosted={entry_score:.3f}"
-                )
-            else:
-                # Conflicting directions -> use existing signal only
-                entry_direction = direction_str
-                entry_score = signal.combined_score
-                entry_source = "signal"
-
-        elif has_signal:
-            # Existing signal only
-            entry_direction = "long" if signal.direction == SignalDirection.LONG else "short"
-            entry_score = signal.combined_score
-            entry_source = "signal"
-
-        elif has_sweep:
-            # Sweep-only entry
+        if has_sweep:
+            # Layer 3: Sweep is the ONLY entry trigger
             entry_direction = "long" if sweep_signal.direction == "LONG" else "short"
             entry_score = sweep_signal.score
             entry_source = "sweep"
@@ -433,11 +412,44 @@ class TradingOrchestrator:
                 sweep_stop_override = abs(bar.close - sweep_signal.stop_price)
             else:
                 sweep_stop_override = None  # Fall back to ATR-based stop
+
+            # Layer 2: Contextual boosts from aggregator alignment
+            if has_signal:
+                signal_dir = "long" if signal.direction == SignalDirection.LONG else "short"
+                if signal_dir == entry_direction:
+                    entry_score += CONTEXT_AGGREGATOR_BOOST
+                    logger.info(
+                        f"CONTEXT BOOST: aggregator {signal_dir} agrees | "
+                        f"+{CONTEXT_AGGREGATOR_BOOST} -> {entry_score:.3f}"
+                    )
+
+            # Layer 2: Structural context boosts from feature snapshot
+            if features:
+                if entry_direction == "long":
+                    if getattr(features, 'near_bullish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bullish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+                elif entry_direction == "short":
+                    if getattr(features, 'near_bearish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bearish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+
+            stop_str = f"{sweep_stop_override:.1f}pts" if sweep_stop_override else "ATR-based"
             logger.info(
                 f"SWEEP SIGNAL: {entry_direction} | "
-                f"Score: {sweep_signal.score:.2f} | "
+                f"Score: {entry_score:.3f} (base {sweep_signal.score:.2f}) | "
                 f"Levels: {', '.join(sweep_signal.swept_levels)} | "
-                f"Stop: {sweep_stop_override:.1f}pts"
+                f"Stop: {stop_str}"
+            )
+
+        elif has_signal:
+            # PATH C: Aggregator alone CANNOT trigger trades — context only
+            agg_dir = "long" if signal.direction == SignalDirection.LONG else "short"
+            logger.debug(
+                f"CONTEXT ONLY (no sweep): aggregator {agg_dir} "
+                f"score={signal.combined_score:.3f} — no trade (sweep required)"
             )
 
         # ── Shadow rejection helper ──────────────────────────────────
@@ -747,7 +759,7 @@ class TradingOrchestrator:
                     action_result["inst_fomc_window"] = modifier_result.details.get(
                         "fomc", {}).get("window", "n/a")
                 # Attach sweep metadata if applicable
-                if entry_source in ("sweep", "confluence") and sweep_signal:
+                if entry_source == "sweep" and sweep_signal:
                     action_result["sweep_levels"] = sweep_signal.swept_levels
                     action_result["sweep_score"] = sweep_signal.score
                     action_result["sweep_depth_pts"] = sweep_signal.sweep_depth_pts
