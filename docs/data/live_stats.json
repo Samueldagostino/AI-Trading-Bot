@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T08:45:56.430742+00:00",
+  "updated": "2026-03-06T08:47:34.281602+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 6,
@@ -28,67 +28,67 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25092.5,
+  "last_price": 25106.5,
   "recent_decisions": [
     {
-      "time": "03:45:00 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "03:45:15 ET",
+      "time": "03:46:25 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:45:20 ET",
+      "time": "03:46:35 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:45:26 ET",
+      "time": "03:46:40 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
     },
     {
-      "time": "03:45:30 ET",
+      "time": "03:46:45 ET",
       "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "CONFLUENCE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "03:45:36 ET",
+      "time": "03:46:50 ET",
       "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "CONFLUENCE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "03:45:41 ET",
+      "time": "03:47:00 ET",
       "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "CONFLUENCE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "03:45:45 ET",
+      "time": "03:47:05 ET",
       "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "CONFLUENCE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "03:45:50 ET",
+      "time": "03:47:15 ET",
       "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "CONFLUENCE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "03:45:55 ET",
+      "time": "03:47:25 ET",
       "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "CONFLUENCE"
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "03:47:30 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
     }
   ]
 }
