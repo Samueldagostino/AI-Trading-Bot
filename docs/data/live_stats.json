@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T07:14:14.259691+00:00",
+  "updated": "2026-03-06T07:15:48.811981+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 2,
@@ -28,67 +28,67 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25096.5,
+  "last_price": 25102.0,
   "recent_decisions": [
     {
-      "time": "02:10:40 ET",
-      "direction": "SHORT",
+      "time": "02:14:46 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:10:50 ET",
-      "direction": "SHORT",
+      "time": "02:15:05 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:10:55 ET",
-      "direction": "SHORT",
+      "time": "02:15:11 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:11:00 ET",
-      "direction": "SHORT",
+      "time": "02:15:15 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:11:06 ET",
-      "direction": "SHORT",
+      "time": "02:15:20 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:11:10 ET",
-      "direction": "SHORT",
+      "time": "02:15:26 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:11:41 ET",
-      "direction": "SHORT",
+      "time": "02:15:30 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:11:45 ET",
-      "direction": "SHORT",
+      "time": "02:15:36 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:11:56 ET",
-      "direction": "SHORT",
+      "time": "02:15:40 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     },
     {
-      "time": "02:12:15 ET",
-      "direction": "SHORT",
+      "time": "02:15:45 ET",
+      "direction": "LONG",
       "decision": "REJECTED",
-      "reason": "HTF_GATE"
+      "reason": "MIN_RR"
     }
   ]
 }
