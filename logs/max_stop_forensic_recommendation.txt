@@ -1,0 +1,35 @@
+MAX STOP GATE FORENSIC — RECOMMENDATION
+==================================================
+
+Generated: 2026-03-06T17:13:52.214616+00:00
+Dataset: period_4 (Sep 2023 - Feb 2024)
+
+Stop Formula: min(structural_stop, ATR_14 x 1.5)
+HC Cap: 30.0 pts
+
+Blocked Trades Analyzed: 44
+  Direct rejections: 5
+  UCL-routed: 39
+
+Stop Distribution:
+  min      30.0 pts
+  max      54.8 pts
+  mean     38.5 pts
+  median   35.8 pts
+  p75      42.0 pts
+  p90      50.8 pts
+
+Bucket Classification:
+  A (Formula Too Wide):   0 trades (0%)
+  B (Legitimately Wide):  9 trades (20%)
+  C (No Clear Structure): 35 trades (80%)
+
+Shadow PnL (if these trades were executed):
+  Direct: $+53.70 (WR=40.0%, PF=1.18)
+  UCL:    $+1,638.52 (WR=48.7%, PF=1.67)
+  Total:  $+1,692.22
+
+RECOMMENDATION: KEEP_30PT_CAP
+Confidence: MEDIUM
+
+Bucket C (35 trades, 80%) dominant — most blocked trades use ATR-based stops with no structural override. Shadow data lacks structural stop info for definitive classification. Small sample (44 trades), shadow PnL $+1,692.22. The 30pt cap blocks a small number of trades with marginal PnL impact. Recommend: keep current 30pt cap. The UCL watch mechanism already recovers the best wide-stop setups through post-sweep confirmation.

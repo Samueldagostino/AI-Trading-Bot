@@ -18,6 +18,9 @@ from typing import Optional, List, Tuple
 from enum import Enum
 from zoneinfo import ZoneInfo
 
+from monitoring.alerting import get_alert_manager
+from monitoring.alert_templates import AlertTemplates
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,14 +90,15 @@ class RiskAssessment:
 class RiskEngine:
     """
     Independent risk management engine.
-    
+
     CRITICAL: This engine has absolute authority over position sizing
     and trade approval. No signal, regardless of confidence, can
     override risk limits.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, instrument: str = "MNQ"):
         self.config = config.risk
+        self._instrument = instrument
         self.state = RiskState(
             starting_equity=self.config.account_size,
             current_equity=self.config.account_size,
@@ -102,6 +106,16 @@ class RiskEngine:
             daily_starting_equity=self.config.account_size,
         )
         self._economic_events: List[dict] = []
+
+    @property
+    def _point_value(self) -> float:
+        """Get point value for the configured instrument."""
+        return self.config.get_point_value(self._instrument)
+
+    @property
+    def _tick_size(self) -> float:
+        """Get tick size for the configured instrument."""
+        return self.config.get_tick_size(self._instrument)
 
     # ================================================================
     # Primary Risk Assessment
@@ -235,10 +249,10 @@ class RiskEngine:
             stop_distance, entry_price, size_multiplier
         )
 
-        # Dollar risk calculation
-        point_value = (self.config.nq_point_value_micro if self.config.use_micro 
-                      else self.config.nq_point_value_mini)
-        risk_per_contract = stop_distance * point_value + self.config.commission_per_contract
+        # Dollar risk calculation — instrument-aware
+        point_value = self._point_value
+        commission = self.config.get_commission(self._instrument)
+        risk_per_contract = stop_distance * point_value + commission
         total_risk = risk_per_contract * max_contracts
 
         adjustments = []
@@ -281,14 +295,15 @@ class RiskEngine:
         Contracts = risk_budget / (stop_distance * point_value + commission)
         """
         risk_budget = self.state.current_equity * (self.config.max_risk_per_trade_pct / 100)
-        
-        point_value = (self.config.nq_point_value_micro if self.config.use_micro 
-                      else self.config.nq_point_value_mini)
+
+        point_value = self._point_value
+        tick_size = self._tick_size
+        commission = self.config.get_commission(self._instrument)
 
         # Include slippage in risk calculation
-        slippage_cost = self.config.max_slippage_ticks * 0.25 * point_value  # ticks -> points -> dollars
-        cost_per_contract = (stop_distance * point_value 
-                           + self.config.commission_per_contract 
+        slippage_cost = self.config.max_slippage_ticks * tick_size * point_value  # ticks -> points -> dollars
+        cost_per_contract = (stop_distance * point_value
+                           + commission
                            + slippage_cost)
 
         if cost_per_contract <= 0:
@@ -335,31 +350,39 @@ class RiskEngine:
 
     def _compute_size_multiplier(self, vix: float, current_time: datetime) -> float:
         """
-        Compute a multiplicative factor to reduce position size
-        based on current conditions. Always <= 1.0.
+        Compute a reduction factor for position size based on current
+        conditions. Always <= 1.0.
+
+        Uses min(factors) instead of multiplying all factors together.
+        Multiplicative chaining was too aggressive — worst case produced
+        0.01875 which rounds to 0 contracts, killing the strategy.
+        Taking the single worst factor prevents compounding.
         """
-        multiplier = 1.0
+        factors = []
 
         # Overnight reduction
         if self.state.is_overnight and self.config.reduce_size_overnight:
-            multiplier *= 0.5
+            factors.append(0.5)
 
         # VIX-based reduction
         if vix > self.config.max_vix_for_full_size:
             vix_factor = max(0.3, 1.0 - (vix - self.config.max_vix_for_full_size) / 30)
-            multiplier *= vix_factor
+            factors.append(vix_factor)
 
         # Loss streak reduction (gradual)
         if self.state.consecutive_losses >= 3:
             streak_factor = max(0.25, 1.0 - (self.state.consecutive_losses - 2) * 0.15)
-            multiplier *= streak_factor
+            factors.append(streak_factor)
 
         # Drawdown reduction
         if self.state.current_drawdown_pct >= 5.0:
             dd_factor = max(0.25, 1.0 - (self.state.current_drawdown_pct - 5.0) / 10)
-            multiplier *= dd_factor
+            factors.append(dd_factor)
 
-        return round(min(multiplier, 1.0), 2)
+        if not factors:
+            return 1.0
+
+        return round(min(factors), 2)
 
     # ================================================================
     # Trade Outcome Recording
@@ -390,6 +413,23 @@ class RiskEngine:
             f"Equity=${self.state.current_equity:.2f} | DD={self.state.current_drawdown_pct:.2f}%"
         )
 
+        # Alert on consecutive losses (>= 3)
+        mgr = get_alert_manager()
+        if mgr and self.state.consecutive_losses >= 3:
+            mgr.enqueue(AlertTemplates.consecutive_loss_streak(
+                consecutive_losses=self.state.consecutive_losses,
+                avg_loss=self.state.daily_pnl / max(self.state.daily_losses, 1),
+                total_loss=self.state.daily_pnl,
+            ))
+
+        # Alert on drawdown approaching limit (>= 50% of max)
+        if mgr and self.state.current_drawdown_pct >= self.config.max_total_drawdown_pct * 0.5:
+            mgr.enqueue(AlertTemplates.drawdown_warning(
+                current_drawdown_pct=self.state.current_drawdown_pct,
+                max_drawdown_pct=self.config.max_total_drawdown_pct,
+                daily_pnl=self.state.daily_pnl,
+            ))
+
     def reset_daily_state(self) -> None:
         """Call at the start of each trading day."""
         self.state.daily_starting_equity = self.state.current_equity
@@ -413,13 +453,42 @@ class RiskEngine:
         logger.critical(f"KILL SWITCH ACTIVATED: {reason}")
         logger.critical(f"Resume at: {self.state.kill_switch_resume_at}")
 
+        # Fire EMERGENCY alert (bypasses rate limit)
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.kill_switch_triggered(reason, {
+                "equity": self.state.current_equity,
+                "drawdown_pct": self.state.current_drawdown_pct,
+                "consecutive_losses": self.state.consecutive_losses,
+                "daily_pnl": self.state.daily_pnl,
+                "resume_at": self.state.kill_switch_resume_at.isoformat()
+                    if self.state.kill_switch_resume_at else "",
+            }))
+
     def _deactivate_kill_switch(self) -> None:
-        """Deactivate kill switch after cooldown."""
+        """Deactivate kill switch after cooldown.
+
+        Only reset consecutive_losses if that was the trigger.
+        If triggered by drawdown, the drawdown condition may still be
+        true and resetting losses would cause an immediate re-trigger
+        loop when the drawdown check fires again on the next
+        evaluate_trade() call.  Instead, reset the peak equity to
+        current equity so the drawdown percentage resets.
+        """
+        triggered_by_losses = "Consecutive losses" in self.state.kill_switch_reason
         self.state.kill_switch_active = False
         self.state.kill_switch_reason = ""
         self.state.kill_switch_resume_at = None
-        # Reset consecutive losses to prevent immediate re-trigger
-        self.state.consecutive_losses = 0
+        if triggered_by_losses:
+            # Reset consecutive losses to prevent immediate re-trigger
+            self.state.consecutive_losses = 0
+        else:
+            # Drawdown-triggered: reset peak equity to current equity
+            # so the drawdown percentage starts fresh after cooldown
+            self.state.peak_equity = self.state.current_equity
+            self.state.current_drawdown_pct = 0.0
+            self.state.max_drawdown_pct = max(self.state.max_drawdown_pct,
+                                               self.state.current_drawdown_pct)
 
     def _can_resume(self, current_time: datetime) -> bool:
         """Check if kill switch cooldown has elapsed."""

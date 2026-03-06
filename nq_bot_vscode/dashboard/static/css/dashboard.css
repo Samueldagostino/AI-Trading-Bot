@@ -1,0 +1,410 @@
+/* NQ Trading Bot — Real-Time Monitoring Dashboard */
+/* Dark theme with status colors */
+
+:root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-panel: #0f3460;
+    --bg-input: #1a1a3e;
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0b0;
+    --text-muted: #6a6a7a;
+    --green: #00ff88;
+    --red: #ff4444;
+    --yellow: #ffaa00;
+    --blue: #4488ff;
+    --orange: #ff6600;
+    --purple: #aa44ff;
+    --border: #2a2a4e;
+    --panel-radius: 8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* ─── Top Bar ─── */
+.top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.top-bar .logo {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--blue);
+    white-space: nowrap;
+}
+
+.top-bar .status-group {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-badge.running { background: rgba(0,255,136,0.15); color: var(--green); }
+.status-badge.warmup { background: rgba(255,170,0,0.15); color: var(--yellow); }
+.status-badge.stopped { background: rgba(255,68,68,0.15); color: var(--red); }
+.status-badge.kill-switch { background: rgba(255,68,68,0.3); color: var(--red); }
+
+.stat-item {
+    text-align: center;
+}
+.stat-item .label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.stat-item .value {
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.stat-item .value.positive { color: var(--green); }
+.stat-item .value.negative { color: var(--red); }
+
+.connection-dots {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.conn-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+.conn-dot.ok { background: var(--green); }
+.conn-dot.err { background: var(--red); }
+.conn-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-right: 4px;
+}
+
+/* ─── Main Layout ─── */
+.main-grid {
+    display: grid;
+    grid-template-columns: 60fr 40fr;
+    gap: 12px;
+    padding: 12px 20px;
+    min-height: calc(100vh - 120px);
+}
+
+/* ─── Panels ─── */
+.panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--panel-radius);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.left-col, .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Chart containers */
+.chart-container {
+    position: relative;
+    width: 100%;
+    flex: 1;
+    min-height: 250px;
+}
+
+.chart-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* ─── Signal Heatmap ─── */
+.heatmap-grid {
+    display: grid;
+    grid-template-columns: 70px repeat(20, 1fr);
+    gap: 2px;
+    font-size: 10px;
+}
+
+.heatmap-label {
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    padding-right: 4px;
+    white-space: nowrap;
+}
+
+.heatmap-cell {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 2px;
+    min-width: 10px;
+    min-height: 10px;
+}
+
+/* ─── Regime Indicator ─── */
+.regime-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+.regime-bar.trending_up, .regime-bar.trending { background: rgba(0,255,136,0.12); color: var(--green); }
+.regime-bar.ranging { background: rgba(255,170,0,0.12); color: var(--yellow); }
+.regime-bar.high_vol, .regime-bar.volatile { background: rgba(255,68,68,0.12); color: var(--red); }
+.regime-bar.crash { background: rgba(0,0,0,0.4); color: var(--red); }
+.regime-bar.unknown { background: rgba(100,100,120,0.12); color: var(--text-muted); }
+
+.regime-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+.regime-bar.trending_up .regime-dot, .regime-bar.trending .regime-dot { background: var(--green); }
+.regime-bar.ranging .regime-dot { background: var(--yellow); }
+.regime-bar.high_vol .regime-dot, .regime-bar.volatile .regime-dot { background: var(--red); }
+.regime-bar.crash .regime-dot { background: #990000; }
+.regime-bar.unknown .regime-dot { background: var(--text-muted); }
+
+/* ─── HTF Bias Panel ─── */
+.htf-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.htf-item {
+    background: var(--bg-primary);
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+}
+
+.htf-item .tf-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.htf-item .tf-arrow {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.htf-item .tf-arrow.bullish { color: var(--green); }
+.htf-item .tf-arrow.bearish { color: var(--red); }
+.htf-item .tf-arrow.neutral { color: var(--text-muted); }
+
+/* ─── Bottom Section ─── */
+.bottom-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    padding: 0 20px 20px;
+}
+
+/* ─── Trade Table ─── */
+.trade-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.trade-table th {
+    text-align: left;
+    padding: 6px 8px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+}
+
+.trade-table th:hover { color: var(--text-primary); }
+
+.trade-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid rgba(42,42,78,0.5);
+    font-variant-numeric: tabular-nums;
+}
+
+.trade-table tr:hover { background: rgba(68,136,255,0.05); }
+
+.trade-table .long { color: var(--green); }
+.trade-table .short { color: var(--red); }
+
+/* ─── Alert Feed ─── */
+.alert-feed {
+    list-style: none;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.alert-item {
+    padding: 6px 10px;
+    border-left: 3px solid var(--text-muted);
+    margin-bottom: 4px;
+    font-size: 11px;
+    background: rgba(0,0,0,0.15);
+    border-radius: 0 4px 4px 0;
+}
+
+.alert-item.INFO { border-left-color: var(--blue); }
+.alert-item.WARNING { border-left-color: var(--yellow); }
+.alert-item.CRITICAL { border-left-color: var(--red); }
+.alert-item.EMERGENCY { border-left-color: #990000; }
+
+.alert-time {
+    color: var(--text-muted);
+    font-size: 10px;
+    margin-right: 6px;
+}
+
+.alert-severity {
+    font-weight: 700;
+    font-size: 10px;
+    margin-right: 6px;
+}
+
+/* ─── Position Indicator ─── */
+.position-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.position-badge.flat { background: rgba(100,100,120,0.2); color: var(--text-muted); }
+.position-badge.long { background: rgba(0,255,136,0.15); color: var(--green); }
+.position-badge.short { background: rgba(255,68,68,0.15); color: var(--red); }
+
+/* ─── Login Page ─── */
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: var(--bg-primary);
+}
+
+.login-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    width: 360px;
+    text-align: center;
+}
+
+.login-box h1 {
+    font-size: 20px;
+    color: var(--blue);
+    margin-bottom: 8px;
+}
+
+.login-box p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+}
+
+.login-box input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 14px;
+    margin-bottom: 16px;
+    outline: none;
+}
+
+.login-box input:focus {
+    border-color: var(--blue);
+}
+
+.login-box button {
+    width: 100%;
+    padding: 10px;
+    background: var(--blue);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.login-box button:hover { opacity: 0.9; }
+
+.login-error {
+    color: var(--red);
+    font-size: 12px;
+    margin-top: 8px;
+    display: none;
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ─── Responsive ─── */
+@media (max-width: 1200px) {
+    .main-grid { grid-template-columns: 1fr; }
+    .bottom-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+    .top-bar { flex-direction: column; align-items: flex-start; }
+    .top-bar .status-group { width: 100%; justify-content: space-between; }
+    .main-grid { padding: 8px; gap: 8px; }
+    .bottom-grid { padding: 0 8px 8px; }
+}

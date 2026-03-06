@@ -82,6 +82,7 @@ from execution.safety_rails import SafetyRails, SafetyRailsConfig
 from paper_trading_monitor import PaperTradingMonitor
 from live_dashboard import atomic_write_json
 from signals.gex_monitor import GEXMonitor
+from Broker.order_manager import OrderManager
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,7 @@ class PaperLiveRunner:
         # Core components (initialized in start())
         self._bot: Optional[TradingOrchestrator] = None
         self._ibkr_client = None
+        self._order_manager: Optional[OrderManager] = None
 
         # Safety rails
         self._safety_rails = SafetyRails(SafetyRailsConfig(
@@ -256,6 +258,19 @@ class PaperLiveRunner:
             if not connected:
                 logger.critical("TWS connection failed — exiting")
                 sys.exit(1)
+
+            # b2. Initialize OrderManager after TWS connect
+            try:
+                self._order_manager = OrderManager(
+                    ib_client=self._ibkr_client,
+                    config={"account_size": CONFIG.risk.account_size},
+                    log_dir=str(LOGS_DIR),
+                )
+                self._order_manager.load_state()
+                logger.info("OrderManager initialized with TWS connection")
+            except Exception as e:
+                logger.warning("OrderManager initialization failed: %s (continuing without)", e)
+                self._order_manager = None
         else:
             logger.info("DRY-RUN mode — using synthetic data (no TWS)")
 
@@ -353,6 +368,19 @@ class PaperLiveRunner:
         # Update heartbeat
         self._safety_rails.on_bar_received()
 
+        # OrderManager bar update (bad tick filter, heartbeat, market halt)
+        if self._order_manager is not None:
+            if not self._order_manager.validate_bar(bar):
+                return  # Bad tick filtered
+            self._order_manager.on_bar_received(bar)
+            self._order_manager.check_market_halt()
+            await self._order_manager.check_eod()
+
+            # Manage active positions (C1 target check, C2 trail update)
+            for trade_id, trade in list(self._order_manager._active_positions.items()):
+                self._order_manager.manage_c1_exit(trade)
+                await self._order_manager.manage_c2_trail(trade, bar.close)
+
         # Check market hours for heartbeat
         et_now = bar.timestamp.astimezone(ET_TZ)
         t = et_now.hour + et_now.minute / 60.0
@@ -405,6 +433,31 @@ class PaperLiveRunner:
                     result.get("signal_score", 0),
                     result.get("signal_source", "?"),
                 )
+
+                # Submit to OrderManager if available (IBKR execution)
+                if self._order_manager is not None and not self._dry_run:
+                    signal = {
+                        "direction": result.get("direction", "").upper(),
+                        "entry_price": result.get("entry_price", bar.close),
+                        "stop_price": result.get("stop", 0),
+                        "c1_target": result.get("c1_target", 0),
+                        "c2_trail_distance": result.get("c2_trail_distance", 15.0),
+                        "modifier_total": result.get("inst_position_mult", 1.0),
+                        "confluence_score": result.get("signal_score", 0),
+                        "reason": result.get("signal_source", ""),
+                    }
+                    # Calculate c1_target if not provided (1.5x R:R)
+                    if signal["c1_target"] <= 0 and signal["stop_price"] > 0:
+                        risk = abs(signal["entry_price"] - signal["stop_price"])
+                        if signal["direction"] == "LONG":
+                            signal["c1_target"] = round(signal["entry_price"] + risk * 1.5, 2)
+                        else:
+                            signal["c1_target"] = round(signal["entry_price"] - risk * 1.5, 2)
+
+                    trade_result = await self._order_manager.submit_entry(signal)
+                    if trade_result:
+                        logger.info("OrderManager: entry submitted for %s",
+                                    trade_result.get("trade_id", "?"))
 
             elif action == "trade_closed":
                 pnl = result.get("total_pnl", 0)
@@ -607,6 +660,7 @@ class PaperLiveRunner:
         try:
             ib = self._ibkr_client._ib  # Access underlying ib_insync.IB instance
             contract = self._ibkr_client._contract  # Use already-qualified contract (has conId + localSymbol)
+            contract = self._ibkr_client.contract  # Use already-qualified contract (has conId + localSymbol)
             contract = self._ibkr_client._contract  # Use already-qualified contract (has conId + localSymbol)
 
             for tf_name, tf_cfg in HISTORICAL_TF_CONFIG.items():
@@ -931,7 +985,17 @@ class PaperLiveRunner:
         logger.info("  SHUTDOWN INITIATED")
         logger.info("=" * 60)
 
-        # Flatten any open positions
+        # Close OrderManager positions first
+        if self._order_manager is not None and self._order_manager._active_positions:
+            logger.warning("OrderManager: flattening %d active positions",
+                           len(self._order_manager._active_positions))
+            try:
+                await self._order_manager.close_all_positions(reason="SHUTDOWN")
+            except Exception as e:
+                logger.error("OrderManager shutdown flatten failed: %s", e)
+            self._order_manager.save_state()
+
+        # Flatten any open positions via executor
         if self._bot and self._bot.executor.has_active_trade:
             logger.warning("Flattening open position before shutdown")
             price = self._bot._get_last_price()

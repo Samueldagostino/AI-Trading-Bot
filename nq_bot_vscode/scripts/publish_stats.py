@@ -193,6 +193,7 @@ def build_sanitized_stats() -> dict:
     return {
         "updated": datetime.now(timezone.utc).isoformat(),
         "status": "LIVE" if is_live else "OFFLINE",
+        "trading_mode": "PAPER",  # Change to "LIVE" only after Phase 4 validation gate
         "bars_processed": status.get("bars_processed", len(candles) if isinstance(candles, list) else 0),
         "trades_today": status.get("trade_count", 0),
         "win_rate": round(status.get("win_rate", 0.0), 1),

@@ -46,16 +46,12 @@ docs/viz_data_full.json
 # Log directories
 logs/
 
-# Website live stats (allowed — sanitized, no sensitive data)
-!Website/data/
+# Cowork orchestration prompts (not for repo)
+prompts/
 
-# TradingView raw data exports
-data/tradingview/*.txt
-data/tradingview/*.csv
-*.txt
-
-# Quant Data API credentials (NEVER commit)
-config/quantdata_token.txt
-config/quantdata_instance_id.txt
-logs/gamma_levels.json
-logs/modifier_diagnostics.json
+# Build artifacts & local-only dirs
+.vertx/
+bin/
+root/
+data/replay_week/
+doc/

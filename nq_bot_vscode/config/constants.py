@@ -53,6 +53,13 @@ UCL_FVG_BOOST: float = 0.05
 UCL_FAST_CONFIRM_BOOST: float = 0.05
 UCL_HTF_ALIGN_BOOST: float = 0.05
 
+# ── LAYER 2 CONTEXT BOOSTS (PATH C architecture) ───────────────────
+# Non-sweep signal sources are demoted to contextual score modifiers.
+# They boost sweep scores but CANNOT independently trigger trades.
+CONTEXT_AGGREGATOR_BOOST: float = 0.05   # aggregator direction agrees with sweep
+CONTEXT_OB_BOOST: float = 0.05           # order block near sweep price
+CONTEXT_FVG_BOOST: float = 0.05          # FVG near sweep price
+
 # ── TIMEFRAMES ────────────────────────────────────────────────────
 HTF_TIMEFRAMES: frozenset = frozenset({"1D", "4H", "1H", "30m", "15m", "5m"})
 EXECUTION_TIMEFRAMES: frozenset = frozenset({"2m", "3m", "1m"})

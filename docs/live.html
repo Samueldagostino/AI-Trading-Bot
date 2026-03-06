@@ -134,6 +134,13 @@ a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
   <footer class="footer">
     Data refreshes every 30s from publish_stats.py &middot; Sanitized: no account numbers, no dollar amounts, no order IDs
   </footer>
+
+  <div style="padding:24px 0 16px;text-align:center;font-family:'IBM Plex Mono','SF Mono','Consolas',monospace;font-size:10px;color:#566988;line-height:1.7;max-width:700px;margin:0 auto">
+    RISK DISCLOSURE: Past backtested performance does not guarantee future results.
+    Futures trading carries substantial risk of loss and is not suitable for all investors.
+    Only risk capital should be used. All metrics shown are from historical simulation
+    with calibrated slippage &mdash; not live trading results unless explicitly labeled.
+  </div>
 </div>
 
 <script>
@@ -142,6 +149,20 @@ a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
   const POLL_INTERVAL = 30; // seconds
   let countdown = POLL_INTERVAL;
   let data = null;
+
+  // ── CONFIG-DRIVEN TRADING MODE ──
+  // Change to "LIVE" only after Phase 4 validation gate
+  const TRADING_MODE = "PAPER";
+  const STATUS_COLORS = {
+      "PAPER": "#f0b429",   // Amber
+      "LIVE": "#00d4aa",    // Teal (system green)
+      "OFFLINE": "#ff5f6d"  // Red
+  };
+  const MODE_LABELS = {
+      "PAPER": "PAPER TRADING — NOT LIVE CAPITAL",
+      "LIVE": "LIVE TRADING — REAL CAPITAL",
+      "OFFLINE": "SYSTEM OFFLINE"
+  };
 
   function $(id){ return document.getElementById(id); }
 
@@ -156,8 +177,20 @@ a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
 
   function render(d){
     const isLive = d.status === 'LIVE';
+    const modeColor = STATUS_COLORS[TRADING_MODE] || STATUS_COLORS["OFFLINE"];
+    const modeLabel = MODE_LABELS[TRADING_MODE] || "UNKNOWN";
+    const dataSource = TRADING_MODE === "PAPER" ? "Paper Trading via IBKR" : "Live Trading via IBKR";
     const app = $('app');
     app.innerHTML = `
+      <div style="background:${modeColor};color:#000;padding:12px 24px;border-radius:8px;margin-bottom:20px;text-align:center;font-family:var(--mono);font-size:14px;font-weight:700;letter-spacing:1.5px">
+        SYSTEM STATUS: ${modeLabel}
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-family:var(--mono);font-size:11px;color:var(--text2)">
+        <span>Last Updated: ${formatTime(d.updated)}</span>
+        <span>Data Source: ${dataSource}</span>
+      </div>
+
       <div class="live-header">
         <h1>LIVE STATUS</h1>
         <span class="status-pill ${isLive?'live':'offline'}">
@@ -182,15 +215,19 @@ a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
 
       <div class="kpi-grid">
         <div class="kpi">
-          <div class="kpi-label">Trades Today</div>
+          <div class="kpi-label">Mode</div>
+          <div class="kpi-value" style="color:${modeColor};font-size:16px">${TRADING_MODE}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Trades Today (${TRADING_MODE})</div>
           <div class="kpi-value">${d.trades_today}</div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Win Rate</div>
+          <div class="kpi-label">Win Rate (${TRADING_MODE})</div>
           <div class="kpi-value ${d.win_rate>=55?'green':d.win_rate>=45?'amber':'red'}">${d.win_rate.toFixed(1)}%</div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Profit Factor</div>
+          <div class="kpi-label">Profit Factor (${TRADING_MODE})</div>
           <div class="kpi-value ${d.profit_factor>=1.5?'green':d.profit_factor>=1.0?'amber':'red'}">${d.profit_factor.toFixed(2)}</div>
         </div>
         <div class="kpi">

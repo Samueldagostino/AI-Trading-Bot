@@ -1,0 +1,15 @@
+{
+  "base_url": "https://core-lb-prod.quantdata.us",
+  "auth_method": "bearer",
+  "auth_value": "STORED_IN_ENV",
+  "endpoints": {
+    "gex": "/api/options/exposure/strike/?symbol={symbol}&type=gamma",
+    "dex": "/api/options/exposure/strike/?symbol={symbol}&type=delta",
+    "net_flow": "/api/options/flow/net?symbol={symbol}",
+    "dark_pool": "/api/options/darkpool/levels?symbol={symbol}",
+    "vol_skew": "/api/options/volatility/skew?symbol={symbol}"
+  },
+  "discovered_at": "2026-03-06T00:00:00",
+  "status": "manual",
+  "notes": "Run python data_feeds/quantdata_discovery.py to discover live endpoints"
+}

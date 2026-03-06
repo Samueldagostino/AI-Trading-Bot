@@ -71,6 +71,8 @@ if _env_path.exists():
                 os.environ.setdefault(key.strip(), val)
 
 from config.settings import CONFIG
+from monitoring.alerting import AlertManager, set_alert_manager, get_alert_manager
+from monitoring.alert_templates import AlertTemplates
 from Broker.ibkr_client_portal import (
     IBKRConfig,
     IBKRClient,
@@ -81,6 +83,7 @@ from Broker.ibkr_client_portal import (
     ET_TZ,
 )
 from Broker.order_executor import ExecutorConfig
+from Broker.contract_roller import ContractRoller
 from execution.orchestrator import IBKRLivePipeline, PipelineState
 
 logger = logging.getLogger(__name__)
@@ -211,8 +214,35 @@ class IBKRLiveRunner:
     # ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Full startup sequence: validate -> connect -> warmup -> run."""
+        """Full startup sequence: validate -> connect -> rollover check -> warmup -> run."""
         self._print_banner()
+
+        # ── Contract rollover check (before pipeline start) ──
+        roller = ContractRoller()
+        self._roller = roller
+        self._daily_roll_checked = False
+        schedule = roller.get_roll_schedule(self._ibkr_config.symbol)
+        logger.info(
+            "Roll schedule: %s expires %s, roll date %s, next contract %s (expires %s)",
+            schedule["current_symbol"],
+            schedule["expiry_date"],
+            schedule["roll_date"],
+            schedule["next_contract"],
+            schedule["next_expiry"],
+        )
+        self._log_decision("roll_schedule", schedule)
+
+        # Print full 4-quarter roll schedule
+        full_schedule = ContractRoller.get_roll_schedule_next_4_quarters(
+            self._ibkr_config.symbol
+        )
+        logger.info("Roll Schedule (next 4 quarters):")
+        for entry in full_schedule:
+            logger.info(
+                "  %s -> %s: roll by %s (expiry %s)",
+                entry["current"], entry["next"],
+                entry["roll_date"], entry["expiry"],
+            )
 
         # Build pipeline
         self._pipeline = IBKRLivePipeline(
@@ -227,11 +257,64 @@ class IBKRLiveRunner:
             lambda bar: self._on_bar_wrapper(bar, original_on_bar)
         )
 
+        # Initialize AlertManager for live runner
+        alert_mgr = AlertManager(
+            CONFIG.alerting,
+            rate_limit_seconds=CONFIG.alerting.rate_limit_seconds,
+        )
+        set_alert_manager(alert_mgr)
+        await alert_mgr.start()
+        self._alert_manager = alert_mgr
+
         # Start the pipeline (connect, resolve contract, data feed, recon)
         started = await self._pipeline.start()
         if not started:
             logger.critical("Pipeline failed to start — exiting")
+            mgr = get_alert_manager()
+            if mgr:
+                mgr.enqueue(AlertTemplates.connection_loss("IBKRPipeline", "Failed to start"))
             sys.exit(1)
+
+        # ── Execute roll if needed ──
+        if roller.should_roll(self._ibkr_config.symbol):
+            next_contract = roller.get_next_contract(self._ibkr_config.symbol)
+            logger.warning(
+                "CONTRACT ROLL NEEDED: %s -> %s",
+                self._ibkr_config.symbol, next_contract,
+            )
+
+            roll_ok = await roller.execute_roll(
+                ibkr_client=self._pipeline._client,
+                order_executor=self._pipeline._executor,
+                position_manager=self._pipeline._position_manager,
+                data_feed=self._pipeline._data_feed,
+            )
+
+            if not roll_ok:
+                logger.critical(
+                    "CONTRACT ROLL FAILED — trading halted. "
+                    "Will retry on next startup."
+                )
+                self._log_decision("roll_failed", {
+                    "current": self._ibkr_config.symbol,
+                    "target": next_contract,
+                })
+                sys.exit(1)
+
+            # Update our config reference to match the rolled symbol
+            self._ibkr_config.symbol = self._pipeline._client.config.symbol
+            logger.warning(
+                "CONTRACT ROLL COMPLETE: now trading %s",
+                self._ibkr_config.symbol,
+            )
+            self._log_decision("roll_complete", {
+                "new_symbol": self._ibkr_config.symbol,
+            })
+
+            # Re-run historical backfill for new contract
+            logger.info("Re-running historical backfill for %s...", self._ibkr_config.symbol)
+            await self._pipeline._data_feed._run_backfill()
+            logger.info("Backfill complete for %s", self._ibkr_config.symbol)
 
         self._session_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self._last_session = get_session_type(datetime.now(timezone.utc))
@@ -243,6 +326,14 @@ class IBKRLiveRunner:
         })
 
         logger.info("Pipeline started — waiting for bars")
+
+        # Fire startup complete alert
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.startup_complete(
+                environment=self._ibkr_config.account_type,
+                broker="IBKR",
+            ))
 
         # Main loop
         await self._run_loop()
@@ -284,12 +375,11 @@ class IBKRLiveRunner:
             self._on_session_transition(self._last_session, current_session)
         self._last_session = current_session
 
-        # Warmup phase — feed bars to prime indicators, but don't trade
+        # Warmup phase — feed bars to feature engine only, do NOT trade
         if not self._warmup_complete:
             if self._warmup_bar_count < self.WARMUP_BARS:
-                # Feed through pipeline for indicator warmup only
-                # The pipeline won't trade because we set it to
-                # a non-RUNNING state during warmup
+                # Feed to feature engine only — do NOT call original_on_bar
+                # or process_bar, which would allow trades during warmup
                 self._pipeline._feature_engine.update(bar)
                 if self._warmup_bar_count % 10 == 0:
                     logger.info(
@@ -358,9 +448,40 @@ class IBKRLiveRunner:
             "to": new.value,
         })
 
+        if new == SessionType.RTH and old == SessionType.ETH:
+            # RTH open — daily contract rollover check
+            self._check_daily_roll()
+
         if new == SessionType.ETH and old == SessionType.RTH:
             # RTH ended — reset daily counters for new session
+            self._daily_roll_checked = False
             self._on_daily_reset()
+
+    def _check_daily_roll(self) -> None:
+        """Daily rollover check at RTH open (9:30 ET). Runs once per session."""
+        if self._daily_roll_checked:
+            return
+        self._daily_roll_checked = True
+
+        if not hasattr(self, '_roller') or not self._pipeline:
+            return
+
+        if self._roller.should_roll(self._ibkr_config.symbol):
+            next_contract = self._roller.get_next_contract(self._ibkr_config.symbol)
+            logger.critical(
+                "DAILY ROLL CHECK: Roll needed %s -> %s. "
+                "Halting trading — manual intervention or restart required.",
+                self._ibkr_config.symbol, next_contract,
+            )
+            self._log_decision("daily_roll_needed", {
+                "current": self._ibkr_config.symbol,
+                "target": next_contract,
+            })
+            # Halt the executor — do not attempt automatic roll mid-session
+            self._pipeline._executor._state.is_halted = True
+            self._pipeline._executor._state.halt_reason = (
+                f"Contract roll needed: {self._ibkr_config.symbol} -> {next_contract}"
+            )
 
     def _on_daily_reset(self) -> None:
         """Reset daily PnL and counters at session boundary."""
@@ -377,6 +498,36 @@ class IBKRLiveRunner:
             "new_date": self._session_date,
             "final_status": status,
         })
+
+        # Fire daily summary alert at RTH close
+        mgr = get_alert_manager()
+        if mgr:
+            pm = self._pipeline._position_manager
+            pm_status = pm.get_status()
+            wins = sum(1 for p in pm._closed_positions if p.net_pnl > 0)
+            losses = sum(1 for p in pm._closed_positions if p.net_pnl < 0)
+            total = wins + losses
+            win_rate = (wins / total * 100) if total > 0 else 0.0
+            daily_pnl = pm_status.get("daily_realized_pnl", 0.0)
+            pnls = [p.net_pnl for p in pm._closed_positions]
+            winning_pnls = [p for p in pnls if p > 0]
+            losing_pnls = [p for p in pnls if p < 0]
+            gross_wins = sum(winning_pnls) if winning_pnls else 0.0
+            gross_losses = abs(sum(losing_pnls)) if losing_pnls else 0.0
+            pf = gross_wins / gross_losses if gross_losses > 0 else 0.0
+            largest_win = max(pnls) if pnls else 0.0
+            largest_loss = min(pnls) if pnls else 0.0
+
+            mgr.enqueue(AlertTemplates.daily_summary(
+                total_trades=total,
+                winning_trades=wins,
+                losing_trades=losses,
+                daily_pnl=daily_pnl,
+                win_rate=win_rate,
+                profit_factor=pf,
+                largest_win=largest_win,
+                largest_loss=largest_loss,
+            ))
 
         self._pipeline._executor.reset_daily()
         self._pipeline._position_manager.reset_daily()
@@ -620,6 +771,11 @@ class IBKRLiveRunner:
         logger.info("  SHUTDOWN INITIATED")
         logger.info("=" * 60)
 
+        # Fire shutdown alert
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.shutdown_initiated("ibkr_runner_shutdown"))
+
         # 1. Flatten positions
         pm = self._pipeline._position_manager
         if pm.open_position_count > 0:
@@ -661,6 +817,10 @@ class IBKRLiveRunner:
         # 5. Flush logs
         self._trade_log.flush()
         self._decision_log.flush()
+
+        # 6. Stop alert manager
+        if hasattr(self, '_alert_manager') and self._alert_manager:
+            await self._alert_manager.stop()
 
         logger.info("Shutdown complete — all positions flat, logs flushed")
         self._pipeline = None

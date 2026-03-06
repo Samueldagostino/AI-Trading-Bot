@@ -48,7 +48,10 @@ from config.settings import BotConfig, CONFIG
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS, HTF_TIMEFRAMES,
+    CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
 )
+from data_feeds.market_context import MarketContext
+from data_feeds.quantdata_client import QuantDataClient
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +132,12 @@ class IBKRLivePipeline:
         # ── Active trade tracking ──
         self._active_group_id: Optional[str] = None
 
+        # ── QuantData market context (LOG-ONLY) ──
+        self._quantdata_client = QuantDataClient()
+        self._market_context: Optional[MarketContext] = None
+        self._last_context_refresh: Optional[datetime] = None
+        self._context_refresh_minutes = 30
+
     # ──────────────────────────────────────────────────────────
     # LIFECYCLE
     # ──────────────────────────────────────────────────────────
@@ -179,6 +188,20 @@ class IBKRLivePipeline:
             # 5. Reset daily counters
             self._executor.reset_daily()
             self._position_manager.reset_daily()
+
+            # 6. Initial market context refresh (LOG-ONLY, non-blocking)
+            try:
+                self._market_context = await self._quantdata_client.get_market_context()
+                self._last_context_refresh = datetime.now(timezone.utc)
+                logger.info(
+                    "Market context loaded: gamma=%s, flow=%s, source=%s",
+                    self._market_context.gamma_regime,
+                    self._market_context.flow_direction,
+                    self._market_context.source,
+                )
+            except Exception as e:
+                logger.warning("Initial market context refresh failed (non-fatal): %s", e)
+                self._market_context = None
 
             self._state = PipelineState.RUNNING
             logger.info("IBKR Live Pipeline RUNNING")
@@ -262,6 +285,9 @@ class IBKRLivePipeline:
         self._bars_processed += 1
         self._last_bar = bar
 
+        # === 0b. MARKET CONTEXT REFRESH (every 30 min, LOG-ONLY) ===
+        await self._refresh_market_context_if_needed()
+
         # === 1. FEATURES ===
         features = self._feature_engine.update(bar)
 
@@ -314,7 +340,7 @@ class IBKRLivePipeline:
             current_time=bar.timestamp,
         )
 
-        # Determine entry source (identical to main.py logic)
+        # PATH C: Sweep-only trigger architecture (mirrors main.py)
         has_signal = signal and signal.should_trade
         has_sweep = (
             sweep_signal is not None
@@ -325,37 +351,62 @@ class IBKRLivePipeline:
         entry_score = 0.0
         entry_source = None
 
-        if has_signal and has_sweep:
-            direction_str = (
-                "long" if signal.direction == SignalDirection.LONG
-                else "short"
-            )
-            sweep_dir = (
-                "long" if sweep_signal.direction == "LONG" else "short"
-            )
-            if direction_str == sweep_dir:
-                entry_direction = direction_str
-                entry_score = signal.combined_score + SWEEP_CONFLUENCE_BONUS
-                entry_source = "confluence"
-            else:
-                entry_direction = direction_str
-                entry_score = signal.combined_score
-                entry_source = "signal"
-        elif has_signal:
-            entry_direction = (
-                "long" if signal.direction == SignalDirection.LONG
-                else "short"
-            )
-            entry_score = signal.combined_score
-            entry_source = "signal"
-        elif has_sweep:
+        if has_sweep:
             entry_direction = (
                 "long" if sweep_signal.direction == "LONG" else "short"
             )
             entry_score = sweep_signal.score
             entry_source = "sweep"
+            # Layer 2 context boost from aggregator alignment
+            if has_signal:
+                signal_dir = (
+                    "long" if signal.direction == SignalDirection.LONG
+                    else "short"
+                )
+                if signal_dir == entry_direction:
+                    entry_score += CONTEXT_AGGREGATOR_BOOST
+            # Layer 2 structural context boosts
+            if features:
+                if entry_direction == "long":
+                    if getattr(features, 'near_bullish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bullish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+                elif entry_direction == "short":
+                    if getattr(features, 'near_bearish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bearish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+        # Aggregator alone cannot trigger (PATH C)
 
         if entry_direction is None:
+            return None
+
+        # === HTF DIRECTIONAL GATE (choke-point — ALL signal sources) ===
+        # Catches sweep entries that bypass the aggregator's HTF check.
+        if htf_bias is not None:
+            if entry_direction == "long" and not htf_bias.htf_allows_long:
+                logger.info(
+                    "HTF GATE BLOCK: long entry blocked — HTF %s (%.2f) "
+                    "[source=%s]",
+                    htf_bias.consensus_direction,
+                    htf_bias.consensus_strength, entry_source,
+                )
+                return None
+            if entry_direction == "short" and not htf_bias.htf_allows_short:
+                logger.info(
+                    "HTF GATE BLOCK: short entry blocked — HTF %s (%.2f) "
+                    "[source=%s]",
+                    htf_bias.consensus_direction,
+                    htf_bias.consensus_strength, entry_source,
+                )
+                return None
+        else:
+            # Fail-safe: no HTF data → block all trades
+            logger.warning(
+                "HTF GATE BLOCK: %s blocked — no HTF data [source=%s]",
+                entry_direction, entry_source,
+            )
             return None
 
         # === NaN GUARD — NaN comparisons always return False, bypassing gates ===
@@ -477,6 +528,8 @@ class IBKRLivePipeline:
             )
             self._position_manager.mark_partial_fill(group_id, "C2")
 
+        # Build market context snapshot for logging
+        ctx = self._market_context
         action_result = {
             "action": "entry",
             "timestamp": bar.timestamp.isoformat(),
@@ -493,6 +546,15 @@ class IBKRLivePipeline:
             "regime": self._current_regime,
             "group_id": group_id,
             "metadata": bridge_result.metadata,
+            # QuantData market context (LOG-ONLY)
+            "market_context": ctx.to_dict() if ctx else None,
+            "gamma_regime_at_entry": ctx.gamma_regime if ctx else "unknown",
+            "flow_aligned_with_trade": (
+                ctx.aligns_with_direction(entry_direction) if ctx else None
+            ),
+            "favorable_for_momentum": (
+                ctx.is_favorable_for_momentum() if ctx else None
+            ),
         }
 
         logger.info(
@@ -544,6 +606,31 @@ class IBKRLivePipeline:
                 self._active_group_id = None
 
     # ──────────────────────────────────────────────────────────
+    # MARKET CONTEXT REFRESH (LOG-ONLY)
+    # ──────────────────────────────────────────────────────────
+
+    async def _refresh_market_context_if_needed(self) -> None:
+        """Refresh market context every 30 minutes during RTH."""
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_context_refresh is None
+            or (now - self._last_context_refresh).total_seconds()
+            >= self._context_refresh_minutes * 60
+        ):
+            try:
+                self._market_context = (
+                    await self._quantdata_client.get_market_context()
+                )
+                self._last_context_refresh = now
+            except Exception as e:
+                logger.warning("Market context refresh failed (non-fatal): %s", e)
+
+    @property
+    def market_context(self) -> Optional[MarketContext]:
+        """Current market context snapshot (may be None)."""
+        return self._market_context
+
+    # ──────────────────────────────────────────────────────────
     # HTF BAR ROUTING
     # ──────────────────────────────────────────────────────────
 
@@ -592,4 +679,7 @@ class IBKRLivePipeline:
                 "rejections": self._bridge.rejections,
             },
             "data_feed": self._data_feed.get_status(),
+            "market_context": (
+                self._market_context.to_dict() if self._market_context else None
+            ),
         }
