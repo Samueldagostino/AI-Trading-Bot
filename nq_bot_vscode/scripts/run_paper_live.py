@@ -606,10 +606,7 @@ class PaperLiveRunner:
 
         try:
             ib = self._ibkr_client._ib  # Access underlying ib_insync.IB instance
-            from ib_insync import Future
-
-            contract = Future("MNQ", exchange="CME")
-            ib.qualifyContracts(contract)
+            contract = self._ibkr_client.contract  # Use already-qualified contract (has conId + localSymbol)
 
             for tf_name, tf_cfg in HISTORICAL_TF_CONFIG.items():
                 try:
