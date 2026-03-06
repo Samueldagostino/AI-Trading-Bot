@@ -1,0 +1,87 @@
+# Docker Compose Override for Development
+# Automatically loaded by docker-compose (takes precedence over docker-compose.yml)
+#
+# This file enables:
+# - Source code hot-reload (bind mounts without :cached)
+# - Verbose logging
+# - Development-friendly resource limits
+# - Direct log output to console
+#
+# To use:
+#   docker-compose up -d         # Uses this override automatically
+#   docker-compose -f docker-compose.yml up -d  # Ignores this override
+#
+# Note: Keep production values in docker-compose.yml
+
+version: '3.9'
+
+services:
+  db:
+    # More permissive resource limits for development
+    resources:
+      limits:
+        cpus: '4'
+        memory: 4G
+      reservations:
+        cpus: '1'
+        memory: 1G
+    # Expose port to host for debugging tools
+    ports:
+      - "5432:5432"
+
+  bot:
+    # Enable volume bind mount for live code reload
+    volumes:
+      - ./nq_bot_vscode:/app
+      - bot_logs:/app/logs
+      - bot_data:/app/data
+    # More verbose logging in dev
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    # Relaxed resource limits for development
+    resources:
+      limits:
+        cpus: '4'
+        memory: 4G
+      reservations:
+        cpus: '2'
+        memory: 2G
+    # Auto-restart on failure (helpful during development)
+    restart: on-failure:5
+
+  dashboard:
+    # Enable volume bind mount for live code reload
+    volumes:
+      - ./nq_bot_vscode:/app
+    # More verbose logging in dev
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    # Relaxed resource limits for development
+    resources:
+      limits:
+        cpus: '2'
+        memory: 2G
+      reservations:
+        cpus: '0.5'
+        memory: 512M
+    # Always restart when modified
+    restart: unless-stopped
+
+  backtest:
+    # Enable volume bind mount for live code reload
+    volumes:
+      - ./nq_bot_vscode:/app
+      - bot_data:/app/data
+      - bot_results:/app/results
+    # More verbose logging in dev
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  db_data:
+  bot_logs:
+  bot_data:
+  bot_results:
