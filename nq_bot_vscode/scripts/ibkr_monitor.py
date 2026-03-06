@@ -1071,7 +1071,29 @@ def render_dashboard(stats: StatsEngine, alerts: List[Alert]) -> str:
         f"     PnL: ${stats.daily_pnl:+.2f}"
     )
 
+    # ── Paper Trading Status Bar ──
+    mode = os.getenv("IBKR_ACCOUNT_TYPE", "PAPER").upper()
+    # Compute trading day count from first trade
+    if stats.trades and len(stats.trades) > 0:
+        first_ts = stats.trades[0].get("entry_timestamp", stats.trades[0].get("timestamp", ""))
+        if first_ts:
+            try:
+                first_date = datetime.fromisoformat(first_ts.replace("Z", "+00:00")).date()
+                day_count = (datetime.now(timezone.utc).date() - first_date).days + 1
+            except (ValueError, TypeError):
+                day_count = 1
+        else:
+            day_count = 1
+    else:
+        day_count = 0
+
+    pf_bar = f"{pf_str}" if stats.total_trades > 0 else "—"
+    wr_bar = f"{stats.win_rate:.0f}%" if stats.total_trades > 0 else "—"
     lines.append("")
+    lines.append(
+        f"  {mode} | Day {day_count} | {stats.total_trades} trades | "
+        f"WR {wr_bar} | PF {pf_bar}"
+    )
     lines.append(bar)
 
     return "\n".join(lines)
