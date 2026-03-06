@@ -1,0 +1,299 @@
+========================================================================
+AGENT 3 — EXECUTION & SAFETY AUDIT REPORT
+========================================================================
+Date: 2026-03-06
+Scope: Trade signal through to IBKR order placement
+Mode: READ-ONLY
+
+------------------------------------------------------------------------
+1. ORDER EXECUTOR SAFETY RAILS
+------------------------------------------------------------------------
+File: Broker/order_executor.py
+
+Constants (lines 43-47):
+  MAX_CONTRACTS_PER_ORDER = 2     -- CORRECT (exact value, module-level const)
+  MAX_OPEN_POSITIONS = 4          -- CORRECT (exact value)
+  DAILY_LOSS_LIMIT_DOLLARS = 500.0 -- CORRECT ($500)
+  KILL_SWITCH_THRESHOLD_DOLLARS = 1000.0 -- CORRECT ($1,000)
+
+NOT configurable at runtime — these are module-level constants, not
+dataclass fields or env vars.
+
+Finding 1.1 [INFO]: MAX_CONTRACTS_PER_ORDER = 2 — VERIFIED
+Checked at line 466: if request.contracts > MAX_CONTRACTS_PER_ORDER
+
+Finding 1.2 [INFO]: MAX_OPEN_POSITIONS = 4 — VERIFIED
+Checked at line 473: if len(self._state.open_positions) >= MAX_OPEN_POSITIONS
+
+Finding 1.3 [INFO]: DAILY_LOSS_LIMIT = $500 — VERIFIED
+Checked at line 498: if self._state.daily_pnl <= -DAILY_LOSS_LIMIT_DOLLARS
+This check happens INSIDE _run_safety_checks() which is called BEFORE every
+order at line 186: rejection = self._run_safety_checks(request)
+
+Finding 1.4 [INFO]: KILL_SWITCH = $1,000 — VERIFIED
+Checked at line 488: if self._state.daily_pnl <= -KILL_SWITCH_THRESHOLD_DOLLARS
+Sets is_halted = True (line 489) and logs CRITICAL.
+Also triggered in record_trade_pnl() (line 375) which schedules
+cancel_all_open_orders() via _schedule_cancel_all() (line 382).
+
+Kill switch behavior:
+  - Sets is_halted = True (halts ALL future orders)
+  - Schedules cancel_all_open_orders() on event loop
+  - CRITICAL log with daily P&L details
+
+Safety file: execution/safety_rails.py provides ADDITIONAL layer:
+  - MaxDailyLossCircuitBreaker (default $500)
+  - MaxConsecutiveLossesBreaker (default 5)
+  - MaxPositionSizeGuard (default 2 contracts)
+  - HeartbeatMonitor (alert 60s, halt 300s)
+
+Both layers (order_executor + safety_rails) provide defense-in-depth.
+
+------------------------------------------------------------------------
+2. NO ORDER BYPASS
+------------------------------------------------------------------------
+
+Every order placement function in the codebase:
+
+1. IBKROrderExecutor.place_order() (order_executor.py:168)
+   -> Calls _run_safety_checks() at line 186. VERIFIED.
+
+2. IBKROrderExecutor.place_scale_out_entry() (order_executor.py:217)
+   -> Calls place_order() for C1 (line 268) and C2 (line 271).
+   -> Both go through _run_safety_checks(). VERIFIED.
+
+3. IBKRClient.place_order() (ibkr_client.py:291)
+   -> TWS adapter path. Does NOT go through IBKROrderExecutor safety checks.
+
+Finding 2.1 [CRITICAL]: The TWS adapter (ibkr_client.py:291) has its own
+place_order() method that does NOT pass through the IBKROrderExecutor's
+_run_safety_checks(). However, examining the call sites:
+  - It is only called via the tws_adapter.py wrapper
+  - In the current architecture, the IBKRLivePipeline (orchestrator.py)
+    uses IBKROrderExecutor, not the raw TWS client
+  - No production code path calls ibkr_client.place_order() directly
+    for trade entry
+
+HOWEVER: This raw place_order() exists and could be called by future code.
+It has no safety checks (no max contracts, no daily loss, no kill switch).
+
+Mitigating factor: The current deployment uses the Client Portal path
+(IBKROrderExecutor), not the TWS path. The TWS place_order() is not in
+the active execution chain.
+
+REVISED SEVERITY: HIGH (not CRITICAL, because the TWS path is not currently
+active, but it's a latent risk if TWS migration happens without adding
+safety checks).
+
+4. TradovateClient.place_order() (tradovate_client.py:453)
+   -> Tradovate path, not IBKR. Has its own paper trading logic.
+
+5. TradovateClient.place_scale_out_entry() (tradovate_client.py:512)
+   -> Tradovate path. Calls place_order() internally.
+
+Neither Tradovate path goes through IBKROrderExecutor, but they are for a
+different broker entirely and are not in the IBKR execution chain.
+
+Verdict: All IBKR production paths go through safety checks. TWS raw
+place_order() is a latent risk.
+
+------------------------------------------------------------------------
+3. PAPER/LIVE MODE SEPARATION
+------------------------------------------------------------------------
+
+Finding 3.1 [HIGH]: NO IBKR_LIVE_CONFIRMED FLAG EXISTS
+Searched entire codebase for "IBKR_LIVE_CONFIRMED" — zero matches.
+
+The IBKR_ACCOUNT_TYPE env var accepts "paper" or "live" (ibkr_client_portal.py
+line 56). There is NO additional confirmation flag required for live mode.
+
+run_ibkr.py line 908:
+  paper_mode=(ibkr_config.account_type != "live")
+If account_type is "live", paper_mode becomes False. No second confirmation.
+
+The ExecutorConfig has paper_mode=True by default (line 119), but this is
+overridden by the ibkr_config.account_type at startup.
+
+Live execution path (order_executor.py:572-587):
+  _execute_live() raises NotImplementedError with the message:
+  "LIVE EXECUTION NOT YET IMPLEMENTED."
+
+This means even if account_type="live" is set, the system will crash on
+the first trade attempt. This is a SAFE failure mode — it prevents
+accidental live trading by design.
+
+Verdict: Live mode is EFFECTIVELY blocked by NotImplementedError. No
+IBKR_LIVE_CONFIRMED flag exists, but live execution is not yet implemented.
+RECOMMENDED: Add explicit confirmation flag before implementing live mode.
+
+------------------------------------------------------------------------
+4. SCALE-OUT INTEGRITY
+------------------------------------------------------------------------
+
+File: Broker/order_executor.py, place_scale_out_entry() lines 217-287
+
+C1 placed first (line 268):
+  c1_record = await self.place_order(c1_request)
+
+C2 only placed if C1 accepted (line 270):
+  if c1_record.accepted:
+      c2_record = await self.place_order(c2_request)
+  else:
+      # Mirror the rejection for C2 (lines 274-285)
+
+Finding 4.1 [INFO]: Scale-out integrity is CORRECT. If C1 is rejected,
+C2 is automatically rejected with reason "C1 rejected: {reason}".
+No code path exists where C2 fires without C1.
+
+Orchestrator (line 514-528): If C2 is rejected but C1 accepted, it's
+logged as "PARTIAL FILL" and marked via mark_partial_fill(). This is
+the only case where C1 exists without C2, and it's tracked properly.
+
+Verdict: VERIFIED — C2 cannot fire without C1.
+
+------------------------------------------------------------------------
+5. POSITION RECONCILIATION
+------------------------------------------------------------------------
+
+File: Broker/position_manager.py
+
+Reconciliation runs every 30 seconds (RECONCILIATION_INTERVAL_SECONDS = 30).
+Queries IBKR portfolio via _fetch_broker_positions() and compares against
+internal ledger.
+
+On mismatch (line 419-422):
+  - Logs CRITICAL with full details
+  - Calls emergency_flatten() — HALTs trading AND cancels all orders
+  - NO auto-correction — human must intervene
+
+Finding 5.1 [INFO]: Reconciliation correctly HALTS on mismatch.
+Ghost positions (broker has, we don't track) and missing positions
+(we track, broker doesn't have) both trigger halt.
+
+Finding 5.2 [MEDIUM]: Exception handling in the reconciliation loop
+(line 376-391) catches CancelledError but other exceptions could
+theoretically crash the reconciliation task. However, _fetch_broker_positions
+has its own try/except that returns empty dict on failure, so the compare
+function would see a mismatch and correctly halt.
+
+Verdict: Position reconciliation is CORRECT — mismatches halt trading.
+
+------------------------------------------------------------------------
+6. CONTRACT ROLLOVER SAFETY
+------------------------------------------------------------------------
+
+File: Broker/contract_roller.py, execute_roll() lines 357-471
+
+Step 1: Verify new contract exists via IBKR API (line 395)
+  - If verification fails, returns False (no roll, retry next startup)
+
+Step 2: Flatten ALL positions before switching (lines 405-430)
+  - emergency_flatten() called if any positions open
+  - CRITICAL log if flatten fails
+  - Verifies position count is 0 after flatten
+  - If positions remain, returns False (TRADING HALTED)
+
+Step 3: Update symbol in config (line 434)
+
+Step 4: Resubscribe data feed (line 441-456)
+  - If resubscription fails, REVERTS symbol and returns False
+
+Step 5: Log success
+
+Finding 6.1 [INFO]: Rollover safety is CORRECT.
+  - Flattens ALL positions before switching
+  - Verifies positions are actually closed
+  - Never trades both contracts (symbol only changes after flatten)
+  - Failure at any step halts trading
+  - Revert on data feed failure
+
+Verdict: Contract rollover is SAFE.
+
+------------------------------------------------------------------------
+7. KILL SWITCH AUTHENTICATION
+------------------------------------------------------------------------
+
+File: dashboard/server.py
+
+Kill switch endpoint (line 316):
+  @app.post("/api/kill-switch", dependencies=[Depends(_require_token)])
+
+_require_token (lines 69-74):
+  - Validates Bearer token from Authorization header
+  - Uses secrets.compare_digest() for timing-safe comparison
+  - Returns 401 for missing token, 403 for invalid token
+
+Token source (line 60):
+  _DASHBOARD_TOKEN = os.environ.get("DASHBOARD_API_TOKEN", "")
+  If not set, generates ephemeral token with secrets.token_hex(32)
+  and logs it as WARNING.
+
+Finding 7.1 [INFO]: Kill switch endpoint REQUIRES authentication.
+Both /api/kill-switch and /api/kill-switch/reset have _require_token.
+Unauthenticated requests receive 401/403.
+
+Finding 7.2 [MEDIUM]: Kill switch reset (/api/kill-switch/reset, line 324)
+also requires authentication. However, the reset only toggles a DEMO_STATE
+flag. The actual order executor's is_halted flag is separate. The dashboard
+kill switch controls DEMO_STATE, not the real executor. This means:
+  - Dashboard kill switch: cosmetic (for UI display only)
+  - Real kill switch: in order_executor.py record_trade_pnl()
+The dashboard kill switch does NOT actually cancel orders or halt the executor.
+
+REVISED Finding 7.2 [MEDIUM]: Dashboard kill switch is cosmetic only —
+it toggles DEMO_STATE but does not call emergency_flatten() on the actual
+order executor. In production, the dashboard should be wired to the real
+executor. Currently safe because the real kill switch in order_executor.py
+works independently.
+
+Verdict: Authentication is CORRECT. Dashboard kill switch is cosmetic.
+
+------------------------------------------------------------------------
+8. INSTRUMENT VALIDATION
+------------------------------------------------------------------------
+
+File: config/instruments.py
+
+MNQ: validated=True (line 120)  — CORRECT
+MES: validated=False (default)  — CORRECT (line 137, no validated= specified)
+MYM: validated=False (default)  — CORRECT (line 153, no validated= specified)
+M2K: validated=False (default)  — CORRECT (line 169, no validated= specified)
+
+Blocking logic: Broker/order_executor.py, _check_instrument_validated()
+lines 594-626:
+  - If not spec.validated AND ALLOW_UNVALIDATED != "true": BLOCKED
+  - ALLOW_UNVALIDATED override: env var, defaults to "false"
+  - Override logs WARNING: "Use for PAPER TESTING ONLY"
+
+place_scale_out_entry() calls _check_instrument_validated() at line 233
+BEFORE any order placement.
+
+Finding 8.1 [MEDIUM]: ALLOW_UNVALIDATED env var can bypass validation.
+This is documented as "PAPER ONLY" override. However, there's no check
+that paper_mode=True when ALLOW_UNVALIDATED=true. A user could set both
+ALLOW_UNVALIDATED=true and account_type=live (though live execution
+raises NotImplementedError, so it's currently safe).
+
+Verdict: Instrument validation is CORRECT for current deployment.
+
+========================================================================
+SUMMARY
+========================================================================
+
+| Severity | Count | Key Finding                                    |
+|----------|-------|------------------------------------------------|
+| CRITICAL | 0     | None (revised from 1 — TWS path not active)    |
+| HIGH     | 2     | TWS bypass latent risk, no IBKR_LIVE_CONFIRMED  |
+| MEDIUM   | 3     | Dashboard kill switch cosmetic, recon exception, |
+|          |       | ALLOW_UNVALIDATED not mode-checked              |
+| LOW      | 0     | None                                           |
+| INFO     | 5     | Safety rails correct, scale-out, rollover,      |
+|          |       | auth, instrument validation                     |
+
+OVERALL EXECUTION & SAFETY VERDICT: PASS WITH WARNINGS
+
+The HIGH findings are:
+1. TWS place_order() has no safety checks — not in active chain but latent.
+2. No IBKR_LIVE_CONFIRMED flag — mitigated by NotImplementedError on live.
+
+Both are acceptable for paper trading. Must be addressed before live deployment.
