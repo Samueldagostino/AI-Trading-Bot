@@ -81,6 +81,7 @@ from Broker.ibkr_client_portal import (
     ET_TZ,
 )
 from Broker.order_executor import ExecutorConfig
+from Broker.contract_roller import ContractRoller
 from execution.orchestrator import IBKRLivePipeline, PipelineState
 
 logger = logging.getLogger(__name__)
@@ -211,8 +212,21 @@ class IBKRLiveRunner:
     # ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Full startup sequence: validate -> connect -> warmup -> run."""
+        """Full startup sequence: validate -> connect -> rollover check -> warmup -> run."""
         self._print_banner()
+
+        # ── Contract rollover check (before pipeline start) ──
+        roller = ContractRoller()
+        schedule = roller.get_roll_schedule(self._ibkr_config.symbol)
+        logger.info(
+            "Roll schedule: %s expires %s, roll date %s, next contract %s (expires %s)",
+            schedule["current_symbol"],
+            schedule["expiry_date"],
+            schedule["roll_date"],
+            schedule["next_contract"],
+            schedule["next_expiry"],
+        )
+        self._log_decision("roll_schedule", schedule)
 
         # Build pipeline
         self._pipeline = IBKRLivePipeline(
@@ -232,6 +246,47 @@ class IBKRLiveRunner:
         if not started:
             logger.critical("Pipeline failed to start — exiting")
             sys.exit(1)
+
+        # ── Execute roll if needed ──
+        if roller.should_roll(self._ibkr_config.symbol):
+            next_contract = roller.get_next_contract(self._ibkr_config.symbol)
+            logger.warning(
+                "CONTRACT ROLL NEEDED: %s -> %s",
+                self._ibkr_config.symbol, next_contract,
+            )
+
+            roll_ok = await roller.execute_roll(
+                ibkr_client=self._pipeline._client,
+                order_executor=self._pipeline._executor,
+                position_manager=self._pipeline._position_manager,
+                data_feed=self._pipeline._data_feed,
+            )
+
+            if not roll_ok:
+                logger.critical(
+                    "CONTRACT ROLL FAILED — trading halted. "
+                    "Will retry on next startup."
+                )
+                self._log_decision("roll_failed", {
+                    "current": self._ibkr_config.symbol,
+                    "target": next_contract,
+                })
+                sys.exit(1)
+
+            # Update our config reference to match the rolled symbol
+            self._ibkr_config.symbol = self._pipeline._client.config.symbol
+            logger.warning(
+                "CONTRACT ROLL COMPLETE: now trading %s",
+                self._ibkr_config.symbol,
+            )
+            self._log_decision("roll_complete", {
+                "new_symbol": self._ibkr_config.symbol,
+            })
+
+            # Re-run historical backfill for new contract
+            logger.info("Re-running historical backfill for %s...", self._ibkr_config.symbol)
+            await self._pipeline._data_feed._run_backfill()
+            logger.info("Backfill complete for %s", self._ibkr_config.symbol)
 
         self._session_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self._last_session = get_session_type(datetime.now(timezone.utc))
