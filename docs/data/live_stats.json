@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T06:39:44.534694+00:00",
+  "updated": "2026-03-06T06:41:18.328875+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 0,
@@ -28,56 +28,8 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 25109.25,
+  "last_price": 25112.75,
   "recent_decisions": [
-    {
-      "time": "01:26:05 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "01:26:45 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "01:26:51 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "01:27:00 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "01:28:01 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "01:37:05 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "01:37:11 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "01:37:15 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
     {
       "time": "01:39:36 ET",
       "direction": "LONG",
@@ -86,6 +38,54 @@
     },
     {
       "time": "01:39:41 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "01:39:46 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "01:39:50 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "01:39:56 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "01:40:01 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "01:40:10 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "01:40:16 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "01:40:56 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "01:41:11 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
