@@ -1,13 +1,13 @@
 {
-  "updated": "2026-03-06T07:20:35.076468+00:00",
+  "updated": "2026-03-06T07:22:09.417914+00:00",
   "status": "LIVE",
   "bars_processed": 200,
-  "trades_today": 2,
+  "trades_today": 4,
   "win_rate": 50.0,
-  "profit_factor": 0.25,
-  "session_pnl_pct": -0.02,
-  "signals_rejected": 42,
-  "signals_approved": 4,
+  "profit_factor": 0.53,
+  "session_pnl_pct": -0.024,
+  "signals_rejected": 46,
+  "signals_approved": 2,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
@@ -28,67 +28,67 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25104.75,
+  "last_price": 25123.25,
   "recent_decisions": [
-    {
-      "time": "02:16:30 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "02:16:35 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "02:16:41 ET",
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "time": "02:18:40 ET",
-      "direction": "LONG",
-      "decision": "EXIT",
-      "reason": "Approved"
-    },
-    {
-      "time": "02:18:46 ET",
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "time": "02:19:06 ET",
-      "direction": "LONG",
-      "decision": "EXIT",
-      "reason": "Approved"
-    },
-    {
-      "time": "02:20:15 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "02:20:21 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "02:20:26 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
     {
       "time": "02:20:31 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
+    },
+    {
+      "time": "02:20:36 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "02:20:46 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "02:20:50 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "02:20:55 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "02:21:00 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "CONFLUENCE"
+    },
+    {
+      "time": "02:21:10 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "02:21:16 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "02:21:25 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
+    },
+    {
+      "time": "02:21:31 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "MIN_RR"
     }
   ]
 }
