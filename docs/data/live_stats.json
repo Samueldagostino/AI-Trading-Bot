@@ -1,59 +1,35 @@
 {
-  "updated": "2026-03-06T07:07:57.120744+00:00",
+  "updated": "2026-03-06T07:09:31.701617+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 0,
   "win_rate": 0.0,
   "profit_factor": 0.0,
   "session_pnl_pct": 0.0,
-  "signals_rejected": 50,
-  "signals_approved": 0,
+  "signals_rejected": 49,
+  "signals_approved": 1,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
     "overnight": {
       "value": 1.0,
-      "display": "1.0x (No data)"
+      "display": "1.0x (neutral)"
     },
     "fomc": {
       "value": 1.0,
-      "display": "1.0x (No data)"
+      "display": "1.0x (no_fomc)"
     },
     "gamma": {
       "value": 1.0,
-      "display": "1.0x (No data)"
+      "display": "1.0x (VIX data unavailable)"
     },
     "har_rv": {
-      "value": 1.0,
-      "display": "1.0x (No data)"
+      "value": 1.1,
+      "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25106.0,
+  "last_price": 25102.25,
   "recent_decisions": [
-    {
-      "time": "01:57:06 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "02:06:05 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "02:06:21 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
-    {
-      "time": "02:06:26 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "CONFLUENCE"
-    },
     {
       "time": "02:06:30 ET",
       "direction": "LONG",
@@ -89,6 +65,30 @@
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
+    },
+    {
+      "time": "02:08:05 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "02:08:11 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "02:08:15 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "02:09:05 ET",
+      "direction": "SHORT",
+      "decision": "APPROVED",
+      "reason": "Approved"
     }
   ]
 }
