@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T09:28:33.415420+00:00",
+  "updated": "2026-03-06T09:30:10.968298+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 7,
@@ -28,14 +28,8 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 24966.0,
+  "last_price": 24958.5,
   "recent_decisions": [
-    {
-      "time": "04:25:20 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "MIN_RR"
-    },
     {
       "time": "04:25:25 ET",
       "direction": "LONG",
@@ -89,6 +83,12 @@
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "MIN_RR"
+    },
+    {
+      "time": "04:28:50 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
     }
   ]
 }
