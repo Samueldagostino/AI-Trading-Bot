@@ -1,0 +1,108 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Test and coverage
+tests/
+test/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Documentation
+docs/
+*.md
+ARCHITECTURE.md
+CLAUDE.md
+QUICKSTART.md
+README.md
+GIT_WORKFLOW
+Knowledge/
+
+# Environment files (secrets)
+.env
+.env.local
+.env.example
+
+# Data and logs (keep separate, not in image)
+data/
+logs/
+results/
+*.csv
+*.json
+*.log
+
+# Build artifacts
+Dockerfile.orig
+docker-compose.dev.yml
+.dockerignore.bak
+
+# Node modules (if frontend exists)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# OS files
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# Backup files
+*.backup
+*.old
+*.orig
+
+# Large files
+*.tar
+*.gz
+*.zip
+*.iso
+
+# Miscellaneous
+.cache/
+.venv/
+requirements.txt.lock
