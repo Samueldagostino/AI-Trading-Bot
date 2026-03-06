@@ -87,6 +87,12 @@ class TradeRecord:
     regime: str = ""
     modifiers: Dict = field(default_factory=dict)
 
+    # QuantData market context (LOG-ONLY — does not affect scoring)
+    market_context: Optional[Dict] = None
+    gamma_regime_at_entry: str = "unknown"
+    flow_aligned_with_trade: Optional[bool] = None
+    favorable_for_momentum: Optional[bool] = None
+
 
 class PaperTradingJournal:
     """
