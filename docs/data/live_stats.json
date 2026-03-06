@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T08:32:48.815746+00:00",
+  "updated": "2026-03-06T08:34:26.978866+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 5,
@@ -28,7 +28,7 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
     }
   },
-  "last_price": 25073.75,
+  "last_price": 25066.5,
   "recent_decisions": [
     {
       "time": "03:21:05 ET",
