@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-06T06:21:07.630999+00:00",
+  "updated": "2026-03-06T06:23:10.626794+00:00",
   "status": "LIVE",
   "bars_processed": 200,
   "trades_today": 0,
@@ -28,64 +28,64 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 25116.75,
+  "last_price": 25115.5,
   "recent_decisions": [
     {
-      "time": "01:18:56 ET",
+      "time": "01:21:21 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:19:06 ET",
+      "time": "01:21:25 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:19:15 ET",
+      "time": "01:21:31 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:19:21 ET",
+      "time": "01:21:35 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:19:25 ET",
+      "time": "01:21:41 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:19:31 ET",
+      "time": "01:21:50 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:19:36 ET",
+      "time": "01:22:06 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:19:41 ET",
+      "time": "01:22:10 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:21:00 ET",
+      "time": "01:22:15 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
     },
     {
-      "time": "01:21:06 ET",
+      "time": "01:22:31 ET",
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "CONFLUENCE"
