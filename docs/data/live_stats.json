@@ -1,73 +1,33 @@
 {
-  "updated": "2026-03-05T03:28:33.387879+00:00",
-  "updated": "2026-03-05T14:34:39.965217+00:00",
+  "updated": "2026-03-06T05:47:17.032287+00:00",
   "status": "LIVE",
-  "bars_processed": 38,
+  "bars_processed": 147,
   "trades_today": 0,
   "win_rate": 0.0,
   "profit_factor": 0.0,
   "session_pnl_pct": 0.0,
-  "signals_rejected": 34,
-  "signals_approved": 16,
+  "signals_rejected": 0,
+  "signals_approved": 0,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
-    "overnight": 1.0,
-    "fomc": 1.0,
-    "gamma": 1.0,
-    "har_rv": 1.0
-  },
-  "last_price": 24493.52,
-  "recent_decisions": [
-    {
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
+    "overnight": {
+      "value": 1.0,
+      "display": "1.0x (No data)"
     },
-    {
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
+    "fomc": {
+      "value": 1.0,
+      "display": "1.0x (No data)"
     },
-    {
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
+    "gamma": {
+      "value": 1.0,
+      "display": "1.0x (No data)"
     },
-    {
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
+    "har_rv": {
+      "value": 1.0,
+      "display": "1.0x (No data)"
     }
-  ]
+  },
+  "last_price": 25117.75,
+  "recent_decisions": []
 }
