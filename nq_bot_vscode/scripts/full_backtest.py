@@ -64,6 +64,7 @@ from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_STRENGTH_GATE,
+    CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
 )
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -999,34 +1000,36 @@ class CausalReplayEngine:
         entry_source = None
         sweep_stop_override = None
 
-        if has_signal and has_sweep:
-            direction_str = (
-                "long" if signal.direction == SignalDirection.LONG else "short"
-            )
-            sweep_dir = (
-                "long" if sweep_signal.direction == "LONG" else "short"
-            )
-            if direction_str == sweep_dir:
-                entry_direction = direction_str
-                entry_score = signal.combined_score + SWEEP_CONFLUENCE_BONUS
-                entry_source = "confluence"
-            else:
-                entry_direction = direction_str
-                entry_score = signal.combined_score
-                entry_source = "signal"
-        elif has_signal:
-            entry_direction = (
-                "long" if signal.direction == SignalDirection.LONG else "short"
-            )
-            entry_score = signal.combined_score
-            entry_source = "signal"
-        elif has_sweep:
+        # PATH C: Sweep-only trigger architecture (mirrors main.py)
+        if has_sweep:
             entry_direction = (
                 "long" if sweep_signal.direction == "LONG" else "short"
             )
             entry_score = sweep_signal.score
             entry_source = "sweep"
-            sweep_stop_override = abs(bar["close"] - sweep_signal.stop_price)
+            if sweep_signal.stop_price and sweep_signal.stop_price > 0:
+                sweep_stop_override = abs(bar["close"] - sweep_signal.stop_price)
+            # Layer 2 context boost from aggregator alignment
+            if has_signal:
+                signal_dir = (
+                    "long" if signal.direction == SignalDirection.LONG
+                    else "short"
+                )
+                if signal_dir == entry_direction:
+                    entry_score += CONTEXT_AGGREGATOR_BOOST
+            # Layer 2 structural context boosts
+            if features:
+                if entry_direction == "long":
+                    if getattr(features, 'near_bullish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bullish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+                elif entry_direction == "short":
+                    if getattr(features, 'near_bearish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bearish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+        # Aggregator alone cannot trigger (PATH C)
 
         if entry_direction is None:
             # Capture HTF rejection if aggregator returned a blocked signal
