@@ -18,6 +18,7 @@ Safety rules:
 import logging
 from datetime import date, timedelta
 from typing import Optional
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,11 @@ class ContractRoller:
         """
         if today is None:
             today = date.today()
+
+        # ROLLOVER_OVERRIDE=true skips the roll check (for backtesting or manual control)
+        if os.environ.get("ROLLOVER_OVERRIDE", "").lower() == "true":
+            logger.info("Roll check: ROLLOVER_OVERRIDE=true — skipping roll check")
+            return False
 
         _base, month_code, year_digit = self.parse_symbol(current_symbol)
         roll_date = self.get_roll_date(month_code, year_digit)
@@ -526,3 +532,27 @@ class ContractRoller:
             "next_contract": next_contract,
             "next_expiry": next_expiry,
         }
+
+    @staticmethod
+    def get_roll_schedule_next_4_quarters(start_symbol: str) -> list:
+        """
+        Return roll schedule for the next 4 quarters starting from start_symbol.
+
+        Returns list of dicts with: current, next, roll_date, expiry.
+        Used for display in terminal dashboard and startup logging.
+        """
+        schedule = []
+        current = start_symbol
+        for _ in range(4):
+            base, month_code, year_digit = ContractRoller.parse_symbol(current)
+            expiry = ContractRoller.get_expiry_date(month_code, year_digit)
+            roll_date = ContractRoller.get_roll_date(month_code, year_digit)
+            next_contract = ContractRoller.get_next_contract(current)
+            schedule.append({
+                "current": current,
+                "next": next_contract,
+                "roll_date": roll_date,
+                "expiry": expiry,
+            })
+            current = next_contract
+        return schedule
