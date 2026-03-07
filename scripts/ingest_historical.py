@@ -190,10 +190,17 @@ def main():
     all_results = []
     all_bars_by_file = {}
 
+    # Source files live in data/tradingview/ (moved from repo root)
+    tv_dir = REPO_ROOT / "data" / "tradingview"
+
     for filename, info in FILE_MAP.items():
-        src_path = REPO_ROOT / filename
+        # Check data/tradingview/ first, fall back to repo root
+        src_path = tv_dir / filename
+        if not src_path.exists():
+            src_path = REPO_ROOT / filename
         if not src_path.exists():
             print(f"\n  WARNING: File not found: {filename}")
+            print(f"           Looked in: {tv_dir}")
             continue
 
         print(f"\n{'─' * 70}")

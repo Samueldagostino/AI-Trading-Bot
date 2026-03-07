@@ -173,8 +173,14 @@ class ScaleOutConfig:
     c2_trailing_fixed_points: float = 30.0
     c2_max_target_points: float = 150.0
     c2_time_stop_minutes: int = 120
-    
-    c2_be_trigger: str = "c1_exited"           # Move stop to BE when C1 exits (time or stop)
+
+    # C2 Breakeven Variant (optimized Feb 2026 — run scripts/c2_be_optimizer.py to validate)
+    # "A" = No BE: C2 keeps initial stop; ATR trail provides sole protection
+    # "B" = Delayed: BE moves only after C2 MFE >= c2_be_delay_multiplier × stop_distance
+    # "C" = Partial: BE at midpoint between initial stop and entry (entry - stop/2)
+    # "D" = Current/immediate: BE at entry+1 the instant C1 exits (original behavior)
+    c2_be_variant: str = "B"                  # Default: delayed BE to prevent stolen runners
+    c2_be_delay_multiplier: float = 1.5       # Variant B: MFE threshold = stop_distance × this
 
 
 @dataclass

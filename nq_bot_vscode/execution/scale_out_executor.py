@@ -121,6 +121,7 @@ class ScaleOutTrade:
     # Trailing stop state (for C2)
     c2_trailing_stop: float = 0.0
     c2_best_price: float = 0.0    # Best favorable price seen since entry
+    c2_be_triggered: bool = False  # Variant B: True once delayed BE has been applied
     
     # Aggregate PnL
     total_gross_pnl: float = 0.0
@@ -431,8 +432,16 @@ class ScaleOutExecutor:
     async def _close_c1_to_runner(
         self, trade: ScaleOutTrade, exit_price: float, time: datetime, reason: str
     ) -> dict:
-        """Close C1 and transition C2 to runner phase with BE stop."""
+        """Close C1 and transition C2 to runner phase.
+
+        C2 stop is adjusted based on c2_be_variant:
+          A — no change (keep initial stop; ATR trail provides protection)
+          B — no change yet; BE applied later in _manage_runner once MFE threshold is met
+          C — partial: stop moves to midpoint between initial stop and entry
+          D — immediate: stop moves to entry + buffer (original behavior)
+        """
         direction = trade.direction
+        cfg = self.scale_config
 
         # Close C1
         trade.c1.exit_price = exit_price
@@ -442,15 +451,31 @@ class ScaleOutExecutor:
         trade.c1.gross_pnl = self._compute_leg_pnl(trade.c1, trade.direction)
         trade.c1.net_pnl = trade.c1.gross_pnl - trade.c1.commission
 
-        # Move C2 stop to breakeven + buffer
-        if self.scale_config.c2_move_stop_to_breakeven:
-            buffer = self.scale_config.c2_breakeven_buffer_points
-            if direction == "long":
-                new_stop = trade.entry_price + buffer
-            else:
-                new_stop = trade.entry_price - buffer
-            trade.c2.stop_price = round(new_stop, 2)
+        # Apply BE stop based on variant
+        variant = getattr(cfg, "c2_be_variant", "D")
+        be_stop_label = "initial"
+        new_stop: Optional[float] = None
 
+        if variant == "D" and cfg.c2_move_stop_to_breakeven:
+            # Immediate BE (original behavior)
+            buf = cfg.c2_breakeven_buffer_points
+            new_stop = (trade.entry_price + buf if direction == "long"
+                        else trade.entry_price - buf)
+            be_stop_label = f"BE+{buf}"
+            trade.c2_be_triggered = True
+
+        elif variant == "C":
+            # Partial: midpoint between initial stop and entry
+            initial_stop = trade.initial_stop
+            new_stop = round((initial_stop + trade.entry_price) / 2.0, 2)
+            be_stop_label = f"partial({new_stop:.2f})"
+            trade.c2_be_triggered = True
+
+        # Variants A and B: keep initial stop (B will check in _manage_runner)
+        # new_stop stays None → stop is not modified
+
+        if new_stop is not None:
+            trade.c2.stop_price = round(new_stop, 2)
             if not self.config.execution.paper_trading and self.broker:
                 if trade.c2.stop_order_id:
                     await self.broker.modify_stop(trade.c2.stop_order_id, new_stop)
@@ -463,7 +488,7 @@ class ScaleOutExecutor:
             f"C1 EXIT ({reason}) @ bar {trade.c1_bars_elapsed} | "
             f"Price: {exit_price:.2f} ({c1_pts:.1f}pts) | "
             f"C1 PnL: ${trade.c1.net_pnl:.2f} | "
-            f"C2 stop moved to BE+1: {trade.c2.stop_price:.2f}"
+            f"C2 stop: {be_stop_label} @ {trade.c2.stop_price:.2f} [variant={variant}]"
         )
 
         # Fire partial exit alert for C1
@@ -519,6 +544,7 @@ class ScaleOutExecutor:
     async def _manage_runner(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
         """
         Manage C2 (runner contract):
+        - Variant B: trigger delayed BE once MFE >= threshold
         - Update trailing stop
         - Check stop hit
         - Check time stop
@@ -532,6 +558,34 @@ class ScaleOutExecutor:
             trade.c2_best_price = max(trade.c2_best_price, price)
         else:
             trade.c2_best_price = min(trade.c2_best_price, price)
+
+        # --- Variant B: delayed BE trigger ---
+        variant = getattr(cfg, "c2_be_variant", "D")
+        if variant == "B" and not trade.c2_be_triggered:
+            mfe = (trade.c2_best_price - trade.entry_price if direction == "long"
+                   else trade.entry_price - trade.c2_best_price)
+            stop_dist = abs(trade.entry_price - trade.initial_stop)
+            threshold = stop_dist * getattr(cfg, "c2_be_delay_multiplier", 1.5)
+            if mfe >= threshold:
+                buf = cfg.c2_breakeven_buffer_points
+                new_stop = (trade.entry_price + buf if direction == "long"
+                            else trade.entry_price - buf)
+                new_stop = round(new_stop, 2)
+                # Only tighten (never widen) the stop
+                should_apply = (
+                    (direction == "long"  and new_stop > trade.c2.stop_price) or
+                    (direction == "short" and new_stop < trade.c2.stop_price)
+                )
+                if should_apply:
+                    trade.c2.stop_price = new_stop
+                    trade.c2_be_triggered = True
+                    logger.info(
+                        f"C2 BE triggered (Variant B) @ MFE {mfe:.1f}pts "
+                        f"(threshold {threshold:.1f}pts) | new stop: {new_stop:.2f}"
+                    )
+                    if not self.config.execution.paper_trading and self.broker:
+                        if trade.c2.stop_order_id:
+                            await self.broker.modify_stop(trade.c2.stop_order_id, new_stop)
 
         # --- Update trailing stop ---
         if cfg.c2_trailing_stop_enabled:
@@ -570,7 +624,17 @@ class ScaleOutExecutor:
             stop_hit = True
 
         if stop_hit:
-            exit_reason = "trailing" if trade.c2_trailing_stop > 0 else "breakeven"
+            # Classify exit reason precisely
+            buf = cfg.c2_breakeven_buffer_points
+            if trade.c2_trailing_stop > 0:
+                # Trailing stop has ratcheted above the initial BE level
+                exit_reason = "trailing"
+            elif trade.c2_be_triggered:
+                # BE was applied and stop is at or near entry
+                exit_reason = "breakeven"
+            else:
+                # Stop still at initial stop (Variant A, or Variant B before threshold)
+                exit_reason = "stop"
             return await self._close_c2(trade, trade.c2.stop_price, time, exit_reason)
 
         # --- Check MAX TARGET ---

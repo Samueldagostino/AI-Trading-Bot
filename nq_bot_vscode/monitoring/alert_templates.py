@@ -199,10 +199,12 @@ class AlertTemplates:
         direction_emoji = "📈" if direction.upper() == "LONG" else "📉"
         pnl_emoji = "✅" if pnl >= 0 else "❌"
 
+        _range = contracts * abs(exit_price - entry_price) * 2
+        _pct = (pnl / _range * 100) if _range > 0 else 0.0
         message = (
             f"{direction.upper()} {contracts} contract(s)\n"
             f"Entry: ${entry_price:.2f} → Exit: ${exit_price:.2f}\n"
-            f"PnL: ${pnl:+,.2f} ({(pnl / (contracts * abs(exit_price - entry_price) * 2) * 100):+.1f}%)\n"
+            f"PnL: ${pnl:+,.2f} ({_pct:+.1f}%)\n"
             f"Reason: {exit_reason}"
         )
 

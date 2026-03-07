@@ -1,10 +1,10 @@
 {
   "diagnostic": "fast_shadow_ucl_v2",
-  "generated": "2026-03-06T17:04:32.311909+00:00",
+  "generated": "2026-03-07T20:22:24.848438+00:00",
   "dataset": {
     "period": "period_4",
     "label": "Sep 2023 \u2013 Feb 2024 (chop regime)",
-    "data_dir": "/home/user/AI-Trading-Bot/data/firstrate/historical/aggregated/period_4_2023-09_to_2024-02",
+    "data_dir": "C:\\Users\\dagos\\OneDrive\\Desktop\\AI-Trading-Bot\\data\\firstrate\\historical\\aggregated\\period_4_2023-09_to_2024-02",
     "start_date": "2023-09-01",
     "end_date": "2023-12-01",
     "date_range_actual": "2023-09-01 00:00 to 2023-11-30 23:58",
@@ -212,9 +212,40 @@
       }
     ]
   },
+  "c2_exit_breakdown": {
+    "counts": {
+      "stop": 132,
+      "breakeven": 45,
+      "trailing": 61,
+      "emergency": 3,
+      "max_target": 6
+    },
+    "pnl": {
+      "stop": -3586.78,
+      "breakeven": -31.05,
+      "trailing": 4146.45,
+      "emergency": 211.13,
+      "max_target": 1897.26
+    },
+    "pct": {
+      "stop": 53.4,
+      "breakeven": 18.2,
+      "trailing": 24.7,
+      "emergency": 1.2,
+      "max_target": 2.4
+    },
+    "total_trades": 247
+  },
+  "c2_be_fix": {
+    "variant": "B",
+    "description": "Delayed BE \u2014 triggers only after C2 MFE >= 1.5x stop distance",
+    "before_variant": "D",
+    "before_variant_description": "Immediate BE on C1 exit",
+    "before_c2_breakeven_pct": 47.6
+  },
   "timing": {
-    "replay_seconds": 212.4,
-    "shadow_sim_seconds": 0.1,
-    "total_seconds": 212.5
+    "replay_seconds": 445.3,
+    "shadow_sim_seconds": 0.2,
+    "total_seconds": 445.4
   }
 }
