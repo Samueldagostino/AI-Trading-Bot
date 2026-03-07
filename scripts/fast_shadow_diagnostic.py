@@ -13,11 +13,15 @@ Usage:
 """
 
 import asyncio
+import csv
 import json
+import os
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Dict, List
 
 # ── Paths ──
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -29,12 +33,14 @@ OUTPUT_FILE = LOGS_DIR / "fast_shadow_results.json"
 
 sys.path.insert(0, str(PROJECT_DIR))
 
-from scripts.replay_simulator import ReplaySimulator, load_firstrate_mtf, filter_by_date
+from scripts.replay_simulator import ReplaySimulator, filter_by_date
 
 # ── Config ──
-# Use period_4 (Sep 2023 – Feb 2024, "chop" regime) — smallest dataset
-DATA_DIR = str(REPO_ROOT / "data" / "firstrate" / "historical" / "aggregated"
-               / "period_4_2023-09_to_2024-02")
+# Use period_4 equivalent (Sep 2023 – Feb 2024, "chop" regime)
+# Data source: combined_1min.csv (real 1m bars, Sep 2021 – Aug 2025)
+COMBINED_1M_CSV = str(REPO_ROOT / "nq_bot_vscode" / "data" / "historical" / "combined_1min.csv")
+START_DATE = "2023-09-01"
+END_DATE = "2024-03-01"
 MAX_EXEC_BARS = 50_000
 EXEC_TF = "2m"
 
@@ -73,26 +79,116 @@ C2_BE_VARIANT_D = {
 }
 
 
-def estimate_end_date(data_dir: str, start: str, max_bars: int) -> str:
-    """Estimate an end date that keeps us under max_bars exec bars.
+def _floor_to_tf(ts: datetime, tf_minutes: int) -> datetime:
+    """Floor a timestamp to the nearest timeframe boundary."""
+    if tf_minutes >= 1440:
+        return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    total_minutes = ts.hour * 60 + ts.minute
+    floored_minutes = (total_minutes // tf_minutes) * tf_minutes
+    return ts.replace(
+        hour=floored_minutes // 60,
+        minute=floored_minutes % 60,
+        second=0,
+        microsecond=0,
+    )
 
-    Reads the 2m CSV header to compute bars/month, then picks a safe end date.
+
+def _aggregate_bars(bars_1m: List[Dict], tf_minutes: int) -> List[Dict]:
+    """Aggregate 1m bars into a higher timeframe."""
+    buckets: Dict[datetime, List[Dict]] = {}
+    for bar in bars_1m:
+        bucket_ts = _floor_to_tf(bar["timestamp"], tf_minutes)
+        if bucket_ts not in buckets:
+            buckets[bucket_ts] = []
+        buckets[bucket_ts].append(bar)
+
+    result = []
+    for bucket_ts in sorted(buckets.keys()):
+        group = buckets[bucket_ts]
+        group.sort(key=lambda b: b["timestamp"])
+        result.append({
+            "timestamp": bucket_ts,
+            "open": group[0]["open"],
+            "high": max(b["high"] for b in group),
+            "low": min(b["low"] for b in group),
+            "close": group[-1]["close"],
+            "volume": sum(b["volume"] for b in group),
+        })
+    return result
+
+
+def load_and_prepare_data(csv_path: str, start_date: str, end_date: str,
+                          max_exec_bars: int) -> str:
+    """Load combined_1min.csv, filter, aggregate to all TFs, write to temp dir.
+
+    Returns the path to a temp directory containing NQ_*.csv files
+    compatible with load_firstrate_mtf().
     """
-    nq_2m = Path(data_dir) / "NQ_2m.csv"
-    if not nq_2m.exists():
-        return "2024-03-01"  # full period fallback
+    import pandas as pd
 
-    line_count = sum(1 for _ in open(str(nq_2m))) - 1  # subtract header
-    total_months = 6  # period_4 spans 6 months
-    bars_per_month = line_count / total_months if total_months > 0 else 15000
+    print(f"  Loading 1m data from {csv_path}...")
+    t0 = time.time()
 
-    months_needed = max_bars / bars_per_month
-    # Start is Sep 2023; add months_needed
-    start_dt = datetime.strptime(start, "%Y-%m-%d")
-    end_month = start_dt.month + int(months_needed)
-    end_year = start_dt.year + (end_month - 1) // 12
-    end_month = ((end_month - 1) % 12) + 1
-    return f"{end_year}-{end_month:02d}-01"
+    # Use pandas for fast CSV loading and filtering
+    df = pd.read_csv(csv_path)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    # Filter to date range
+    start_dt = pd.Timestamp(start_date, tz="UTC")
+    end_dt = pd.Timestamp(end_date, tz="UTC")
+    df = df[(df["timestamp"] >= start_dt) & (df["timestamp"] < end_dt)]
+    df = df.sort_values("timestamp").reset_index(drop=True)
+
+    # Convert to list of dicts for aggregation
+    bars_1m: List[Dict] = []
+    for _, row in df.iterrows():
+        bars_1m.append({
+            "timestamp": row["timestamp"].to_pydatetime(),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": int(row["volume"]),
+        })
+
+    bars_1m.sort(key=lambda b: b["timestamp"])
+    print(f"  Loaded {len(bars_1m):,} 1m bars in {time.time() - t0:.1f}s")
+    print(f"  Date range: {bars_1m[0]['timestamp']} -> {bars_1m[-1]['timestamp']}")
+
+    # Aggregate to all timeframes
+    tf_minutes = {
+        "1m": 1, "2m": 2, "3m": 3, "5m": 5,
+        "15m": 15, "30m": 30, "1H": 60, "4H": 240, "1D": 1440,
+    }
+
+    tmp_dir = tempfile.mkdtemp(prefix="fast_shadow_")
+    print(f"  Aggregating to all timeframes...")
+
+    for tf_label, tf_min in tf_minutes.items():
+        if tf_min == 1:
+            agg_bars = bars_1m
+        else:
+            agg_bars = _aggregate_bars(bars_1m, tf_min)
+
+        # Cap exec bars
+        if tf_label == EXEC_TF and len(agg_bars) > max_exec_bars:
+            agg_bars = agg_bars[:max_exec_bars]
+            print(f"    {tf_label}: {len(agg_bars):>8,} bars (capped at {max_exec_bars:,})")
+        else:
+            print(f"    {tf_label}: {len(agg_bars):>8,} bars")
+
+        # Write CSV
+        csv_out = os.path.join(tmp_dir, f"NQ_{tf_label}.csv")
+        with open(csv_out, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["timestamp", "open", "high", "low", "close", "volume"])
+            for bar in agg_bars:
+                writer.writerow([
+                    bar["timestamp"].isoformat(),
+                    bar["open"], bar["high"], bar["low"], bar["close"],
+                    bar["volume"],
+                ])
+
+    return tmp_dir
 
 
 def print_3way_comparison(baseline, v1, v2, ucl_metrics):
@@ -310,25 +406,25 @@ def print_c2_be_comparison(before: dict, after_counts: dict, after_results: dict
 
 async def main():
     t0 = time.time()
-    start_date = "2023-09-01"
 
     print("=" * 72)
     print("  FAST SHADOW-TRADE DIAGNOSTIC — UCL v2 Edition")
-    print(f"  Dataset: period_4 (Sep 2023 – Feb 2024, chop regime)")
+    print(f"  Dataset: period_4 equiv (Sep 2023 – Feb 2024, chop regime)")
+    print(f"  Source:  combined_1min.csv")
     print(f"  Max exec bars: {MAX_EXEC_BARS:,}")
     print("=" * 72)
 
-    # Estimate end date to stay within bar cap
-    end_date = estimate_end_date(DATA_DIR, start_date, MAX_EXEC_BARS)
-    print(f"\n  Estimated end date for {MAX_EXEC_BARS:,} bars: {end_date}")
+    # ── Load and prepare data from combined_1min.csv ──
+    data_dir = load_and_prepare_data(COMBINED_1M_CSV, START_DATE, END_DATE, MAX_EXEC_BARS)
+    end_date = END_DATE
 
     # ── Create simulator ──
     sim = ReplaySimulator(
         speed="max",
-        start_date=start_date,
+        start_date=START_DATE,
         end_date=end_date,
         validate=True,
-        data_dir=DATA_DIR,
+        data_dir=data_dir,
         c1_variant="C",
         quiet=True,
         sweep_enabled=True,
@@ -424,8 +520,8 @@ async def main():
         "dataset": {
             "period": "period_4",
             "label": "Sep 2023 – Feb 2024 (chop regime)",
-            "data_dir": DATA_DIR,
-            "start_date": start_date,
+            "data_source": COMBINED_1M_CSV,
+            "start_date": START_DATE,
             "end_date": end_date,
             "date_range_actual": f"{date_range_start} to {date_range_end}",
             "exec_bars": exec_bars,
@@ -468,6 +564,11 @@ async def main():
 
     print(f"\n  Results written to: {OUTPUT_FILE}")
     print(f"\n  Total time: {time.time() - t0:.1f}s")
+
+    # Cleanup temp directory
+    import shutil
+    shutil.rmtree(data_dir, ignore_errors=True)
+
     return output
 
 
