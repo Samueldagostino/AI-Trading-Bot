@@ -1103,6 +1103,32 @@ class CausalReplayEngine:
         # Count as a directional signal (regardless of HC outcome)
         self._signals_with_direction += 1
 
+        # ── HTF DIRECTIONAL GATE (choke-point — ALL signal sources pass through) ──
+        # Mirrors main.py lines 582-617: sweep-only and confluence entries
+        # must also respect HTF directional consensus.  Without this gate,
+        # sweep entries bypass the aggregator's internal HTF check.
+        htf_bias = self._htf_bias
+        if htf_bias is not None:
+            if entry_direction == "long" and not htf_bias.htf_allows_long:
+                self._record_shadow_signal(
+                    bar, features, entry_direction, entry_score, None,
+                    "HTF gate blocks long", 1)
+                self._rejection_count += 1
+                return
+            if entry_direction == "short" and not htf_bias.htf_allows_short:
+                self._record_shadow_signal(
+                    bar, features, entry_direction, entry_score, None,
+                    "HTF gate blocks short", 1)
+                self._rejection_count += 1
+                return
+        elif htf_bias is None:
+            # Fail-safe: no HTF data → block all trades
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, None,
+                "No HTF data — fail-safe block", 1)
+            self._rejection_count += 1
+            return
+
         # ── NaN Guard ──
         if not math.isfinite(entry_score):
             logger.debug("NaN entry_score — blocking")
@@ -1437,6 +1463,24 @@ class CausalReplayEngine:
 
         # ── Step 4: Generate signal (if flat, not warmup) ──
         await self._generate_signal(bar, features, self._htf_bias, exec_bar)
+
+        # ── ONE-TIME diagnostic at bar 25,000 ──
+        if self._bars_processed == 25_000:
+            sched_loaded = {tf: len(q) for tf, q in htf_scheduler._queues.items()}
+            sched_delivered = {tf: htf_scheduler._indices[tf] for tf in htf_scheduler._indices}
+            htf_data_in_engine = {
+                tf: len(bars) for tf, bars in self.htf_engine._bars.items()
+            }
+            print(
+                f"\n  [DIAGNOSTIC bar 25,000]\n"
+                f"    HTFScheduler loaded:       {sched_loaded}\n"
+                f"    HTFScheduler delivered:    {sched_delivered}\n"
+                f"    HTFBiasEngine bars cached: {htf_data_in_engine}\n"
+                f"    htf_bias is None:          {self._htf_bias is None}\n"
+                f"    htf_bias value:            {self._htf_bias}\n"
+                f"    Aggregator htf_blocked:    {self.signal_aggregator._htf_blocked_count}\n"
+                f"    HTF bars completed:        {self._htf_bars_completed}\n"
+            )
 
         # ── Progress reporting ──
         if self._bars_processed % PROGRESS_INTERVAL == 0:
