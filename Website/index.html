@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NQ.BOT — Live Status</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0e14;--panel:#10151c;--border:#1b2433;
+  --green:#00d4aa;--red:#ff3b5c;--amber:#ffb800;--blue:#4da6ff;
+  --text:#c8d0dc;--dim:#5a6578;--white:#e8ecf2;
+  --mono:'JetBrains Mono','Fira Code','Consolas',monospace;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px;min-height:100vh}
+
+/* HEADER */
+.header{display:flex;align-items:center;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--border);gap:16px}
+.logo{font-size:18px;font-weight:700;letter-spacing:1px}
+.logo .nq{color:var(--green)}.logo .bot{color:var(--dim)}
+.status-badge{display:flex;align-items:center;gap:6px;padding:4px 12px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px}
+.status-badge.live{background:rgba(0,212,170,0.1);color:var(--green);border:1px solid rgba(0,212,170,0.3)}
+.status-badge.offline{background:rgba(90,101,120,0.15);color:var(--dim);border:1px solid var(--border)}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.offline-dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,212,170,.4)}50%{opacity:.7;box-shadow:0 0 0 6px rgba(0,212,170,0)}}
+.updated{color:var(--dim);font-size:10px;margin-left:auto}
+
+/* CONTAINER */
+.container{max-width:900px;margin:0 auto;padding:24px}
+
+/* KPI GRID */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:24px}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:12px;text-align:center}
+.kpi-label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.kpi-value{font-size:18px;font-weight:700;color:var(--white)}
+.kpi-value.green{color:var(--green)}
+.kpi-value.red{color:var(--red)}
+.kpi-value.blue{color:var(--blue)}
+.kpi-value.amber{color:var(--amber)}
+
+/* PANELS */
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+@media(max-width:700px){.panels{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:16px}
+.panel-title{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+
+/* MODIFIERS */
+.mod-row{display:flex;justify-content:space-between;padding:4px 0;font-size:11px}
+.mod-name{color:var(--dim);text-transform:uppercase}
+.mod-val{color:var(--white);font-weight:600}
+
+/* DECISIONS TABLE */
+.decisions-panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:16px}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{text-align:left;padding:6px 10px;color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border)}
+td{padding:5px 10px;border-bottom:1px solid rgba(27,36,51,.5)}
+tr:nth-child(even){background:rgba(16,21,28,.5)}
+.badge-approved{background:rgba(0,212,170,.15);color:var(--green);padding:1px 6px;border-radius:2px;font-size:9px;font-weight:600}
+.badge-rejected{background:rgba(255,59,92,.15);color:var(--red);padding:1px 6px;border-radius:2px;font-size:9px;font-weight:600}
+.no-data{color:var(--dim);text-align:center;padding:20px;font-size:11px}
+
+/* FOOTER */
+.footer{text-align:center;padding:24px;color:var(--dim);font-size:10px;border-top:1px solid var(--border);margin-top:24px}
+.security-note{color:var(--amber);font-size:9px;margin-top:6px}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo"><span class="nq">NQ</span><span class="bot">.BOT</span></div>
+  <div class="status-badge offline" id="statusBadge">
+    <div class="offline-dot" id="statusDot"></div>
+    <span id="statusText">OFFLINE</span>
+  </div>
+  <span class="updated" id="updatedAt">--</span>
+</div>
+
+<div class="container">
+  <!-- KPI GRID -->
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Bars</div>
+      <div class="kpi-value" id="kpiBars">--</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Trades</div>
+      <div class="kpi-value" id="kpiTrades">--</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Win Rate</div>
+      <div class="kpi-value" id="kpiWinRate">--</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Profit Factor</div>
+      <div class="kpi-value" id="kpiPF">--</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Session PnL</div>
+      <div class="kpi-value" id="kpiPnl">--</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Last Price</div>
+      <div class="kpi-value" id="kpiPrice">--</div>
+    </div>
+  </div>
+
+  <!-- PANELS -->
+  <div class="panels">
+    <!-- SIGNAL STATS -->
+    <div class="panel">
+      <div class="panel-title">Signal Pipeline</div>
+      <div class="mod-row"><span class="mod-name">HTF Bias</span><span class="mod-val" id="htfBias">--</span></div>
+      <div class="mod-row"><span class="mod-name">Approved</span><span class="mod-val green" id="sigApproved">0</span></div>
+      <div class="mod-row"><span class="mod-name">Rejected</span><span class="mod-val red" id="sigRejected">0</span></div>
+      <div class="mod-row"><span class="mod-name">Safety Rails</span><span class="mod-val" id="safetyStatus">--</span></div>
+    </div>
+
+    <!-- MODIFIERS -->
+    <div class="panel">
+      <div class="panel-title">Modifiers</div>
+      <div class="mod-row"><span class="mod-name">Overnight</span><span class="mod-val" id="modON">1.00x</span></div>
+      <div class="mod-row"><span class="mod-name">FOMC</span><span class="mod-val" id="modFOMC">1.00x</span></div>
+      <div class="mod-row"><span class="mod-name">Gamma</span><span class="mod-val" id="modGamma">1.00x</span></div>
+      <div class="mod-row"><span class="mod-name">HAR-RV</span><span class="mod-val" id="modHARRV">1.00x</span></div>
+    </div>
+  </div>
+
+  <!-- RECENT DECISIONS -->
+  <div class="decisions-panel">
+    <div class="panel-title">Recent Decisions</div>
+    <table>
+      <thead><tr><th>Direction</th><th>Decision</th><th>Reason</th></tr></thead>
+      <tbody id="decisionsBody">
+        <tr><td colspan="3" class="no-data">No decisions yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    NQ.BOT Live Status &middot; Read-only display &middot; Auto-refreshes every 30s
+    <div class="security-note">No account numbers, dollar amounts, exact prices, order IDs, or connection details are exposed.</div>
+  </div>
+</div>
+
+<script>
+async function fetchStats() {
+  try {
+    const res = await fetch('data/live_stats.json?' + Date.now());
+    if (!res.ok) return;
+    const d = await res.json();
+
+    // Status badge
+    const badge = document.getElementById('statusBadge');
+    const dot = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+    if (d.status === 'LIVE') {
+      badge.className = 'status-badge live';
+      dot.className = 'live-dot';
+      text.textContent = 'LIVE';
+    } else {
+      badge.className = 'status-badge offline';
+      dot.className = 'offline-dot';
+      text.textContent = 'OFFLINE';
+    }
+
+    // Updated timestamp
+    if (d.updated) {
+      const t = new Date(d.updated);
+      document.getElementById('updatedAt').textContent =
+        'Updated: ' + t.toLocaleString('en-US', {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'America/New_York'}) + ' ET';
+    }
+
+    // KPIs
+    document.getElementById('kpiBars').textContent = (d.bars_processed || 0).toLocaleString();
+    document.getElementById('kpiTrades').textContent = d.trades_today || 0;
+
+    const wrEl = document.getElementById('kpiWinRate');
+    wrEl.textContent = (d.win_rate || 0).toFixed(1) + '%';
+    wrEl.className = 'kpi-value ' + ((d.win_rate || 0) >= 55 ? 'green' : '');
+
+    const pfEl = document.getElementById('kpiPF');
+    pfEl.textContent = (d.profit_factor || 0).toFixed(2);
+    pfEl.className = 'kpi-value ' + ((d.profit_factor || 0) >= 1.0 ? 'green' : 'red');
+
+    const pnlEl = document.getElementById('kpiPnl');
+    const pnl = d.session_pnl_pct || 0;
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(3) + '%';
+    pnlEl.className = 'kpi-value ' + (pnl >= 0 ? 'green' : 'red');
+
+    const priceEl = document.getElementById('kpiPrice');
+    priceEl.textContent = d.last_price ? d.last_price.toFixed(2) : '--';
+    priceEl.className = 'kpi-value blue';
+
+    // Signal pipeline
+    const biasEl = document.getElementById('htfBias');
+    biasEl.textContent = d.htf_bias || 'NEUTRAL';
+    biasEl.style.color = d.htf_bias === 'BULLISH' ? 'var(--green)' : d.htf_bias === 'BEARISH' ? 'var(--red)' : 'var(--dim)';
+
+    document.getElementById('sigApproved').textContent = d.signals_approved || 0;
+    document.getElementById('sigRejected').textContent = d.signals_rejected || 0;
+
+    const safetyEl = document.getElementById('safetyStatus');
+    safetyEl.textContent = d.safety_rails || 'OK';
+    safetyEl.style.color = d.safety_rails === 'OK' ? 'var(--green)' : 'var(--red)';
+
+    // Modifiers
+    const mods = d.modifiers || {};
+    document.getElementById('modON').textContent = (mods.overnight || 1.0).toFixed(2) + 'x';
+    document.getElementById('modFOMC').textContent = (mods.fomc || 1.0).toFixed(2) + 'x';
+    document.getElementById('modGamma').textContent = (mods.gamma || 1.0).toFixed(2) + 'x';
+    document.getElementById('modHARRV').textContent = (mods.har_rv || 1.0).toFixed(2) + 'x';
+
+    // Decisions table
+    const tbody = document.getElementById('decisionsBody');
+    const decisions = d.recent_decisions || [];
+    if (!decisions.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="no-data">No decisions yet</td></tr>';
+    } else {
+      tbody.innerHTML = [...decisions].reverse().map(dec => {
+        const isApproved = dec.decision === 'APPROVED';
+        const badge = isApproved
+          ? '<span class="badge-approved">APPROVED</span>'
+          : '<span class="badge-rejected">REJECTED</span>';
+        const dirColor = dec.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
+        return `<tr>
+          <td style="color:${dirColor}">${dec.direction || '--'}</td>
+          <td>${badge}</td>
+          <td style="color:var(--dim)">${dec.reason || '--'}</td>
+        </tr>`;
+      }).join('');
+    }
+
+  } catch(e) {
+    console.warn('Stats fetch error:', e);
+  }
+}
+
+// Initial fetch + auto-refresh every 30 seconds
+fetchStats();
+setInterval(fetchStats, 30000);
+</script>
+</body>
+</html>

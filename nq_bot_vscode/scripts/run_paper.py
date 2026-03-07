@@ -6,17 +6,17 @@ used by the backtester. Zero parameter changes.
 
 Pipeline:
   Tradovate WebSocket (1m bars)
-    → TradovatePaperConnector (aggregates 1m → 2m)
-      → TradingOrchestrator.process_bar() (HC filter + HTF gate)
-        → ScaleOutExecutor (trade lifecycle)
-          → TradovatePaperConnector (demo orders)
+    -> TradovatePaperConnector (aggregates 1m -> 2m)
+      -> TradingOrchestrator.process_bar() (HC filter + HTF gate)
+        -> ScaleOutExecutor (trade lifecycle)
+          -> TradovatePaperConnector (demo orders)
 
 Session rules:
   - No entries before 6:01 PM ET
   - Flat by 4:30 PM ET
   - No trading during maintenance (5:00–6:00 PM ET)
-  - Daily loss limit: $500 → halt
-  - Connection loss > 60s → flatten + halt
+  - Daily loss limit: $500 -> halt
+  - Connection loss > 60s -> flatten + halt
 
 Usage:
     python scripts/run_paper.py
@@ -32,12 +32,15 @@ import argparse
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 import signal
 import sys
+import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict
+from zoneinfo import ZoneInfo
 
 # Ensure project root is on path
 script_dir = Path(__file__).resolve().parent
@@ -73,6 +76,10 @@ logger = logging.getLogger(__name__)
 LOGS_DIR = project_dir / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 DECISION_LOG_PATH = str(LOGS_DIR / "paper_decisions.json")
+
+# ── New JSONL logger (replaces load-rewrite pattern) ──
+from monitoring.json_logger import JSONLineLogger
+_decision_jl = JSONLineLogger(str(LOGS_DIR), "paper_decisions")
 
 # OOS baseline for comparison (Config D + C1 Time Exit, Sep 2025 – Feb 2026)
 OOS_EXPECTANCY = 15.34    # $/trade from 6-month OOS
@@ -373,20 +380,13 @@ class PaperTradingRunner:
             self._flush_decisions()
 
     def _flush_decisions(self) -> None:
-        """Write decisions to disk."""
+        """Write decisions to disk via JSONL logger (append-only, daily rotation)."""
         if not self._decisions:
             return
-        try:
-            existing = []
-            if os.path.exists(DECISION_LOG_PATH):
-                with open(DECISION_LOG_PATH, "r") as f:
-                    existing = json.load(f)
-            existing.extend(self._decisions)
-            with open(DECISION_LOG_PATH, "w") as f:
-                json.dump(existing, f, indent=2, default=str)
-            self._decisions.clear()
-        except Exception as e:
-            logger.error(f"Failed to write decision log: {e}")
+        for entry in self._decisions:
+            _decision_jl.log(entry)
+        _decision_jl.flush()
+        self._decisions.clear()
 
     # ================================================================
     # SHUTDOWN
@@ -442,7 +442,11 @@ def main():
         datefmt="%H:%M:%S",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(str(LOGS_DIR / "paper_trading.log")),
+            logging.handlers.RotatingFileHandler(
+                str(LOGS_DIR / "paper_trading.log"),
+                maxBytes=10 * 1024 * 1024,  # 10 MB
+                backupCount=5,
+            ),
         ],
     )
 
@@ -455,13 +459,28 @@ def main():
         logger.info("Shutdown signal received")
         runner.request_shutdown()
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _signal_handler)
+    # add_signal_handler is Unix-only; on Windows, fall through to
+    # the KeyboardInterrupt handler below.
+    if sys.platform != "win32":
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, _signal_handler)
+    else:
+        logger.info(
+            "Windows detected — using KeyboardInterrupt for Ctrl+C shutdown"
+        )
 
     try:
         loop.run_until_complete(runner.start())
     except KeyboardInterrupt:
         loop.run_until_complete(runner.shutdown())
+    except Exception:
+        # NEVER leave positions open on crash
+        logger.critical(
+            "UNHANDLED EXCEPTION — flattening all positions\n%s",
+            traceback.format_exc(),
+        )
+        loop.run_until_complete(runner.shutdown())
+        sys.exit(1)
     finally:
         loop.close()
 

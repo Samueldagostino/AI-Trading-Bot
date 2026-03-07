@@ -78,11 +78,14 @@ C1 exits via **trail-from-profit** (Variant C): once unrealized profit >= 3.0pts
 ### Constants Location
 
 ```python
-# main.py — module-level constants (lines ~60-70)
+# config/constants.py — SINGLE SOURCE OF TRUTH for all policy constants
+# All modules import from here. Do NOT redefine locally.
 HIGH_CONVICTION_MIN_SCORE = 0.75
 HIGH_CONVICTION_MAX_STOP_PTS = 30.0
 SWEEP_MIN_SCORE = 0.70           # Sweep must score >= 0.70 to be eligible
 SWEEP_CONFLUENCE_BONUS = 0.05    # Boost when signal + sweep fire together
+HTF_STRENGTH_GATE = 0.3          # Config D — do NOT change without backtest
+HTF_STALENESS_LIMITS = {...}     # Per-TF staleness limits (minutes)
 
 # config/settings.py — ScaleOutConfig
 c1_profit_threshold_pts = 3.0   # Activate trailing once profit >= this
@@ -147,6 +150,7 @@ nq-trading-bot/                    # Root — CLAUDE.md goes here
 ├── CLAUDE.md                      # THIS FILE — project brain
 ├── main.py                        # Orchestrator — HC filter lives here
 ├── config/
+│   ├── constants.py               # HC constants — SINGLE SOURCE OF TRUTH
 │   └── settings.py                # All dataclass configs (BotConfig, RiskConfig, etc.)
 ├── features/
 │   ├── engine.py                  # NQFeatureEngine — OB, FVG, sweeps, VWAP, delta
@@ -175,8 +179,10 @@ nq-trading-bot/                    # Root — CLAUDE.md goes here
 │   ├── run_oos_validation.py     # Monthly-segmented OOS validation runner
 │   └── replay_simulator.py       # Replay simulator with --sweep-compare A/B testing
 ├── docs/
+│   ├── SECURITY_AUDIT.md         # Consolidated security audit (3 phases)
 │   ├── validation_report.html    # Institutional-grade OOS report (dark-themed)
 │   └── out_of_sample_validation.md  # Generated OOS results markdown
+├── requirements.txt              # Pinned dependencies for reproducible installs
 └── data/
     ├── tradingview/              # TradingView CSV exports (multi-TF)
     └── firstrate/                # FirstRate 1m data + aggregated TFs (gitignored)
@@ -369,7 +375,12 @@ When using Claude Code Agent Teams, these roles map to the project:
 
 ## Current State & Known Issues
 
-### System Status: LIVE-READY
+### System Status: v2.0.0-rc1 — PAPER TRADING APPROVED
+
+**Version:** v2.0.0-rc1
+**Tests:** 449 passed (all offline, 0 network calls, ~2s)
+**Security Audit:** COMPLETE — 9 CRITICAL, 8 HIGH fixed; 0 remain (see `docs/SECURITY_AUDIT.md`)
+**Deployment Readiness:** Paper trading approved on Tradovate demo
 
 Config D + Variant C (Trail from Profit) + Sweep Detector + Calibrated Slippage complete. 6-month OOS validated on FirstRate 1-minute absolute-adjusted NQ data (Sep 2025 – Feb 2026) with realistic slippage model (avg 0.96pt/fill). PF 1.73 with slippage — system survives real-world friction.
 
@@ -380,6 +391,31 @@ Config D + Variant C (Trail from Profit) + Sweep Detector + Calibrated Slippage 
 - C2: ATR-based trailing runner
 - Sweep detector: additive (PDH/PDL, session H/L, PWH/PWL, VWAP, round numbers)
 - Slippage: Calibrated (RTH 0.50pt, ETH 1.00pt, caps 1.50/2.50/3.00pt)
+
+### Critical Fixes Applied (Security Audit)
+
+| Fix | Severity | Impact |
+|-----|----------|--------|
+| NaN guard on all safety gates (7 locations) | CRITICAL | `isfinite()` prevents silent bypass of HC, kill switch, loss limits |
+| HTF gate fail-safe (defaults `False`) | CRITICAL | No HTF data → trades blocked (not allowed) |
+| DST-safe timezone (`ZoneInfo("America/New_York")`) | CRITICAL | Session boundaries correct year-round, no DST drift |
+| 4-layer NaN/Inf data pipeline defense | CRITICAL | Corrupted prices rejected at parse → tick → candle → bar |
+| Emergency flatten 3-attempt retry | CRITICAL | Network blip won't leave positions orphaned |
+| Gateway 24h session expiry detection | CRITICAL | Pipeline halts instead of silent 401 order failures |
+| asyncio.Lock on bar processing + reconciliation | HIGH | No race conditions between concurrent tasks |
+| RotatingFileHandler on all log files | HIGH | Logs capped at ~60 MB per runner |
+| Pinned `requirements.txt` | HIGH | Reproducible installs for financial system |
+| Windows shutdown compatibility | HIGH | Cross-platform Ctrl+C with 30s timeout |
+
+### Hardening Fixes Applied (MEDIUM — Post-Audit)
+
+| Fix | Audit ID | Impact |
+|-----|----------|--------|
+| HC constants in `config/constants.py` — single source of truth | P1-M1 | Eliminates drift between main.py, orchestrator.py, full_backtest.py |
+| HTF data staleness detection | P1-M4 | Stale TFs downgraded to neutral + warning logged |
+| Position state persistence to disk | P2-M7 | `logs/position_state.json` — atomic write, crash recovery via `load_state()` |
+| Candle aggregator duplicate/out-of-order detection | P2-M3/M4 | Replayed ticks dropped, duplicate candles skipped |
+| JSONL decision/trade logs with daily rotation | P3-M1 | Replaces load-rewrite pattern — bounded growth |
 
 ### Working
 - HC filter (2 gates: score >= 0.75, stop <= 30pts) fully operational
@@ -392,9 +428,12 @@ Config D + Variant C (Trail from Profit) + Sweep Detector + Calibrated Slippage 
 - 6-month OOS validation pipeline (`scripts/aggregate_1m.py` + `scripts/run_oos_validation.py`)
 - Institutional-grade validation report (`docs/validation_report.html`)
 - Regime cross-analysis complete — no additional gates recommended (`scripts/regime_analysis.py`)
+- IBKR live integration pipeline (orchestrator.py, ibkr_client.py, order_executor.py, position_manager.py)
+- Full security audit (3 phases) — all CRITICAL/HIGH fixed
 
 ### Next Milestone
 - Paper trading on Tradovate demo
+- Monitor live PnL vs backtest baseline
 
 ### Key Edges (from Regime Analysis)
 - **Morning session** (09:30–11:30 ET): PF 3.62, $50/trade, 78% WR — strongest edge

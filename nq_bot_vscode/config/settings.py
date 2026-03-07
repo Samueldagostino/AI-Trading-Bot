@@ -2,7 +2,7 @@
 NQ Trading Bot — Master Configuration
 ======================================
 CONFIGURED FOR:
-- Broker: Tradovate (paper → live)
+- Broker: Tradovate (paper -> live)
 - Instrument: MNQ (Micro Nasdaq-100)
 - Strategy: 2-contract scale-out
 - Account: $50,000
@@ -71,7 +71,7 @@ class DatabaseConfig:
 
 @dataclass
 class DiscordConfig:
-    """MikesTrades server → #alerts channel."""
+    """MikesTrades server -> #alerts channel."""
     token: str = os.getenv("DISCORD_TOKEN", "")
     channel_ids: list = field(default_factory=lambda: 
         [x.strip() for x in os.getenv("DISCORD_CHANNEL_IDS", "").split(",") if x.strip()]
@@ -148,9 +148,9 @@ class ScaleOutConfig:
     Contract 2: Runner, stop to breakeven+1 after C1 exits, then trail
 
     Win-win architecture:
-      Best:  C1 trails a big move + C2 runs big  → $40+ + $200 = $240+
-      Good:  C1 trails small move + C2 at BE     → $10  + $2   = $12
-      Worst: Both at initial stop                → Controlled loss (~$60-80)
+      Best:  C1 trails a big move + C2 runs big  -> $40+ + $200 = $240+
+      Good:  C1 trails small move + C2 at BE     -> $10  + $2   = $12
+      Worst: Both at initial stop                -> Controlled loss (~$60-80)
     """
     total_contracts: int = 2
 
@@ -217,6 +217,30 @@ class RiskConfig:
     kill_switch_max_consecutive_losses: int = 5
     kill_switch_cooldown_minutes: int = 60
 
+    def get_point_value(self, instrument: str = "MNQ") -> float:
+        """Get point value for an instrument, falling back to MNQ defaults."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).point_value
+        except Exception:
+            return self.nq_point_value_micro if self.use_micro else self.nq_point_value_mini
+
+    def get_tick_size(self, instrument: str = "MNQ") -> float:
+        """Get tick size for an instrument, falling back to MNQ defaults."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).tick_size
+        except Exception:
+            return 0.25
+
+    def get_commission(self, instrument: str = "MNQ") -> float:
+        """Get commission per contract for an instrument."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).commission_per_contract
+        except Exception:
+            return self.commission_per_contract
+
 
 @dataclass
 class FeatureConfig:
@@ -260,6 +284,16 @@ class SignalConfig:
 
 
 @dataclass
+class AlertConfig:
+    """Real-time alerting configuration."""
+    enabled_channels: List[str] = field(default_factory=lambda: ["console"])
+    discord_webhook_url: str = os.getenv("ALERT_DISCORD_WEBHOOK_URL", "")
+    telegram_bot_token: str = os.getenv("ALERT_TELEGRAM_BOT_TOKEN", "")
+    telegram_chat_id: str = os.getenv("ALERT_TELEGRAM_CHAT_ID", "")
+    rate_limit_seconds: int = 300  # 5 min per event type (EMERGENCY bypasses)
+
+
+@dataclass
 class DataPipelineConfig:
     """
     Primary: Tradovate WebSocket live bars
@@ -272,28 +306,6 @@ class DataPipelineConfig:
     keep_raw_ticks: bool = False
     bar_retention_days: int = 365
     vix_source: str = "tradovate"
-
-
-@dataclass
-class AlertConfig:
-    """
-    Real-time alerting and notification configuration.
-
-    Channels:
-    - Console: Always on (fallback)
-    - Discord: Rich embeds via webhook
-    - Telegram: Bot API messages
-
-    Rate limiting: Max 1 alert per event type per rate_limit_seconds
-    (except EMERGENCY severity)
-    """
-    enabled_channels: list = field(default_factory=lambda:
-        [x.strip() for x in os.getenv("ALERT_CHANNELS", "console").split(",") if x.strip()]
-    )
-    discord_webhook_url: str = os.getenv("DISCORD_WEBHOOK_URL", "")
-    telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
-    rate_limit_seconds: int = int(os.getenv("ALERT_RATE_LIMIT_SECONDS", "300"))
 
 
 @dataclass
@@ -311,6 +323,31 @@ class BotConfig:
     log_level: str = "INFO"
     environment: str = "paper"
     heartbeat_interval_seconds: int = 5
+    instrument: str = "MNQ"  # Supported: MNQ, MES, MYM, M2K
+
+    @property
+    def instrument_spec(self):
+        """Get the InstrumentSpec for the configured instrument."""
+        from config.instruments import InstrumentSpec
+        return InstrumentSpec.from_symbol(self.instrument)
+
+    @property
+    def point_value(self) -> float:
+        """Instrument point value (delegates to InstrumentSpec if available)."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(self.instrument).point_value
+        except Exception:
+            return self.risk.nq_point_value_micro
+
+    @property
+    def tick_size(self) -> float:
+        """Instrument tick size."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(self.instrument).tick_size
+        except Exception:
+            return 0.25
 
 
 CONFIG = BotConfig()

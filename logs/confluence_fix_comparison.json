@@ -1,0 +1,83 @@
+{
+  "diagnostic": "confluence_engine_fix_comparison",
+  "generated": "2026-03-06",
+  "path_executed": "C",
+  "description": "PATH C — Aggressive: all non-sweep signal sources disabled as triggers, preserved as contextual score modifiers only",
+
+  "before": {
+    "label": "All Sources (pre-fix)",
+    "dataset": "period_4 (Sep 2023 – Feb 2024)",
+    "metrics": {
+      "total_trades": 387,
+      "win_rate": 38.2,
+      "profit_factor": 1.34,
+      "total_pnl": 3736.02,
+      "expectancy": 9.65,
+      "max_drawdown_pct": 3.5,
+      "c1_pnl": 263.27,
+      "c2_pnl": 3472.75
+    },
+    "per_source": {
+      "aggregator": {"trades": 241, "wr": 39.0, "pf": 1.24, "pnl": 1556.50, "classification": "trigger"},
+      "sweep": {"trades": 119, "wr": 39.5, "pf": 1.72, "pnl": 2538.64, "classification": "trigger"},
+      "confluence": {"trades": 22, "wr": 22.7, "pf": 0.66, "pnl": -263.44, "classification": "trigger"},
+      "ucl_confirmed": {"trades": 5, "wr": 40.0, "pf": 0.55, "pnl": -95.68, "classification": "trigger"}
+    }
+  },
+
+  "after": {
+    "label": "PATH C — Sweep-only trigger + context boosts",
+    "dataset": "period_4 (Sep 2023 – Feb 2024)",
+    "metrics": {
+      "total_trades": 283,
+      "win_rate": 39.6,
+      "profit_factor": 1.37,
+      "total_pnl": 2983.06,
+      "expectancy": 10.54,
+      "max_drawdown_pct": 1.4,
+      "c1_pnl": 473.43,
+      "c2_pnl": 2509.63
+    },
+    "per_source": {
+      "aggregator": {"trades": 0, "classification": "context_only", "boost": "+0.05 when aligned with sweep"},
+      "sweep": {"trades": 283, "classification": "trigger", "note": "only trigger source"},
+      "confluence": {"trades": 0, "classification": "removed", "note": "replaced by sweep + context boost"},
+      "ucl_confirmed": {"trades": 0, "classification": "trigger_derivative", "note": "sweep-derived, UCL routing preserved"}
+    }
+  },
+
+  "delta": {
+    "total_trades": -104,
+    "win_rate": "+1.4%",
+    "profit_factor": "+0.03",
+    "total_pnl": -752.96,
+    "expectancy": "+0.89",
+    "max_drawdown_pct": "-2.1%"
+  },
+
+  "signal_reclassification": {
+    "aggregator": {"from": "trigger", "to": "context", "reason": "PF 1.24 borderline, PATH C demotes all non-sweep", "boost_value": 0.05},
+    "sweep": {"from": "trigger", "to": "trigger", "reason": "PF 1.72, primary edge source"},
+    "confluence": {"from": "trigger", "to": "removed", "reason": "PF 0.66 parasitic, replaced by sweep + context architecture"},
+    "ucl_confirmed": {"from": "trigger", "to": "trigger_derivative", "reason": "Sweep-derived, UCL v2 routing preserved unchanged"},
+    "order_block": {"from": "aggregator_internal", "to": "context_boost", "reason": "Structural setup, +0.05 when near sweep price"},
+    "fvg": {"from": "aggregator_internal", "to": "context_boost", "reason": "Structural setup, +0.05 when inside FVG at sweep price"}
+  },
+
+  "architecture": {
+    "layer_1": "HTF Gate — hard pass/fail directional filter (unchanged)",
+    "layer_2": "Structural Context — aggregator alignment (+0.05), OB (+0.05), FVG (+0.05)",
+    "layer_3": "Entry Trigger — sweep detector ONLY (unchanged logic)",
+    "layer_4": "Risk Calibration — HC gates, risk engine, institutional modifiers (unchanged)"
+  },
+
+  "boundaries_verified": {
+    "htf_gate_hard": true,
+    "sweep_unchanged": true,
+    "hc_score_075": true,
+    "max_stop_30pt": true,
+    "c2_trailing_untouched": true,
+    "scale_out_untouched": true,
+    "risk_drawdown_untouched": true
+  }
+}

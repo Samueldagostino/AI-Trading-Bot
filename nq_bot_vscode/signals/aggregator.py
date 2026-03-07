@@ -16,8 +16,11 @@ agreeing on direction. Discord alone NEVER triggers a trade.
 import logging
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, TYPE_CHECKING
 from enum import Enum
+
+if TYPE_CHECKING:
+    from nq_bot_vscode.ml.predictor import MLPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,9 @@ class AggregatedSignal:
     should_trade: bool
     rejection_reason: str = ""
 
+    # Structural stop price (tightest from contributing signals)
+    structural_stop_price: Optional[float] = None
+
 
 class SignalAggregator:
     """
@@ -68,8 +74,9 @@ class SignalAggregator:
     direction and confidence. The risk engine decides sizing and approval.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, ml_predictor: Optional["MLPredictor"] = None):
         self.config = config.signals
+        self._ml_predictor = ml_predictor
         self._last_signal_time: Optional[datetime] = None
         self._signal_history: List[AggregatedSignal] = []
         self._htf_blocked_count: int = 0
@@ -96,6 +103,20 @@ class SignalAggregator:
         """
         if current_time is None:
             current_time = datetime.now(timezone.utc)
+
+        # Auto-generate ML prediction when predictor is available
+        if ml_prediction is None and self._ml_predictor is not None:
+            try:
+                pred = self._ml_predictor.predict(
+                    feature_snapshot, htf_bias,
+                )
+                if pred.direction != "neutral":
+                    ml_prediction = {
+                        "direction": pred.direction,
+                        "confidence": pred.confidence,
+                    }
+            except Exception as e:
+                logger.debug("ML prediction failed: %s", e)
 
         signals: List[IndividualSignal] = []
 
@@ -207,8 +228,18 @@ class SignalAggregator:
             rejection_reason = "Discord signal alone — requires technical or ML confluence"
 
         # === HTF BIAS GATE ===
-        if should_trade and htf_bias is not None:
-            if direction == SignalDirection.LONG and not htf_bias.htf_allows_long:
+        # CRITICAL: fail-safe — if HTF data is unavailable, block all trades.
+        # The HTF gate provides 84% of the system's edge; trading without it
+        # is trading blind.  Never default to allowing trades.
+        if should_trade:
+            if htf_bias is None:
+                should_trade = False
+                rejection_reason = (
+                    "HTF data unavailable — blocking trade (fail-safe)"
+                )
+                self._htf_blocked_count += 1
+                logger.warning("HTF FAIL-SAFE: no HTF data, blocking %s signal", direction.value)
+            elif direction == SignalDirection.LONG and not htf_bias.htf_allows_long:
                 should_trade = False
                 rejection_reason = (
                     f"HTF bias blocks long: {htf_bias.consensus_direction} "
@@ -223,6 +254,19 @@ class SignalAggregator:
                 )
                 self._htf_blocked_count += 1
 
+        # Find tightest structural stop from contributing signals
+        structural_stops = [
+            s.metadata.get("structural_stop_price")
+            for s in aligned_signals
+            if s.metadata.get("structural_stop_price") is not None
+        ]
+        tightest_structural = None
+        if structural_stops:
+            if direction == SignalDirection.LONG:
+                tightest_structural = max(structural_stops)  # Highest = closest to entry
+            else:
+                tightest_structural = min(structural_stops)  # Lowest = closest to entry
+
         signal = AggregatedSignal(
             timestamp=current_time,
             direction=direction,
@@ -234,6 +278,7 @@ class SignalAggregator:
             num_signals_aligned=len(aligned_signals),
             should_trade=should_trade,
             rejection_reason=rejection_reason,
+            structural_stop_price=tightest_structural,
         )
 
         self._signal_history.append(signal)
@@ -264,7 +309,8 @@ class SignalAggregator:
                 strength=0.75,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "OB", "type": "bullish"},
+                metadata={"feature": "OB", "type": "bullish",
+                          "structural_stop_price": snapshot.structural_stop_long},
             ))
 
         if snapshot.near_bearish_ob:
@@ -274,7 +320,8 @@ class SignalAggregator:
                 strength=0.75,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "OB", "type": "bearish"},
+                metadata={"feature": "OB", "type": "bearish",
+                          "structural_stop_price": snapshot.structural_stop_short},
             ))
 
         # --- Fair Value Gap ---
@@ -285,7 +332,8 @@ class SignalAggregator:
                 strength=0.70,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "FVG", "type": "bullish"},
+                metadata={"feature": "FVG", "type": "bullish",
+                          "structural_stop_price": snapshot.structural_stop_long},
             ))
 
         if snapshot.inside_bearish_fvg:
@@ -295,7 +343,8 @@ class SignalAggregator:
                 strength=0.70,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "FVG", "type": "bearish"},
+                metadata={"feature": "FVG", "type": "bearish",
+                          "structural_stop_price": snapshot.structural_stop_short},
             ))
 
         # --- Liquidity Sweeps ---
@@ -307,7 +356,8 @@ class SignalAggregator:
                 strength=0.80,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "sweep", "type": "buy_side"},
+                metadata={"feature": "sweep", "type": "buy_side",
+                          "structural_stop_price": snapshot.structural_stop_short},
             ))
 
         # Sell-side sweep (swept lows) = bullish signal (smart money bought)
@@ -318,7 +368,8 @@ class SignalAggregator:
                 strength=0.80,
                 source_category="technical",
                 timestamp=current_time,
-                metadata={"feature": "sweep", "type": "sell_side"},
+                metadata={"feature": "sweep", "type": "sell_side",
+                          "structural_stop_price": snapshot.structural_stop_long},
             ))
 
         # --- VWAP ---

@@ -29,6 +29,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Callable, Dict, List, Any
 from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class PaperTradingState:
     halt_reason: str = ""
     session_date: str = ""
 
-    # Bar aggregation state (1m → 2m)
+    # Bar aggregation state (1m -> 2m)
     pending_1m_bar: Optional[Dict] = None
     bars_in_current_2m: int = 0
     current_2m_open: float = 0.0
@@ -110,10 +111,12 @@ class TradovatePaperConnector:
         self._on_position_update: Optional[Callable] = None
         self._on_connection_lost: Optional[Callable] = None
 
-        # Trade log
+        # Trade log — JSONL with daily rotation (replaces load-rewrite pattern)
         self._trade_log: List[Dict] = []
         _LOGS_DIR.mkdir(parents=True, exist_ok=True)
         self._trade_log_path = str(_LOGS_DIR / "paper_trades.json")
+        from monitoring.json_logger import JSONLineLogger
+        self._trade_jl = JSONLineLogger(str(_LOGS_DIR), "paper_trades")
 
         # Connection monitor task
         self._monitor_task: Optional[asyncio.Task] = None
@@ -175,7 +178,7 @@ class TradovatePaperConnector:
         logger.info("Paper trading connector disconnected")
 
     # ================================================================
-    # BAR AGGREGATION (1m → 2m)
+    # BAR AGGREGATION (1m -> 2m)
     # ================================================================
     async def _handle_raw_bar(self, data: Dict) -> None:
         """
@@ -359,10 +362,23 @@ class TradovatePaperConnector:
         self.state.halt_reason = f"emergency: {reason}"
         self._log_event("emergency_flatten", {"reason": reason})
 
-        try:
-            await self._client.flatten_position()
-        except Exception as e:
-            logger.error(f"Emergency flatten failed: {e}")
+        # Retry flatten up to 3 times — positions MUST be closed
+        for attempt in range(1, 4):
+            try:
+                await self._client.flatten_position()
+                logger.info("Emergency flatten succeeded on attempt %d", attempt)
+                return
+            except Exception as e:
+                logger.error(
+                    "Emergency flatten attempt %d/3 failed: %s", attempt, e
+                )
+                if attempt < 3:
+                    await asyncio.sleep(2.0)
+
+        logger.critical(
+            "EMERGENCY FLATTEN FAILED after 3 attempts — "
+            "MANUAL INTERVENTION REQUIRED. Positions may still be open."
+        )
 
     # ================================================================
     # DAILY PnL TRACKING
@@ -409,18 +425,14 @@ class TradovatePaperConnector:
     # ================================================================
     @staticmethod
     def get_et_now() -> datetime:
-        """Get current time in US/Eastern (UTC-5 or UTC-4 for DST)."""
-        utc_now = datetime.now(timezone.utc)
-        # Simple EST offset (UTC-5). For DST, this would need pytz/zoneinfo.
-        # Futures sessions are defined in ET.
-        et_offset = timezone(timedelta(hours=-5))
-        return utc_now.astimezone(et_offset)
+        """Get current time in US/Eastern — DST-aware via ZoneInfo."""
+        return datetime.now(ZoneInfo("America/New_York"))
 
     @staticmethod
     def is_within_session(et_time: datetime = None) -> bool:
         """Check if current ET time is within trading session.
 
-        Session: 6:01 PM ET → 4:30 PM ET next day.
+        Session: 6:01 PM ET -> 4:30 PM ET next day.
         Maintenance: 5:00 PM – 6:00 PM ET.
         """
         if et_time is None:
@@ -531,25 +543,13 @@ class TradovatePaperConnector:
             self._flush_trade_log()
 
     def _flush_trade_log(self) -> None:
-        """Write trade log to disk."""
+        """Write trade log to disk via JSONL logger (append-only, daily rotation)."""
         if not self._trade_log:
             return
-
-        try:
-            # Read existing log
-            existing = []
-            if os.path.exists(self._trade_log_path):
-                with open(self._trade_log_path, "r") as f:
-                    existing = json.load(f)
-
-            existing.extend(self._trade_log)
-
-            with open(self._trade_log_path, "w") as f:
-                json.dump(existing, f, indent=2, default=str)
-
-            self._trade_log.clear()
-        except Exception as e:
-            logger.error(f"Failed to write trade log: {e}")
+        for entry in self._trade_log:
+            self._trade_jl.log(entry)
+        self._trade_jl.flush()
+        self._trade_log.clear()
 
     # ================================================================
     # STATUS

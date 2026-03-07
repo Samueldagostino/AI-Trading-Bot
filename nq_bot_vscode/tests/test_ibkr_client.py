@@ -23,7 +23,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock, call
 
-from Broker.ibkr_client import (
+from Broker.ibkr_client_portal import (
     IBKRClient,
     IBKRConfig,
     IBKRDataFeed,
@@ -136,24 +136,16 @@ class TestContractResolution:
             }
         ]
 
-        contract_info_response = {
-            "conid": 654321,
-            "symbol": "MNQH6",
-            "exchange": "CME",
-            "maturity_date": "20260320",
-            "company_name": "Micro E-mini Nasdaq-100 Mar26",
-        }
-
         client._session = MagicMock()
         client._post = AsyncMock(return_value=search_response)
-        client._get = AsyncMock(return_value=contract_info_response)
 
         result = await client._resolve_front_month("MNQ")
 
         assert result is not None
         assert result.conid == 654321
-        assert result.symbol == "MNQH6"
-        assert result.expiry == "20260320"
+        assert result.symbol == "MNQ"
+        assert result.expiry == "MAR2026"
+        assert result.exchange == "CME"
 
     @pytest.mark.asyncio
     async def test_resolve_front_month_no_results(self, client):
@@ -524,36 +516,36 @@ class TestSessionType:
         return datetime(2026, 2, 28, hour, minute, tzinfo=timezone.utc)
 
     def test_rth_open(self):
-        """9:30 ET = 14:30 UTC → RTH."""
+        """9:30 ET = 14:30 UTC -> RTH."""
         assert get_session_type(self._utc(14, 30)) == SessionType.RTH
 
     def test_rth_mid_morning(self):
-        """11:00 ET = 16:00 UTC → RTH."""
+        """11:00 ET = 16:00 UTC -> RTH."""
         assert get_session_type(self._utc(16, 0)) == SessionType.RTH
 
     def test_rth_close_boundary(self):
-        """16:00 ET = 21:00 UTC → ETH (RTH is exclusive of 16:00)."""
+        """16:00 ET = 21:00 UTC -> ETH (RTH is exclusive of 16:00)."""
         assert get_session_type(self._utc(21, 0)) == SessionType.ETH
 
     def test_rth_just_before_close(self):
-        """15:59 ET = 20:59 UTC → RTH."""
+        """15:59 ET = 20:59 UTC -> RTH."""
         assert get_session_type(self._utc(20, 59)) == SessionType.RTH
 
     def test_eth_premarket(self):
-        """8:00 ET = 13:00 UTC → ETH."""
+        """8:00 ET = 13:00 UTC -> ETH."""
         assert get_session_type(self._utc(13, 0)) == SessionType.ETH
 
     def test_eth_overnight(self):
-        """2:00 ET = 07:00 UTC → ETH."""
+        """2:00 ET = 07:00 UTC -> ETH."""
         assert get_session_type(self._utc(7, 0)) == SessionType.ETH
 
     def test_eth_evening(self):
-        """20:00 ET = 01:00 UTC next day → ETH."""
+        """20:00 ET = 01:00 UTC next day -> ETH."""
         ts = datetime(2026, 3, 1, 1, 0, tzinfo=timezone.utc)
         assert get_session_type(ts) == SessionType.ETH
 
     def test_rth_929_is_eth(self):
-        """9:29 ET = 14:29 UTC → ETH (one minute before RTH open)."""
+        """9:29 ET = 14:29 UTC -> ETH (one minute before RTH open)."""
         assert get_session_type(self._utc(14, 29)) == SessionType.ETH
 
     def test_client_get_session_type(self, client):
@@ -1019,7 +1011,7 @@ class TestIBKRWebSocket:
     @pytest.mark.asyncio
     async def test_connect_failure_increments_counter(self, ws):
         """Failed connect should increment consecutive_failures."""
-        # No real gateway → connection will fail
+        # No real gateway -> connection will fail
         ws.config = IBKRConfig(gateway_host="127.0.0.1", gateway_port=59999)
 
         result = await ws.connect()
@@ -1349,7 +1341,7 @@ class TestPollingFallback:
         snap2 = MarketSnapshot(conid=654321, last_price=21010.0,
                                timestamp=_ts(0, 30))
         snap3 = MarketSnapshot(conid=654321, last_price=21005.0,
-                               timestamp=_ts(2, 0))  # new window → emit
+                               timestamp=_ts(2, 0))  # new window -> emit
 
         await feed._on_poll_snapshot(snap1)
         await feed._on_poll_snapshot(snap2)
@@ -1416,10 +1408,10 @@ class TestHealthMonitor:
 # ================================================================
 
 class TestDataFeedIntegration:
-    """End-to-end tests for tick→candle→callback pipeline."""
+    """End-to-end tests for tick->candle->callback pipeline."""
 
     def test_ws_tick_to_bar_pipeline(self):
-        """WebSocket tick → aggregator → on_bar callback."""
+        """WebSocket tick -> aggregator -> on_bar callback."""
         client = _make_connected_client()
         feed = IBKRDataFeed(client)
 
@@ -1435,7 +1427,7 @@ class TestDataFeedIntegration:
         agg.process_tick(20990.0, 1, _ts(31, 0))
         agg.process_tick(21005.0, 1, _ts(31, 30))
 
-        # Window 2 starts → emits candle 1
+        # Window 2 starts -> emits candle 1
         agg.process_tick(21020.0, 1, _ts(32, 0))
 
         assert len(received) == 1
@@ -1466,7 +1458,7 @@ class TestDataFeedIntegration:
 
         # Step 2: Live ticks
         feed._aggregator.process_tick(21100.0, 1, _ts(30, 0))
-        feed._aggregator.process_tick(21110.0, 1, _ts(32, 0))  # new window → emit
+        feed._aggregator.process_tick(21110.0, 1, _ts(32, 0))  # new window -> emit
 
         assert len(received) == 4  # 3 backfill + 1 live candle
         live_bar = received[3]
@@ -1479,7 +1471,7 @@ class TestDataFeedIntegration:
 # ================================================================
 
 class TestCandleToBar:
-    """Tests for the dict→Bar adapter in IBKRDataFeed."""
+    """Tests for the dict->Bar adapter in IBKRDataFeed."""
 
     def test_basic_conversion(self):
         """candle_to_bar should convert dict to Bar with all fields."""
@@ -1573,7 +1565,7 @@ class TestCandleToBar:
 
     def test_round_trip_candle_to_bar_accepted_by_process_bar(self):
         """
-        Round-trip: raw candle dict → candle_to_bar → Bar → process_bar()
+        Round-trip: raw candle dict -> candle_to_bar -> Bar -> process_bar()
         accepts it without AttributeError.
 
         Verifies that every attribute access process_bar() makes on the bar

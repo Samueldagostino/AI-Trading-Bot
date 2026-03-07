@@ -37,6 +37,8 @@ token.json
 # ── Trading Data (too large / sensitive for git) ─────────────
 data/tradingview/*.csv
 data/tradingview/*.json
+data/historical/*.csv
+data/firstrate/
 data/backtest_results/
 data/live_logs/
 *.parquet
@@ -82,3 +84,9 @@ htmlcov/
 .coverage
 .pytest_cache/
 .tox/
+
+# ── Quant Data API (NEVER COMMIT) ────────────────────────────
+config/quantdata_token.txt
+config/quantdata_instance_id.txt
+logs/gamma_levels.json
+logs/modifier_diagnostics.json

@@ -8,20 +8,23 @@ enforcement.
 Responsibilities:
   1. Internal position ledger (entry price, size, side, tags, order IDs)
   2. Reconciliation loop: every 30s, query IBKR portfolio and compare
-  3. Mismatch → CRITICAL log + HALT (no auto-correction, human intervenes)
+  3. Mismatch -> CRITICAL log + HALT (no auto-correction, human intervenes)
   4. Realized P&L per trade and cumulative daily P&L
   5. Partial fill tracking (C1 fills but C2 doesn't)
   6. Immediate state update on position close (no waiting for recon cycle)
 """
 
 import asyncio
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from Broker.ibkr_client import IBKRClient
+from Broker.ibkr_client_portal import IBKRClient
 from Broker.order_executor import IBKROrderExecutor, MNQ_POINT_VALUE
 
 logger = logging.getLogger(__name__)
@@ -153,9 +156,13 @@ class PositionManager:
         self,
         client: IBKRClient,
         executor: IBKROrderExecutor,
+        trade_lock: Optional[asyncio.Lock] = None,
+        state_file: Optional[str] = None,
     ):
         self._client = client
         self._executor = executor
+        self._trade_lock = trade_lock  # Shared with bar processing
+        self._state_file = state_file or "logs/position_state.json"
 
         # Position ledger
         self._open_positions: Dict[str, TrackedPosition] = {}
@@ -228,6 +235,7 @@ class PositionManager:
             position_id, side, contracts,
             entry_price, tag, group_id or "—",
         )
+        self._save_state()
         return pos
 
     def close_position(
@@ -279,6 +287,7 @@ class PositionManager:
             pos.exit_price, exit_reason,
             pos.gross_pnl, pos.net_pnl, self._daily_realized_pnl,
         )
+        self._save_state()
         return pos
 
     def mark_partial_fill(
@@ -365,11 +374,19 @@ class PositionManager:
             logger.info("Reconciliation loop stopped")
 
     async def _reconciliation_loop(self) -> None:
-        """Run reconciliation on a fixed interval."""
+        """Run reconciliation on a fixed interval.
+
+        Acquires the shared trade lock (if provided) to prevent
+        interleaving with bar processing on shared state.
+        """
         try:
             while True:
                 await asyncio.sleep(RECONCILIATION_INTERVAL_SECONDS)
-                await self.reconcile()
+                if self._trade_lock:
+                    async with self._trade_lock:
+                        await self.reconcile()
+                else:
+                    await self.reconcile()
         except asyncio.CancelledError:
             return
 
@@ -575,10 +592,114 @@ class PositionManager:
             ),
         }
 
+    # ──────────────────────────────────────────────────────────
+    # STATE PERSISTENCE
+    # ──────────────────────────────────────────────────────────
+
+    def _save_state(self) -> None:
+        """Persist open positions + daily counters to disk.
+
+        Written atomically (write-to-temp then rename) to prevent
+        corruption from a crash mid-write.
+        """
+        state = {
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "daily_realized_pnl": self._daily_realized_pnl,
+            "trade_count": self._trade_count,
+            "open_positions": {
+                pid: {
+                    "position_id": p.position_id,
+                    "broker_order_id": p.broker_order_id,
+                    "side": p.side.value,
+                    "contracts": p.contracts,
+                    "entry_price": p.entry_price,
+                    "entry_time": p.entry_time.isoformat(),
+                    "tag": p.tag,
+                    "fill_state": p.fill_state.value,
+                }
+                for pid, p in self._open_positions.items()
+            },
+            "scale_out_groups": {
+                gid: {
+                    "group_id": g.group_id,
+                    "direction": g.direction,
+                    "c1_id": g.c1.position_id if g.c1 else None,
+                    "c2_id": g.c2.position_id if g.c2 else None,
+                    "created_at": g.created_at.isoformat(),
+                }
+                for gid, g in self._scale_out_groups.items()
+            },
+        }
+        try:
+            path = Path(self._state_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(state, indent=2))
+            import os
+            os.replace(str(tmp_path), str(path))
+        except OSError as e:
+            logger.critical("Failed to save position state: %s", e)
+
+    def load_state(self) -> bool:
+        """Restore open positions from disk after a crash restart.
+
+        Returns True if state was loaded, False if no file or error.
+        Should be called BEFORE starting the reconciliation loop
+        so that the restored state can be verified against the broker.
+        """
+        path = Path(self._state_file)
+        if not path.exists():
+            logger.info("No position state file at %s — starting fresh", path)
+            return False
+
+        try:
+            state = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error("Failed to read position state: %s", e)
+            return False
+
+        restored = 0
+        for pid, pdata in state.get("open_positions", {}).items():
+            pos = TrackedPosition(
+                position_id=pdata["position_id"],
+                broker_order_id=pdata["broker_order_id"],
+                side=PositionSide(pdata["side"]),
+                contracts=pdata["contracts"],
+                entry_price=pdata["entry_price"],
+                entry_time=datetime.fromisoformat(pdata["entry_time"]),
+                tag=pdata.get("tag", ""),
+                fill_state=FillState(pdata.get("fill_state", "filled")),
+            )
+            self._open_positions[pid] = pos
+            restored += 1
+
+        for gid, gdata in state.get("scale_out_groups", {}).items():
+            group = ScaleOutGroup(
+                group_id=gdata["group_id"],
+                direction=gdata["direction"],
+                created_at=datetime.fromisoformat(gdata["created_at"]),
+            )
+            if gdata.get("c1_id") and gdata["c1_id"] in self._open_positions:
+                group.c1 = self._open_positions[gdata["c1_id"]]
+            if gdata.get("c2_id") and gdata["c2_id"] in self._open_positions:
+                group.c2 = self._open_positions[gdata["c2_id"]]
+            self._scale_out_groups[gid] = group
+
+        self._daily_realized_pnl = state.get("daily_realized_pnl", 0.0)
+        self._trade_count = state.get("trade_count", 0)
+
+        logger.info(
+            "Position state restored: %d open positions, "
+            "daily_pnl=%.2f, trades=%d",
+            restored, self._daily_realized_pnl, self._trade_count,
+        )
+        return True
+
     def reset_daily(self) -> None:
         """Reset daily counters at session open."""
         self._daily_realized_pnl = 0.0
         self._trade_count = 0
         self._closed_positions.clear()
         self._scale_out_groups.clear()
+        self._save_state()
         logger.info("Position manager daily reset complete")

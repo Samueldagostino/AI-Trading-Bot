@@ -9,18 +9,18 @@ THE STRATEGY:
           Once unrealized profit >= 3.0pts, activate a 2.5pt trailing stop
           from the high-water mark. Fallback: exit at market after 12 bars
           if trailing never activates.
-  C2:     Runner → stop to breakeven+1 after C1 exits, then trail
+  C2:     Runner -> stop to breakeven+1 after C1 exits, then trail
 
 LIFECYCLE:
-  1. SIGNAL  → Risk approved → Enter 2 MNQ
-  2. PHASE_1 → Both contracts open, initial stop on both, C1 trailing armed
-  3. C1_EXIT → Trailing stop hit (or 12-bar fallback) → close C1, C2 stop → BE+1
-  4. RUNNING → C2 trailing with ATR-based or fixed trail
-  5. C2_EXIT → C2 hits trailing stop, time stop, or max target
-  6. DONE    → Record PnL, update risk engine
+  1. SIGNAL  -> Risk approved -> Enter 2 MNQ
+  2. PHASE_1 -> Both contracts open, initial stop on both, C1 trailing armed
+  3. C1_EXIT -> Trailing stop hit (or 12-bar fallback) -> close C1, C2 stop -> BE+1
+  4. RUNNING -> C2 trailing with ATR-based or fixed trail
+  5. C2_EXIT -> C2 hits trailing stop, time stop, or max target
+  6. DONE    -> Record PnL, update risk engine
 
 Win-win math ($2/point MNQ):
-  C1 trails 5pts profit → $10
+  C1 trails 5pts profit -> $10
   C2 at breakeven+1 = $2
   Total minimum win: $12
   C1 trails 10pts + C2 runs 80pts = $20 + $160 = $180
@@ -36,6 +36,9 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 from enum import Enum
 import uuid
+
+from monitoring.alerting import get_alert_manager
+from monitoring.alert_templates import AlertTemplates
 
 logger = logging.getLogger(__name__)
 
@@ -140,18 +143,20 @@ class ScaleOutTrade:
 class ScaleOutExecutor:
     """
     Manages the full lifecycle of 2-contract scale-out trades.
-    
+
     Works in two modes:
     - Paper: Simulated fills (default)
     - Live: Routes through TradovateClient
     """
 
-    def __init__(self, config, tradovate_client=None):
+    def __init__(self, config, tradovate_client=None, execution_analytics=None, instrument: str = "MNQ"):
         self.config = config
         self.scale_config = config.scale_out
         self.risk_config = config.risk
         self.broker = tradovate_client
-        
+        self._analytics = execution_analytics
+        self._instrument = instrument
+
         self._active_trade: Optional[ScaleOutTrade] = None
         self._trade_history: List[ScaleOutTrade] = []
 
@@ -235,10 +240,22 @@ class ScaleOutExecutor:
         c1_thresh = self.scale_config.c1_profit_threshold_pts
         c1_trail = self.scale_config.c1_trail_distance_pts
         logger.info(
-            f"SCALE-OUT ENTRY: {direction.upper()} 2x MNQ @ {entry_price:.2f} | "
+            f"SCALE-OUT ENTRY: {direction.upper()} 2x {self._instrument} @ {entry_price:.2f} | "
             f"Stop: {stop_price:.2f} | C1: trail from +{c1_thresh}pts (trail {c1_trail}pts) | "
             f"Score: {signal_score:.2f} | Regime: {regime}"
         )
+
+        # Fire trade entry alert
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.trade_entry(
+                direction=direction,
+                contracts=self.scale_config.total_contracts,
+                entry_price=trade.entry_price,
+                stop_loss=trade.initial_stop,
+                take_profit=0.0,  # No fixed target in scale-out
+                signal_confidence=signal_score,
+            ))
 
         return trade
 
@@ -261,13 +278,29 @@ class ScaleOutExecutor:
             leg.entry_time = now
             leg.is_filled = True
             leg.is_open = True
-            leg.commission = self.risk_config.commission_per_contract
+            leg.commission = self.risk_config.get_commission(self._instrument)
 
         trade.entry_price = fill_price
         trade.entry_time = now
-        trade.c1_best_price = fill_price
-        trade.c2_best_price = fill_price
+        trade.c1_best_price = fill_price  # Initialize to entry price
+        trade.c2_best_price = fill_price  # Initialize to entry price
         trade._set_phase(ScaleOutPhase.PHASE_1)
+
+        # Analytics: record entry fills with slippage
+        if self._analytics:
+            side = "BUY" if trade.direction == "long" else "SELL"
+            direction = "long_entry" if trade.direction == "long" else "short_entry"
+            for leg_label in ["C1", "C2"]:
+                oid = f"{trade.trade_id}-{leg_label}-entry"
+                self._analytics.record_order_sent(
+                    order_id=oid, side=side, size=1,
+                    expected_price=price, timestamp=now,
+                    order_type="market", direction=direction,
+                )
+                self._analytics.record_fill(
+                    order_id=oid, fill_price=fill_price,
+                    fill_size=1, fill_timestamp=now,
+                )
 
     async def _live_enter(self, trade: ScaleOutTrade) -> None:
         """Live entry through Tradovate."""
@@ -283,6 +316,9 @@ class ScaleOutExecutor:
 
         if result.get("success"):
             trade._set_phase(ScaleOutPhase.PHASE_1)
+            # Initialize best prices to entry price
+            trade.c1_best_price = trade.entry_price
+            trade.c2_best_price = trade.entry_price
             # Store order IDs for modification later
             c1_order = result.get("c1_order", {})
             c2_order = result.get("c2_order", {})
@@ -350,8 +386,6 @@ class ScaleOutExecutor:
         if direction == "long":
             trade.c1_best_price = max(trade.c1_best_price, price)
         else:
-            if trade.c1_best_price == 0:
-                trade.c1_best_price = price
             trade.c1_best_price = min(trade.c1_best_price, price)
 
         # --- Compute unrealized C1 profit ---
@@ -390,7 +424,7 @@ class ScaleOutExecutor:
         if direction == "long":
             trade.c2_best_price = max(trade.c2_best_price, price)
         else:
-            trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
+            trade.c2_best_price = min(trade.c2_best_price, price)
 
         return None
 
@@ -432,6 +466,16 @@ class ScaleOutExecutor:
             f"C2 stop moved to BE+1: {trade.c2.stop_price:.2f}"
         )
 
+        # Fire partial exit alert for C1
+        mgr = get_alert_manager()
+        if mgr:
+            mgr.enqueue(AlertTemplates.partial_exit(
+                contracts_exited=trade.c1.contracts,
+                remaining_contracts=trade.c2.contracts,
+                exit_price=exit_price,
+                pnl=trade.c1.net_pnl,
+            ))
+
         trade._set_phase(ScaleOutPhase.RUNNING)
 
         return {
@@ -469,7 +513,7 @@ class ScaleOutExecutor:
         if direction == "long":
             trade.c2_best_price = max(trade.c2_best_price, price)
         else:
-            trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
+            trade.c2_best_price = min(trade.c2_best_price, price)
         return None
 
     async def _manage_runner(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
@@ -487,28 +531,36 @@ class ScaleOutExecutor:
         if direction == "long":
             trade.c2_best_price = max(trade.c2_best_price, price)
         else:
-            if trade.c2_best_price == 0:
-                trade.c2_best_price = price
             trade.c2_best_price = min(trade.c2_best_price, price)
 
         # --- Update trailing stop ---
         if cfg.c2_trailing_stop_enabled:
             new_trail = self._compute_trailing_stop(trade, price)
-            
-            # Trail only moves in favorable direction
-            if direction == "long" and new_trail > trade.c2.stop_price:
-                trade.c2.stop_price = round(new_trail, 2)
-                trade.c2_trailing_stop = trade.c2.stop_price
-                
-                if not self.config.execution.paper_trading and self.broker and trade.c2.stop_order_id:
-                    await self.broker.modify_stop(trade.c2.stop_order_id, trade.c2.stop_price)
-                    
-            elif direction == "short" and (new_trail < trade.c2.stop_price or trade.c2.stop_price == 0):
-                trade.c2.stop_price = round(new_trail, 2)
-                trade.c2_trailing_stop = trade.c2.stop_price
 
+            # Trail only moves in favorable direction
+            should_update = False
+            if direction == "long" and new_trail > trade.c2.stop_price:
+                should_update = True
+            elif direction == "short" and new_trail < trade.c2.stop_price:
+                should_update = True
+
+            if should_update:
+                new_stop_rounded = round(new_trail, 2)
+
+                # Update broker FIRST — only update local state on success
                 if not self.config.execution.paper_trading and self.broker and trade.c2.stop_order_id:
-                    await self.broker.modify_stop(trade.c2.stop_order_id, trade.c2.stop_price)
+                    try:
+                        await self.broker.modify_stop(trade.c2.stop_order_id, new_stop_rounded)
+                    except Exception as e:
+                        logger.warning(
+                            "Broker stop modification failed — skipping local update: %s", e
+                        )
+                        # Skip local update to avoid split-brain
+                        should_update = False
+
+                if should_update:
+                    trade.c2.stop_price = new_stop_rounded
+                    trade.c2_trailing_stop = trade.c2.stop_price
 
         # --- Check C2 STOP ---
         stop_hit = False
@@ -585,6 +637,23 @@ class ScaleOutExecutor:
         trade.closed_at = time
         trade._set_phase(ScaleOutPhase.DONE)
 
+        # Analytics: record exit fills with slippage
+        if self._analytics:
+            exit_side = "SELL" if trade.direction == "long" else "BUY"
+            direction = "long_exit" if trade.direction == "long" else "short_exit"
+            for leg, label in [(trade.c1, "C1"), (trade.c2, "C2")]:
+                if leg.exit_price:
+                    oid = f"{trade.trade_id}-{label}-exit"
+                    self._analytics.record_order_sent(
+                        order_id=oid, side=exit_side, size=leg.contracts,
+                        expected_price=leg.stop_price or leg.target_price or leg.entry_price,
+                        timestamp=time, order_type="market", direction=direction,
+                    )
+                    self._analytics.record_fill(
+                        order_id=oid, fill_price=leg.exit_price,
+                        fill_size=leg.contracts, fill_timestamp=time,
+                    )
+
         self._trade_history.append(trade)
         self._active_trade = None
 
@@ -597,6 +666,20 @@ class ScaleOutExecutor:
             f"C2: {trade.c2.exit_reason} ({c2_pts:.1f}pts ${trade.c2.net_pnl:.2f}) | "
             f"TOTAL: ${trade.total_net_pnl:.2f}"
         )
+
+        # Fire trade exit alert
+        mgr = get_alert_manager()
+        if mgr:
+            exit_price = trade.c2.exit_price or trade.c1.exit_price or 0.0
+            exit_reason = trade.c2.exit_reason or trade.c1.exit_reason or "unknown"
+            mgr.enqueue(AlertTemplates.trade_exit(
+                direction=trade.direction,
+                contracts=self.scale_config.total_contracts,
+                exit_price=exit_price,
+                entry_price=trade.entry_price,
+                pnl=trade.total_net_pnl,
+                exit_reason=exit_reason,
+            ))
 
         return {
             "action": "trade_closed",
@@ -655,9 +738,9 @@ class ScaleOutExecutor:
         """Compute gross PnL for one leg in dollars."""
         if not leg.exit_price or not leg.entry_price:
             return 0.0
-        
-        point_value = self.risk_config.nq_point_value_micro  # Always MNQ
-        
+
+        point_value = self.risk_config.get_point_value(self._instrument)
+
         if direction == "long":
             points = leg.exit_price - leg.entry_price
         else:

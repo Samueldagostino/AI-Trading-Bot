@@ -23,7 +23,8 @@ os.environ.setdefault("IBKR_GATEWAY_PORT", "5000")
 os.environ.setdefault("IBKR_ACCOUNT_TYPE", "paper")
 
 from scripts.run_ibkr import IBKRLiveRunner
-from Broker.ibkr_client import IBKRConfig, ET_OFFSET, SessionType
+from Broker.ibkr_client_portal import IBKRConfig, SessionType
+from Broker.ibkr_client_portal import ET_TZ as ET_OFFSET
 from Broker.order_executor import ExecutorConfig
 
 

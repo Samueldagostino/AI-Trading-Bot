@@ -34,6 +34,7 @@ Output:
 
 import argparse
 import csv
+import math
 import os
 import sys
 from datetime import datetime, timezone, timedelta
@@ -88,7 +89,7 @@ def detect_1m_csv(directory: str) -> Optional[str]:
 def _looks_like_timestamp(value: str) -> bool:
     """Check if a string looks like a timestamp rather than a column name."""
     v = value.strip()
-    # Starts with a digit → likely data, not a header
+    # Starts with a digit -> likely data, not a header
     if v and v[0].isdigit():
         return True
     return False
@@ -249,6 +250,11 @@ def load_1m_bars(filepath: str) -> List[Dict]:
                 c = float(row[close_idx])
                 v = int(float(row[vol_idx])) if vol_idx < len(row) else 0
 
+                # NaN/Inf guard — reject corrupted price data
+                if not (math.isfinite(o) and math.isfinite(h) and
+                        math.isfinite(lo) and math.isfinite(c)):
+                    continue
+
                 if h < lo or o <= 0:
                     continue
 
@@ -265,6 +271,27 @@ def load_1m_bars(filepath: str) -> List[Dict]:
 
     # Sort chronologically
     bars.sort(key=lambda b: b["timestamp"])
+
+    # Detect and remove duplicates + log out-of-order stats
+    if bars:
+        original_count = len(bars)
+        deduped = [bars[0]]
+        out_of_order = 0
+        for i in range(1, len(bars)):
+            if bars[i]["timestamp"] == deduped[-1]["timestamp"]:
+                continue  # Skip duplicate timestamp
+            if bars[i]["timestamp"] < deduped[-1]["timestamp"]:
+                out_of_order += 1
+            deduped.append(bars[i])
+        dup_count = original_count - len(deduped)
+        if dup_count > 0:
+            print(f"  WARNING: {dup_count} duplicate timestamps removed "
+                  f"({dup_count / original_count * 100:.2f}% of rows)")
+        if out_of_order > 0:
+            print(f"  WARNING: {out_of_order} out-of-order timestamps detected "
+                  f"(resolved by sort)")
+        bars = deduped
+
     return bars
 
 
@@ -409,7 +436,7 @@ def main():
     total_vol = sum(b["volume"] for b in bars_1m)
 
     print(f"  Rows:        {len(bars_1m):,}")
-    print(f"  Date range:  {first_ts.strftime('%Y-%m-%d %H:%M')} → {last_ts.strftime('%Y-%m-%d %H:%M')} UTC")
+    print(f"  Date range:  {first_ts.strftime('%Y-%m-%d %H:%M')} -> {last_ts.strftime('%Y-%m-%d %H:%M')} UTC")
     print(f"  Span:        {days} days")
     print(f"  Price range: {price_low:.2f} – {price_high:.2f}")
     print(f"  Total volume: {total_vol:,}")
@@ -439,12 +466,12 @@ def main():
         agg = aggregate_bars(bars_1m, tf_minutes)
         outfile = os.path.join(output_dir, f"NQ_{tf_label}.csv")
         write_csv(agg, outfile)
-        print(f"  {tf_label:>4s}: {len(agg):>7,} bars → {outfile}")
+        print(f"  {tf_label:>4s}: {len(agg):>7,} bars -> {outfile}")
 
     # Also save a copy of the 1m data in standard format
     outfile_1m = os.path.join(output_dir, "NQ_1m.csv")
     write_csv(bars_1m, outfile_1m)
-    print(f"  {'1m':>4s}: {len(bars_1m):>7,} bars → {outfile_1m} (standardized)")
+    print(f"  {'1m':>4s}: {len(bars_1m):>7,} bars -> {outfile_1m} (standardized)")
 
     print(f"\n{'=' * 60}")
     print(f"  DONE — {len(TIMEFRAMES) + 1} files written to {output_dir}/")

@@ -10,17 +10,17 @@ Modes:
   Validate mode:     Runs at max speed, compares output to OOS baseline
 
 Pipeline (identical to run_paper.py):
-  FirstRate 1m bars → aggregate to 2m
-    → TradingOrchestrator.process_bar()  (HC filter + HTF gate)
-      → ScaleOutExecutor  (trade lifecycle)
-        → Fill simulation  (slippage + commission)
-          → Log to paper_trades.json / paper_decisions.json
+  FirstRate 1m bars -> aggregate to 2m
+    -> TradingOrchestrator.process_bar()  (HC filter + HTF gate)
+      -> ScaleOutExecutor  (trade lifecycle)
+        -> Fill simulation  (slippage + commission)
+          -> Log to paper_trades.json / paper_decisions.json
 
 Session rules enforced:
   - No entries before 6:01 PM ET
   - Flat by 4:30 PM ET
   - No trading during maintenance (5:00–6:00 PM ET)
-  - Daily loss limit: $500 → halt for the day
+  - Daily loss limit: $500 -> halt for the day
   - Max position: 2 contracts
 
 Fill simulation (calibrated slippage — permanent model):
@@ -68,6 +68,7 @@ from collections import deque
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 # Ensure project root is on path
 script_dir = Path(__file__).resolve().parent
@@ -185,9 +186,8 @@ def filter_by_date(
 # SESSION RULES (same logic as TradovatePaperConnector)
 # ================================================================
 def bar_to_et(bar_time: datetime) -> datetime:
-    """Convert a UTC bar timestamp to ET (EST, UTC-5)."""
-    et_offset = timezone(timedelta(hours=-5))
-    return bar_time.astimezone(et_offset)
+    """Convert a UTC bar timestamp to ET — DST-aware via ZoneInfo."""
+    return bar_time.astimezone(ZoneInfo("America/New_York"))
 
 
 def is_within_session(et_time: datetime) -> bool:
@@ -639,7 +639,7 @@ class ReplaySimulator:
         "baseline": "Original Time 10 bars (exit if profitable)",
         "A": "Minimum Profit Gate (>=4pts or convert to trail)",
         "B": "Fixed TP at entry+6pts (limit=0 slip), fallback 15 bars",
-        "C": "Trail from profit (>=3pts → trail 2.5pt), fallback 12 bars",
+        "C": "Trail from profit (>=3pts -> trail 2.5pt), fallback 12 bars",
         "D": "RTH-only + Original Time 10 (restrict to 9:30-16:00 ET)",
     }
 
@@ -653,6 +653,7 @@ class ReplaySimulator:
         c1_variant: str = "C",
         quiet: bool = False,
         sweep_enabled: bool = True,
+        modifiers_enabled: bool = True,
     ):
         # Default validate mode to the OOS window
         if validate and not start_date:
@@ -668,6 +669,7 @@ class ReplaySimulator:
         self.c1_variant = c1_variant
         self.quiet = quiet  # suppress verbose output in compare-all mode
         self.sweep_enabled = sweep_enabled
+        self.modifiers_enabled = modifiers_enabled
 
         self.state = ReplayState()
         self.bot: Optional[TradingOrchestrator] = None
@@ -684,8 +686,15 @@ class ReplaySimulator:
         # Track signal source for current open trade
         self._current_trade_source = "signal"
 
-        # Speed → delay between exec bars (seconds)
+        # Speed -> delay between exec bars (seconds)
         self._delay = self._parse_speed(speed)
+
+        # Shadow-trade simulation state
+        self._shadow_signals: List[Dict] = []
+        self._shadow_overflow_path: Optional[Path] = None
+        self._shadow_overflow_count: int = 0
+        self._exec_bars: Optional[List] = None  # Stored for post-run shadow sim
+        self._current_exec_idx: int = -1
 
     @staticmethod
     def _parse_speed(speed: str) -> float:
@@ -705,6 +714,9 @@ class ReplaySimulator:
     async def run(self) -> Dict:
         """Main entry point — load data, replay, return results."""
         t0 = time.time()
+
+        # Clear shadow state (safe for reuse across periods)
+        self.reset_shadow_state()
 
         # ── Load data ──
         variant_desc = self.C1_VARIANTS.get(self.c1_variant, self.c1_variant)
@@ -735,7 +747,7 @@ class ReplaySimulator:
             for tf in sorted(tf_bars.keys()):
                 bars = tf_bars[tf]
                 print(f"  {tf:>4s}: {len(bars):>7,} bars  "
-                      f"({bars[0].timestamp.strftime('%Y-%m-%d')} → "
+                      f"({bars[0].timestamp.strftime('%Y-%m-%d')} -> "
                       f"{bars[-1].timestamp.strftime('%Y-%m-%d')})")
 
         # Filter by date
@@ -746,6 +758,7 @@ class ReplaySimulator:
             sys.exit(1)
 
         exec_count = len(tf_bars.get(EXEC_TF, []))
+        self._exec_bars = tf_bars[EXEC_TF]  # Store for shadow simulation
         if not self.quiet:
             print(f"\nReplay window: {exec_count:,} exec bars")
 
@@ -759,6 +772,7 @@ class ReplaySimulator:
         CONFIG.execution.paper_trading = True
         self.bot = TradingOrchestrator(CONFIG)
         self.bot._sweep_enabled = self.sweep_enabled
+        self.bot._modifiers_enabled = self.modifiers_enabled
         await self.bot.initialize(skip_db=True)
 
         # ── Patch executor with dynamic slippage ──
@@ -771,6 +785,7 @@ class ReplaySimulator:
         last_date = ""
         dashboard_update_counter = 0
         dashboard_interval = max(1, exec_count // 200) if self.validate else 1
+        exec_bar_index = 0  # Tracks position in self._exec_bars
 
         for i, (timeframe, bar_data) in enumerate(mtf_iterator):
             self.state.bars_processed += 1
@@ -785,6 +800,8 @@ class ReplaySimulator:
                 continue
 
             # ── Execution bar ──
+            self._current_exec_idx = exec_bar_index
+            exec_bar_index += 1
             self.state.exec_bars_processed += 1
             self.state.current_price = bar_data.close
             self.state.current_time = bar_data.timestamp.isoformat()
@@ -860,6 +877,14 @@ class ReplaySimulator:
             # ── Process through pipeline ──
             exec_bar = bardata_to_bar(bar_data)
             result = await self.bot.process_bar(exec_bar)
+
+            # ── Capture shadow rejection (if any gate blocked) ──
+            if self.bot._last_rejection is not None:
+                self._record_shadow_signal(
+                    self._current_exec_idx,
+                    bar_data.timestamp,
+                    self.bot._last_rejection,
+                )
 
             if result:
                 self._handle_result(result, bar_data.timestamp)
@@ -1492,6 +1517,320 @@ class ReplaySimulator:
         }
 
     # ================================================================
+    # SHADOW-TRADE SIMULATION (runs AFTER main replay loop)
+    # ================================================================
+
+    # Constants for shadow simulation
+    _SHADOW_COMMISSION_PER_SIDE = 1.29  # $1.29/contract/side
+    _SHADOW_POINT_VALUE = 2.00          # MNQ $2/point
+    _SHADOW_SLIPPAGE_RTH = 0.50         # pts per fill, RTH
+    _SHADOW_SLIPPAGE_ETH = 1.00         # pts per fill, ETH
+    _SHADOW_OVERFLOW_THRESHOLD = 50_000
+
+    def _record_shadow_signal(
+        self, bar_index: int, timestamp: datetime, rejection: Dict,
+    ) -> None:
+        """Record a rejected signal for post-run shadow-trade simulation."""
+        stop_distance = rejection.get("stop_distance")
+        atr = rejection.get("atr", 0.0)
+
+        # Estimate stop if not available or invalid
+        if stop_distance is None or not math.isfinite(stop_distance) or stop_distance <= 0:
+            est = atr * CONFIG.risk.atr_multiplier_stop
+            stop_distance = est if (math.isfinite(est) and est > 0) else 10.0
+
+        atr_val = atr if math.isfinite(atr) else 0.0
+        score = rejection.get("score", 0.0)
+        score_val = score if math.isfinite(score) else 0.0
+
+        self._shadow_signals.append({
+            "bar_index": bar_index,
+            "timestamp": timestamp.isoformat(),
+            "direction": rejection["direction"],
+            "score": round(score_val, 4),
+            "stop_distance": round(stop_distance, 2),
+            "atr": round(atr_val, 4),
+            "rejection_reason": rejection["rejection_reason"],
+            "rejected_at_gate": rejection["gate"],
+        })
+
+        # Flush to disk if exceeding threshold (prevents OOM on long periods)
+        if len(self._shadow_signals) >= self._SHADOW_OVERFLOW_THRESHOLD:
+            self._flush_shadow_signals()
+
+    def _flush_shadow_signals(self) -> None:
+        """Write shadow signals to file incrementally and clear in-memory list."""
+        if not self._shadow_signals:
+            return
+
+        if self._shadow_overflow_path is None:
+            self._shadow_overflow_path = LOGS_DIR / "shadow_signals_overflow.jsonl"
+            # Truncate file on first flush for this run
+            self._shadow_overflow_path.write_text("")
+
+        with open(str(self._shadow_overflow_path), "a") as f:
+            for sig in self._shadow_signals:
+                f.write(json.dumps(sig) + "\n")
+
+        self._shadow_overflow_count += len(self._shadow_signals)
+        self._shadow_signals.clear()
+
+    def _iter_all_shadow_signals(self):
+        """Iterate over all shadow signals (disk overflow + in-memory)."""
+        # Read from overflow file first
+        if self._shadow_overflow_path and self._shadow_overflow_path.exists():
+            with open(str(self._shadow_overflow_path)) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        yield json.loads(line)
+        # Then yield in-memory signals
+        yield from self._shadow_signals
+
+    @property
+    def _shadow_signal_count(self) -> int:
+        return self._shadow_overflow_count + len(self._shadow_signals)
+
+    def _simulate_shadow_trades(self) -> Dict:
+        """Simulate what blocked signals WOULD have done if traded.
+
+        Runs AFTER the main replay loop completes. Read-only simulation
+        that never touches real trade state.
+        """
+        if self._shadow_signal_count == 0 or self._exec_bars is None:
+            return {
+                "total_shadow_signals": 0,
+                "by_gate": {},
+                "gate_value_ranking": [],
+            }
+
+        total_bars = len(self._exec_bars)
+        num_contracts = 2
+        commission_rt = self._SHADOW_COMMISSION_PER_SIDE * 2 * num_contracts  # $5.16
+
+        shadow_results = []
+
+        for shadow in self._iter_all_shadow_signals():
+            bar_idx = shadow["bar_index"]
+            entry_idx = bar_idx + 1
+
+            # Edge case: entry bar out of bounds
+            if entry_idx >= total_bars:
+                continue
+
+            entry_bar = self._exec_bars[entry_idx]
+
+            # NaN guard on entry bar
+            if (not math.isfinite(entry_bar.open)
+                    or not math.isfinite(entry_bar.high)
+                    or not math.isfinite(entry_bar.low)):
+                continue
+
+            # Direction-aware slippage (simple RTH/ETH model)
+            et_time = bar_to_et(entry_bar.timestamp)
+            h, m = et_time.hour, et_time.minute
+            t = h + m / 60.0
+            slippage = self._SHADOW_SLIPPAGE_RTH if 9.5 <= t < 16.0 else self._SHADOW_SLIPPAGE_ETH
+
+            if shadow["direction"] == "LONG":
+                entry_price = entry_bar.open + slippage
+            else:
+                entry_price = entry_bar.open - slippage
+
+            stop_dist = shadow["stop_distance"]
+            target_dist = stop_dist * 1.5
+
+            # Guard against zero/negative stop
+            if stop_dist <= 0:
+                continue
+
+            mfe = 0.0
+            mae = 0.0
+            outcome = "TIMEOUT"
+            final_price = entry_price
+
+            max_walk_bars = 120  # 4 hours at 2-min bars
+            walk_end = min(entry_idx + 1 + max_walk_bars, total_bars)
+
+            for j in range(entry_idx + 1, walk_end):
+                walk_bar = self._exec_bars[j]
+
+                # NaN guard on walk bar
+                if (not math.isfinite(walk_bar.high)
+                        or not math.isfinite(walk_bar.low)
+                        or not math.isfinite(walk_bar.close)):
+                    continue
+
+                if shadow["direction"] == "LONG":
+                    favorable = walk_bar.high - entry_price
+                    adverse = entry_price - walk_bar.low
+                else:
+                    favorable = entry_price - walk_bar.low
+                    adverse = walk_bar.high - entry_price
+
+                mfe = max(mfe, favorable)
+                mae = max(mae, adverse)
+                final_price = walk_bar.close
+
+                # Stop hit first (conservative: check stop before target)
+                if mae >= stop_dist:
+                    outcome = "LOSS"
+                    break
+                # Target hit
+                if mfe >= target_dist:
+                    outcome = "WIN"
+                    break
+
+            # Compute shadow PnL
+            if outcome == "WIN":
+                shadow_pnl = (target_dist * self._SHADOW_POINT_VALUE * num_contracts) - commission_rt
+            elif outcome == "LOSS":
+                shadow_pnl = -(stop_dist * self._SHADOW_POINT_VALUE * num_contracts) - commission_rt
+            else:  # TIMEOUT — mark-to-market at bar 120
+                if shadow["direction"] == "LONG":
+                    mtm_points = final_price - entry_price
+                else:
+                    mtm_points = entry_price - final_price
+                shadow_pnl = (mtm_points * self._SHADOW_POINT_VALUE * num_contracts) - commission_rt
+
+            shadow_results.append({
+                "bar_index": bar_idx,
+                "direction": shadow["direction"],
+                "score": shadow["score"],
+                "rejection_reason": shadow["rejection_reason"],
+                "rejected_at_gate": shadow["rejected_at_gate"],
+                "entry_price": round(entry_price, 2),
+                "stop_distance": stop_dist,
+                "outcome": outcome,
+                "mfe": round(mfe, 2),
+                "mae": round(mae, 2),
+                "shadow_pnl": round(shadow_pnl, 2),
+            })
+
+        return self._build_shadow_analysis(shadow_results)
+
+    def _build_shadow_analysis(self, shadow_results: List[Dict]) -> Dict:
+        """Aggregate shadow trade results by rejection gate."""
+        by_gate: Dict[str, Dict] = {}
+
+        for r in shadow_results:
+            gate = r["rejection_reason"]
+            if gate not in by_gate:
+                by_gate[gate] = {
+                    "count": 0, "shadow_wins": 0, "shadow_losses": 0,
+                    "shadow_timeouts": 0, "shadow_total_pnl": 0.0,
+                    "gross_wins": 0.0, "gross_losses": 0.0,
+                    "total_mfe": 0.0, "total_mae": 0.0, "total_score": 0.0,
+                }
+
+            g = by_gate[gate]
+            g["count"] += 1
+            g["total_score"] += r["score"]
+            g["total_mfe"] += r["mfe"]
+            g["total_mae"] += r["mae"]
+            g["shadow_total_pnl"] += r["shadow_pnl"]
+
+            # For profit factor: track gross wins/losses (before commission)
+            commission_rt = self._SHADOW_COMMISSION_PER_SIDE * 2 * 2
+            gross = r["shadow_pnl"] + commission_rt
+
+            if r["outcome"] == "WIN":
+                g["shadow_wins"] += 1
+                g["gross_wins"] += gross
+            elif r["outcome"] == "LOSS":
+                g["shadow_losses"] += 1
+                g["gross_losses"] += abs(gross)
+            else:
+                g["shadow_timeouts"] += 1
+                if gross > 0:
+                    g["gross_wins"] += gross
+                else:
+                    g["gross_losses"] += abs(gross)
+
+        # Build per-gate stats
+        gate_analysis = {}
+        for gate_name, g in by_gate.items():
+            count = g["count"]
+            win_rate = g["shadow_wins"] / count * 100 if count > 0 else 0
+            pf = (
+                g["gross_wins"] / g["gross_losses"]
+                if g["gross_losses"] > 0 else float("inf")
+            )
+
+            gate_analysis[gate_name] = {
+                "count": count,
+                "shadow_wins": g["shadow_wins"],
+                "shadow_losses": g["shadow_losses"],
+                "shadow_timeouts": g["shadow_timeouts"],
+                "shadow_total_pnl": round(g["shadow_total_pnl"], 2),
+                "shadow_win_rate": round(win_rate, 1),
+                "shadow_profit_factor": (
+                    round(pf, 2) if pf != float("inf") else "inf"
+                ),
+                "avg_mfe_points": (
+                    round(g["total_mfe"] / count, 2) if count > 0 else 0
+                ),
+                "avg_mae_points": (
+                    round(g["total_mae"] / count, 2) if count > 0 else 0
+                ),
+                "avg_score": (
+                    round(g["total_score"] / count, 4) if count > 0 else 0
+                ),
+            }
+
+        # Gate value ranking (sorted by shadow_pnl ascending = most negative first)
+        ranking = []
+        for gate_name, g in gate_analysis.items():
+            ranking.append({
+                "gate": gate_name,
+                "shadow_pnl": g["shadow_total_pnl"],
+                "count": g["count"],
+                "verdict": "PROTECTING" if g["shadow_total_pnl"] < 0 else "COSTING",
+            })
+        ranking.sort(key=lambda x: x["shadow_pnl"])
+
+        return {
+            "total_shadow_signals": self._shadow_signal_count,
+            "by_gate": gate_analysis,
+            "gate_value_ranking": ranking,
+        }
+
+    def _print_shadow_summary(self, shadow_analysis: Dict) -> None:
+        """Print the gate value ranking summary."""
+        ranking = shadow_analysis.get("gate_value_ranking", [])
+        total = shadow_analysis.get("total_shadow_signals", 0)
+
+        if not ranking:
+            return
+
+        print(f"\n{'=' * 62}")
+        print(f"  SHADOW-TRADE ANALYSIS — {total:,} rejected signals")
+        print(f"{'=' * 62}")
+        print(f"  {'Gate':<25} {'Count':>6} {'Shadow PnL':>12} {'Verdict':>12}")
+        print(f"  {'─' * 58}")
+
+        for r in ranking:
+            print(f"  {r['gate']:<25} {r['count']:>6} "
+                  f"${r['shadow_pnl']:>+10,.2f} {r['verdict']:>12}")
+
+        by_gate = shadow_analysis.get("by_gate", {})
+        print(f"\n  {'Gate':<25} {'WR':>6} {'PF':>6} {'AvgMFE':>8} {'AvgMAE':>8}")
+        print(f"  {'─' * 58}")
+        for gate_name, g in by_gate.items():
+            pf = g["shadow_profit_factor"]
+            pf_str = f"{pf:.2f}" if isinstance(pf, (int, float)) else pf
+            print(f"  {gate_name:<25} {g['shadow_win_rate']:>5.1f}% "
+                  f"{pf_str:>6} {g['avg_mfe_points']:>7.2f} {g['avg_mae_points']:>7.2f}")
+
+    def reset_shadow_state(self) -> None:
+        """Clear shadow signals between periods."""
+        self._shadow_signals.clear()
+        self._shadow_overflow_count = 0
+        if self._shadow_overflow_path and self._shadow_overflow_path.exists():
+            self._shadow_overflow_path.unlink(missing_ok=True)
+        self._shadow_overflow_path = None
+
+    # ================================================================
     # VALIDATION
     # ================================================================
     def _run_validation(self, results: Dict) -> None:
@@ -1746,7 +2085,7 @@ async def run_compare_all(args):
         results["monthly"] = monthly
         all_results[v] = results
 
-        print(f"  → {v}: PF {results['profit_factor']:.2f} | "
+        print(f"  -> {v}: PF {results['profit_factor']:.2f} | "
               f"PnL ${results['total_pnl']:+,.0f} | "
               f"WR {results['win_rate']:.1f}% | "
               f"DD {results['max_drawdown_pct']:.1f}% | "
@@ -1779,7 +2118,7 @@ async def run_compare_all(args):
                                    -all_results[v]['max_drawdown_pct']),
                     reverse=True)
 
-    print(f"\n  RANKING (by PF → PnL → DD):")
+    print(f"\n  RANKING (by PF -> PnL -> DD):")
     for i, v in enumerate(ranked, 1):
         r = all_results[v]
         desc = ReplaySimulator.C1_VARIANTS.get(v, v)
@@ -1890,7 +2229,7 @@ async def run_sweep_compare(args):
         results["monthly"] = monthly
         runs[label] = results
 
-        print(f"  → {label}: PF {results['profit_factor']:.2f} | "
+        print(f"  -> {label}: PF {results['profit_factor']:.2f} | "
               f"PnL ${results['total_pnl']:+,.0f} | "
               f"WR {results['win_rate']:.1f}% | "
               f"DD {results['max_drawdown_pct']:.1f}% | "
@@ -2089,6 +2428,10 @@ async def async_main():
         "--no-sweep", action="store_true",
         help="Disable the liquidity sweep detector"
     )
+    parser.add_argument(
+        "--no-modifiers", action="store_true",
+        help="Disable institutional modifiers (overnight bias + FOMC drift)"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -2115,6 +2458,7 @@ async def async_main():
         data_dir=args.data_dir,
         c1_variant=args.c1_variant,
         sweep_enabled=not args.no_sweep,
+        modifiers_enabled=not args.no_modifiers,
     )
 
     await sim.run()

@@ -42,6 +42,7 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 # ── Project path setup ──
 script_dir = Path(__file__).resolve().parent
@@ -626,7 +627,7 @@ def compute_weekly_reports(
         return []
 
     # Find all unique weeks
-    weeks_seen: Dict[str, str] = {}  # monday → friday
+    weeks_seen: Dict[str, str] = {}  # monday -> friday
     for t in trades:
         if not t.timestamp:
             continue
@@ -761,9 +762,7 @@ def update_viz_data(
 
 def is_friday_rth_close() -> bool:
     """Check if current time is Friday at/after RTH close (16:00 ET)."""
-    # ET is UTC-5 (ignoring DST for simplicity — matches Broker/ibkr_client.py)
-    et_offset = timedelta(hours=-5)
-    et_now = datetime.now(timezone(et_offset))
+    et_now = datetime.now(ZoneInfo("America/New_York"))
     return (
         et_now.weekday() == 4  # Friday
         and et_now.hour >= RTH_CLOSE_HOUR
@@ -817,7 +816,7 @@ def _render_weekly_report(
     lines.append("")
     lines.append(bar)
     lines.append(
-        f"  WEEKLY REPORT  {report.week_start} → {report.week_end}"
+        f"  WEEKLY REPORT  {report.week_start} -> {report.week_end}"
     )
     lines.append(bar)
 
@@ -1072,7 +1071,29 @@ def render_dashboard(stats: StatsEngine, alerts: List[Alert]) -> str:
         f"     PnL: ${stats.daily_pnl:+.2f}"
     )
 
+    # ── Paper Trading Status Bar ──
+    mode = os.getenv("IBKR_ACCOUNT_TYPE", "PAPER").upper()
+    # Compute trading day count from first trade
+    if stats.trades and len(stats.trades) > 0:
+        first_ts = stats.trades[0].get("entry_timestamp", stats.trades[0].get("timestamp", ""))
+        if first_ts:
+            try:
+                first_date = datetime.fromisoformat(first_ts.replace("Z", "+00:00")).date()
+                day_count = (datetime.now(timezone.utc).date() - first_date).days + 1
+            except (ValueError, TypeError):
+                day_count = 1
+        else:
+            day_count = 1
+    else:
+        day_count = 0
+
+    pf_bar = f"{pf_str}" if stats.total_trades > 0 else "—"
+    wr_bar = f"{stats.win_rate:.0f}%" if stats.total_trades > 0 else "—"
     lines.append("")
+    lines.append(
+        f"  {mode} | Day {day_count} | {stats.total_trades} trades | "
+        f"WR {wr_bar} | PF {pf_bar}"
+    )
     lines.append(bar)
 
     return "\n".join(lines)

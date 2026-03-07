@@ -2,13 +2,13 @@
 Tests for IBKRLivePipeline — full vertical-slice integration.
 
 Covers:
-  - Bar → signal evaluation → bridge → executor → position manager
-  - No signal → no orders
-  - Bridge rejection → no orders
-  - Executor halt → pipeline stops processing
+  - Bar -> signal evaluation -> bridge -> executor -> position manager
+  - No signal -> no orders
+  - Bridge rejection -> no orders
+  - Executor halt -> pipeline stops processing
   - Fill registration with PositionManager
   - Partial fill (C1 fills, C2 rejected)
-  - Position close → P&L feeds to executor
+  - Position close -> P&L feeds to executor
   - Group fully closed clears active trade
   - Pipeline lifecycle (state transitions)
   - Status reporting
@@ -19,13 +19,10 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
-from execution.orchestrator import (
-    IBKRLivePipeline,
-    PipelineState,
-    HIGH_CONVICTION_MIN_SCORE,
-    HIGH_CONVICTION_MAX_STOP_PTS,
-    SWEEP_MIN_SCORE,
-    SWEEP_CONFLUENCE_BONUS,
+from execution.orchestrator import IBKRLivePipeline, PipelineState
+from config.constants import (
+    HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
 )
 from execution.signal_bridge import TradeDecision, BridgeResult, ScaleOutParams
 from Broker.order_executor import (
@@ -37,7 +34,7 @@ from Broker.order_executor import (
     IBKROrderType,
 )
 from Broker.position_manager import PositionManager
-from Broker.ibkr_client import IBKRClient, IBKRConfig, ContractInfo
+from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, ContractInfo
 from features.engine import Bar
 from signals.aggregator import SignalDirection
 from risk.engine import RiskDecision
@@ -141,7 +138,7 @@ def _make_rejected_record(
 # ═══════════════════════════════════════════════════════════════
 
 class TestPipelineWiring:
-    """Full path: signal fires → bridge approves → executor fills → PM tracks."""
+    """Full path: signal fires -> bridge approves -> executor fills -> PM tracks."""
 
     @pytest.mark.asyncio
     async def test_approved_signal_places_order(
@@ -156,7 +153,14 @@ class TestPipelineWiring:
         pipeline._last_bar = None
         pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
-        pipeline._htf_bias = None
+        # HTF bias must be present — fail-safe blocks trades when None
+        from features.htf_engine import HTFBiasResult
+        pipeline._htf_bias = HTFBiasResult(
+            consensus_direction="bullish",
+            consensus_strength=0.6,
+            htf_allows_long=True,
+            htf_allows_short=False,
+        )
 
         # Mock signal pipeline to produce a strong long signal
         mock_features = MagicMock()
@@ -216,7 +220,7 @@ class TestPipelineWiring:
     async def test_no_signal_no_order(
         self, client, executor, position_manager
     ):
-        """No signal → nothing happens."""
+        """No signal -> nothing happens."""
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.RUNNING
         pipeline._executor = executor
@@ -318,7 +322,7 @@ class TestBridgeRejection:
 
 
 # ═══════════════════════════════════════════════════════════════
-# EXECUTOR HALT → PIPELINE STOPS
+# EXECUTOR HALT -> PIPELINE STOPS
 # ═══════════════════════════════════════════════════════════════
 
 class TestHaltPropagation:
@@ -356,7 +360,7 @@ class TestHaltPropagation:
 # ═══════════════════════════════════════════════════════════════
 
 class TestPartialFill:
-    """C1 fills but C2 rejected → partial state tracked."""
+    """C1 fills but C2 rejected -> partial state tracked."""
 
     @pytest.mark.asyncio
     async def test_c2_rejection_tracked(
@@ -370,7 +374,14 @@ class TestPartialFill:
         pipeline._last_bar = None
         pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
-        pipeline._htf_bias = None
+        # HTF bias must be present — fail-safe blocks trades when None
+        from features.htf_engine import HTFBiasResult
+        pipeline._htf_bias = HTFBiasResult(
+            consensus_direction="bullish",
+            consensus_strength=0.6,
+            htf_allows_long=True,
+            htf_allows_short=False,
+        )
 
         mock_features = MagicMock()
         mock_features.atr_14 = 10.0
@@ -431,7 +442,7 @@ class TestPartialFill:
 
 
 # ═══════════════════════════════════════════════════════════════
-# POSITION CLOSE → P&L FLOW
+# POSITION CLOSE -> P&L FLOW
 # ═══════════════════════════════════════════════════════════════
 
 class TestPositionClose:
@@ -601,7 +612,7 @@ class TestImportChain:
     """Verify all components in the vertical slice can be imported."""
 
     def test_ibkr_client_import(self):
-        from Broker.ibkr_client import IBKRClient, IBKRDataFeed
+        from Broker.ibkr_client_portal import IBKRClient, IBKRDataFeed
         assert IBKRClient is not None
 
     def test_order_executor_import(self):

@@ -136,7 +136,7 @@ class TradovateClient:
         if not self._contract_id:
             logger.error(f"Could not resolve contract: {self.config.symbol}")
             return False
-        logger.info(f"Contract resolved: {self.config.symbol} → ID {self._contract_id}")
+        logger.info(f"Contract resolved: {self.config.symbol} -> ID {self._contract_id}")
 
         # Step 3: Get account info
         self._account = await self._get_account()
@@ -506,7 +506,7 @@ class TradovateClient:
         result = await self._post(endpoint, payload)
         if result:
             order_id = result.get("orderId", result.get("id", "?"))
-            logger.info(f"Order placed: {action} {qty}x {self.config.symbol} [{order_type}] → ID {order_id}")
+            logger.info(f"Order placed: {action} {qty}x {self.config.symbol} [{order_type}] -> ID {order_id}")
         return result
 
     async def place_scale_out_entry(

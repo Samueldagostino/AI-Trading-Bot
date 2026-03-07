@@ -27,6 +27,7 @@
   <span class="nav-logo">NQ TRADING SYSTEM</span>
   <div class="nav-links">
     <a href="index.html" class="nav-link">Overview</a>
+    <a href="live.html" class="nav-link">Live</a>
     <a href="weekly-dashboard.html" class="nav-link">Weekly</a>
     <a href="analyzer.html" class="nav-link active">Analyzer</a>
   </div>
@@ -722,5 +723,13 @@ function NQForensicVisualizer() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<NQForensicVisualizer />);
 </script>
+
+<div style="position:fixed;bottom:0;left:0;right:0;padding:8px 16px;text-align:center;font-family:'IBM Plex Mono','SF Mono','Consolas',monospace;font-size:10px;color:#566988;line-height:1.5;background:rgba(8,11,18,0.95);border-top:1px solid #1e293b;z-index:100">
+  RISK DISCLOSURE: Past backtested performance does not guarantee future results.
+  Futures trading carries substantial risk of loss and is not suitable for all investors.
+  Only risk capital should be used. All metrics shown are from historical simulation
+  with calibrated slippage &mdash; not live trading results unless explicitly labeled.
+</div>
+
 </body>
 </html>

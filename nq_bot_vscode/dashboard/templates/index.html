@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NQ Trading Bot — Dashboard</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+    <!-- ═══ Top Bar ═══ -->
+    <div class="top-bar">
+        <div class="logo">NQ Trading Bot</div>
+        <div class="status-group">
+            <span class="status-badge stopped" id="botStatus">STOPPED</span>
+            <div class="stat-item">
+                <div class="label">Contract</div>
+                <div class="value" id="contractInfo">---</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">Roll In</div>
+                <div class="value" id="rollDays">---</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">Daily PnL</div>
+                <div class="value" id="dailyPnl">$0.00</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">Unrealized</div>
+                <div class="value" id="unrealizedPnl">$0.00</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">Position</div>
+                <span class="position-badge flat" id="positionBadge">FLAT</span>
+            </div>
+            <div class="connection-dots">
+                <span class="conn-label">IBKR</span><span class="conn-dot" id="connIBKR"></span>
+                <span class="conn-label">DB</span><span class="conn-dot" id="connDB"></span>
+                <span class="conn-label">Feed</span><span class="conn-dot" id="connFeed"></span>
+                <span class="conn-label">WS</span><span class="conn-dot" id="connWS"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Main Grid ═══ -->
+    <div class="main-grid">
+        <!-- Left Column (60%) -->
+        <div class="left-col">
+            <div class="panel" style="flex:2">
+                <div class="panel-title">Live Price &amp; VWAP</div>
+                <div class="chart-container">
+                    <canvas id="priceChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column (40%) -->
+        <div class="right-col">
+            <div class="panel">
+                <div class="panel-title">Equity Curve</div>
+                <div class="chart-container" style="min-height:160px">
+                    <canvas id="equityChart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">Signal Heatmap (last 20 bars)</div>
+                <div class="heatmap-grid" id="heatmapGrid">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">Market Regime</div>
+                <div class="regime-bar unknown" id="regimeBar">
+                    <span class="regime-dot"></span>
+                    <span id="regimeText">Unknown</span>
+                    <span style="margin-left:auto;font-size:11px;color:var(--text-muted)" id="regimeVix">VIX: ---</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">HTF Bias</div>
+                <div class="htf-grid" id="htfGrid">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Bottom Grid ═══ -->
+    <div class="bottom-grid">
+        <div class="panel">
+            <div class="panel-title">Recent Trades</div>
+            <div style="overflow-x:auto;max-height:300px;overflow-y:auto">
+                <table class="trade-table" id="tradeTable">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Side</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>PnL</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradeBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Alert Feed</div>
+            <ul class="alert-feed" id="alertFeed">
+            </ul>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Execution Quality (Rolling Slippage)</div>
+            <div class="chart-container" style="min-height:160px">
+                <canvas id="slippageChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

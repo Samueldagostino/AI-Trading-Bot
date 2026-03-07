@@ -28,7 +28,7 @@ from Broker.order_executor import (
     KILL_SWITCH_THRESHOLD_DOLLARS,
     MNQ_POINT_VALUE,
 )
-from Broker.ibkr_client import IBKRClient, IBKRConfig, SessionType
+from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, SessionType
 
 
 # ═══════════════════════════════════════════════════════════════

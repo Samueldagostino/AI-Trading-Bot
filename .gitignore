@@ -58,3 +58,7 @@ bin/
 root/
 data/replay_week/
 doc/
+
+# Credentials / tokens
+config/quantdata_token.txt
+config/quantdata_instance_id.txt

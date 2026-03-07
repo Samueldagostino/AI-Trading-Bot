@@ -5,7 +5,7 @@ Pure translation layer between the signal pipeline and the
 IBKR order executor.  Does NOT modify signal generation logic.
 
 Flow:
-  process_bar() → signal pipeline → TradeDecision
+  process_bar() -> signal pipeline -> TradeDecision
                                         ↓
                                    SignalBridge.translate()
                                         ↓
@@ -16,26 +16,28 @@ Flow:
 Responsibilities:
   1. Accept validated trade decisions from the signal pipeline
   2. Compute stop/target prices from ATR using RiskConfig values
-  3. Map direction → OrderSide, package as scale-out entry params
+  3. Map direction -> OrderSide, package as scale-out entry params
   4. Attach signal score + HTF bias state as audit metadata
   5. Belt-and-suspenders safety gates (score, HTF, stop distance)
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from config.settings import RiskConfig
+from config.constants import HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS
 
 logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════
-# CONSTANTS — match main.py HC filter (frozen, validated)
+# CONSTANTS — imported from config/constants.py (single source of truth)
 # ═══════════════════════════════════════════════════════════════
-MIN_SIGNAL_SCORE = 0.75
-MAX_STOP_DISTANCE_PTS = 30.0
+MIN_SIGNAL_SCORE = HIGH_CONVICTION_MIN_SCORE
+MAX_STOP_DISTANCE_PTS = HIGH_CONVICTION_MAX_STOP_PTS
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -130,6 +132,14 @@ class SignalBridge:
         Metadata is always populated for audit logging.
         """
         metadata = self._build_metadata(decision)
+
+        # ── NaN GUARD: NaN comparisons return False, bypassing gates ──
+        if not math.isfinite(decision.signal_score):
+            return self._reject("signal_score is NaN/Inf", metadata)
+        if not math.isfinite(decision.atr):
+            return self._reject("ATR is NaN/Inf", metadata)
+        if not math.isfinite(decision.entry_price):
+            return self._reject("entry_price is NaN/Inf", metadata)
 
         # ── SAFETY GATE 1: direction must be valid ──
         if decision.direction not in ("long", "short"):

@@ -31,7 +31,7 @@ from Broker.order_executor import (
     ExecutorConfig,
     MNQ_POINT_VALUE as EXECUTOR_MNQ_POINT_VALUE,
 )
-from Broker.ibkr_client import IBKRClient, IBKRConfig, ContractInfo
+from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, ContractInfo
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -332,7 +332,7 @@ class TestReconciliationMismatch:
 
     @pytest.mark.asyncio
     async def test_ghost_position_triggers_halt(self, manager, executor):
-        """Broker has a position we don't track → ghost → HALT."""
+        """Broker has a position we don't track -> ghost -> HALT."""
         # Internal: no positions
         assert manager.open_position_count == 0
 
@@ -355,7 +355,7 @@ class TestReconciliationMismatch:
 
     @pytest.mark.asyncio
     async def test_missing_position_triggers_halt(self, manager, executor):
-        """We track a position broker doesn't show → missing → HALT."""
+        """We track a position broker doesn't show -> missing -> HALT."""
         # Internal: 1 long position
         manager.open_position("P1", "B1", "long", 1, 21000.0)
 
@@ -369,7 +369,7 @@ class TestReconciliationMismatch:
 
     @pytest.mark.asyncio
     async def test_quantity_mismatch_triggers_halt(self, manager, executor):
-        """Internal says 1 contract, broker says 2 → HALT."""
+        """Internal says 1 contract, broker says 2 -> HALT."""
         manager.open_position("P1", "B1", "long", 1, 21000.0)
 
         manager._client._get = AsyncMock(return_value=[
@@ -387,7 +387,7 @@ class TestReconciliationMismatch:
 
     @pytest.mark.asyncio
     async def test_matching_positions_no_halt(self, manager, executor):
-        """Internal and broker agree → no halt."""
+        """Internal and broker agree -> no halt."""
         manager.open_position("P1", "B1", "long", 1, 21000.0)
 
         manager._client._get = AsyncMock(return_value=[
@@ -405,7 +405,7 @@ class TestReconciliationMismatch:
 
     @pytest.mark.asyncio
     async def test_both_empty_matches(self, manager, executor):
-        """No positions on either side → match."""
+        """No positions on either side -> match."""
         manager._client._get = AsyncMock(return_value=[])
 
         result = await manager.reconcile()
@@ -565,7 +565,7 @@ class TestHaltOnDiscrepancy:
                 "avgPrice": 21000.0,
             }
         ])
-        # No internal positions → ghost → halt
+        # No internal positions -> ghost -> halt
         await manager.reconcile()
         assert executor.is_halted is True
         assert "reconciliation" in executor.state.halt_reason.lower()

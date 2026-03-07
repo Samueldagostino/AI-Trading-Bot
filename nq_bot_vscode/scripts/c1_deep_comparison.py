@@ -280,10 +280,10 @@ def print_comparison(configs: List[Dict]):
     # ── Reversal Risk Assessment ──
     print(f"\n{'REVERSAL RISK ASSESSMENT':^90}")
     print(f"{'─' * 90}")
-    print(f"  Pure Runner:  Both contracts trail → if price reverses from 1.5x+, BOTH lose")
-    print(f"  BE Step:      C1 at BE after 1x → if reversal, C1 exits at ~$0, only C2 exposed")
-    print(f"  Time 10 bars: C1 exits after 10 bars if profitable → C1 locks early, C2 exposed")
-    print(f"  Current 1.5x: C1 locks at 1.5x → C1 always captures fixed gain, C2 exposed")
+    print(f"  Pure Runner:  Both contracts trail -> if price reverses from 1.5x+, BOTH lose")
+    print(f"  BE Step:      C1 at BE after 1x -> if reversal, C1 exits at ~$0, only C2 exposed")
+    print(f"  Time 10 bars: C1 exits after 10 bars if profitable -> C1 locks early, C2 exposed")
+    print(f"  Current 1.5x: C1 locks at 1.5x -> C1 always captures fixed gain, C2 exposed")
     print()
 
     # Summarize which is best on risk-adjusted basis

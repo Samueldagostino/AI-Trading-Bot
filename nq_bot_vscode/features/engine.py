@@ -16,6 +16,7 @@ Features implemented:
 """
 
 import logging
+import math
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -39,6 +40,36 @@ class Bar:
     tick_count: int = 0
     vwap: float = 0.0
     session_type: Optional[str] = None  # "RTH" or "ETH", set by IBKRDataFeed
+
+    def __post_init__(self):
+        """Validate OHLC data integrity on construction."""
+        # Guard against NaN/Inf in price fields
+        for fld in ("open", "high", "low", "close"):
+            val = getattr(self, fld)
+            if not math.isfinite(val):
+                logger.error("Bar has non-finite %s=%.4f at %s — clamping to close",
+                             fld, val, self.timestamp)
+                object.__setattr__(self, fld, self.close if math.isfinite(self.close) else 0.0)
+
+        # Fix invalid OHLC: high must be >= low, high >= open/close, low <= open/close
+        if self.high < self.low:
+            logger.warning("Bar high (%.2f) < low (%.2f) at %s — swapping",
+                           self.high, self.low, self.timestamp)
+            object.__setattr__(self, "high", max(self.high, self.low))
+            object.__setattr__(self, "low", min(self.high, self.low))
+
+        actual_high = max(self.open, self.high, self.low, self.close)
+        actual_low = min(self.open, self.high, self.low, self.close)
+        if self.high < actual_high:
+            object.__setattr__(self, "high", actual_high)
+        if self.low > actual_low:
+            object.__setattr__(self, "low", actual_low)
+
+        # Guard against negative volume
+        if self.volume < 0:
+            logger.warning("Bar has negative volume (%d) at %s — setting to 0",
+                           self.volume, self.timestamp)
+            object.__setattr__(self, "volume", 0)
 
     @property
     def range(self) -> float:
@@ -148,6 +179,11 @@ class FeatureSnapshot:
     recent_buy_sweep: bool = False
     recent_sell_sweep: bool = False
 
+    # Structural invalidation levels for stop placement
+    # These are price levels where the signal feature is negated
+    structural_stop_long: Optional[float] = None    # Tightest stop price for LONG entries
+    structural_stop_short: Optional[float] = None   # Tightest stop price for SHORT entries
+
 
 class NQFeatureEngine:
     """
@@ -232,13 +268,17 @@ class NQFeatureEngine:
             )
             true_ranges.append(tr)
 
-        snapshot.atr_14 = round(np.mean(true_ranges), 2)
+        atr_val = float(np.mean(true_ranges))
+        snapshot.atr_14 = round(atr_val, 2) if math.isfinite(atr_val) else 0.0
 
         # Realized volatility (annualized from 1-min returns)
         if len(self._bars) >= 20:
             closes = [b.close for b in self._bars[-21:]]
-            returns = [np.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
-            snapshot.realized_vol = round(np.std(returns) * np.sqrt(390), 4)  # 390 min/day
+            # Guard against zero/negative closes that would produce NaN in log
+            if all(c > 0 for c in closes):
+                returns = [np.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+                rv = float(np.std(returns) * np.sqrt(390))
+                snapshot.realized_vol = round(rv, 4) if math.isfinite(rv) else 0.0
 
     # ================================================================
     # VWAP + Deviation Bands
@@ -249,6 +289,8 @@ class NQFeatureEngine:
             return
 
         vwap = self._session_volume_price_sum / self._session_volume_sum
+        if not math.isfinite(vwap):
+            return
         snapshot.session_vwap = round(vwap, 2)
         snapshot.price_vs_vwap = round(bar.close - vwap, 2)
 
@@ -345,7 +387,8 @@ class NQFeatureEngine:
         # Trend strength: distance between EMAs normalized by ATR
         if snapshot.atr_14 > 0:
             ema_spread = abs(ema_8 - ema_21) / snapshot.atr_14
-            snapshot.trend_strength = round(min(ema_spread, 1.0), 3)
+            if math.isfinite(ema_spread):
+                snapshot.trend_strength = round(min(ema_spread, 1.0), 3)
 
     def _ema(self, data: np.ndarray, period: int) -> float:
         """Compute EMA and return latest value."""
@@ -541,6 +584,8 @@ class NQFeatureEngine:
 
         recent_bars = self._bars[-(lookback + 1):-1]  # Exclude current bar
         avg_volume = np.mean([b.volume for b in recent_bars]) if recent_bars else 1
+        if avg_volume <= 0:
+            avg_volume = 1
         vol_threshold = avg_volume * self.config.sweep_volume_spike_multiplier
 
         # Find recent swing highs and lows
@@ -555,11 +600,13 @@ class NQFeatureEngine:
                 b.low < recent_bars[i+1].low and b.low < recent_bars[i+2].low):
                 swing_lows.append(b.low)
 
-        if current_bar.range == 0:
+        if current_bar.range <= 0:
             return
 
         wick_ratio_upper = current_bar.upper_wick / current_bar.range
         wick_ratio_lower = current_bar.lower_wick / current_bar.range
+        if not (math.isfinite(wick_ratio_upper) and math.isfinite(wick_ratio_lower)):
+            return
 
         # --- Buy-side sweep (sweep of highs) ---
         for sh in swing_highs:
@@ -671,13 +718,45 @@ class NQFeatureEngine:
 
         # Recent sweeps (last 10 bars)
         recent_cutoff = len(self._bars) - 10
-        recent_sweeps = [s for s in self._sweeps 
+        recent_sweeps = [s for s in self._sweeps
                         if s.confirmed and self._bars.index(self._bars[-1]) - recent_cutoff < 10]
         snapshot.recent_sweeps = self._sweeps[-5:] if self._sweeps else []
-        
+
         for sweep in self._sweeps[-5:]:
             if sweep.confirmed:
                 if sweep.sweep_type == "buy_side":
                     snapshot.recent_buy_sweep = True
                 elif sweep.sweep_type == "sell_side":
                     snapshot.recent_sell_sweep = True
+
+        # --- Structural stop levels for stop placement ---
+        long_structural_stops = []   # Prices below entry for LONG invalidation
+        short_structural_stops = []  # Prices above entry for SHORT invalidation
+
+        # OB structural stops (zone edge ± 3pts buffer)
+        for ob in active_obs:
+            if ob.direction == "bullish" and snapshot.near_bullish_ob:
+                long_structural_stops.append(ob.zone_low - 3.0)
+            elif ob.direction == "bearish" and snapshot.near_bearish_ob:
+                short_structural_stops.append(ob.zone_high + 3.0)
+
+        # FVG structural stops (FVG boundary ± 3pts buffer)
+        for fvg in active_fvgs:
+            if fvg.gap_type == "bullish" and snapshot.inside_bullish_fvg:
+                long_structural_stops.append(fvg.gap_low - 3.0)
+            elif fvg.gap_type == "bearish" and snapshot.inside_bearish_fvg:
+                short_structural_stops.append(fvg.gap_high + 3.0)
+
+        # Sweep structural stops (swept level ± 5pts buffer)
+        for sweep in self._sweeps[-5:]:
+            if sweep.confirmed:
+                if sweep.sweep_type == "sell_side":
+                    long_structural_stops.append(sweep.sweep_price - 5.0)
+                elif sweep.sweep_type == "buy_side":
+                    short_structural_stops.append(sweep.sweep_price + 5.0)
+
+        # Tightest = highest price for LONG (closest to entry), lowest for SHORT
+        if long_structural_stops:
+            snapshot.structural_stop_long = round(max(long_structural_stops), 2)
+        if short_structural_stops:
+            snapshot.structural_stop_short = round(min(short_structural_stops), 2)

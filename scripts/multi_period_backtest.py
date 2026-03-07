@@ -137,6 +137,9 @@ async def run_single_period(period_id: str, period: dict) -> dict:
 
     results = await sim.run()
 
+    # ── Shadow-trade simulation (runs AFTER replay completes) ──
+    shadow_analysis = sim._simulate_shadow_trades()
+
     # ── Build monthly breakdown from trades log ──
     monthly = {}
     for t in sim.state.trades_log:
@@ -251,6 +254,7 @@ async def run_single_period(period_id: str, period: dict) -> dict:
         },
         "monthly_breakdown": monthly_table,
         "slippage_summary": slip,
+        "shadow_analysis": shadow_analysis,
         "elapsed_seconds": results.get("elapsed_seconds", 0),
         "exec_bars": results.get("exec_bars", 0),
         "htf_bars": results.get("htf_bars", 0),
@@ -288,6 +292,17 @@ def print_period_summary(output: dict) -> None:
             print(f"    {m['month']:<10} {m['trades']:>6} {m['win_rate']:>5.1f}% "
                   f"{pf_m_str:>6} ${m['pnl']:>+9,.0f}")
 
+    # Shadow-trade gate ranking
+    shadow = output.get("shadow_analysis", {})
+    ranking = shadow.get("gate_value_ranking", [])
+    if ranking:
+        total_shadow = shadow.get("total_shadow_signals", 0)
+        print(f"    Shadow signals: {total_shadow:,}")
+        print(f"    {'Gate':<25} {'Count':>6} {'Shadow PnL':>12} {'Verdict':>12}")
+        for g in ranking:
+            print(f"    {g['gate']:<25} {g['count']:>6} "
+                  f"${g['shadow_pnl']:>+10,.2f} {g['verdict']:>12}")
+
 
 def generate_comparison_report(all_results: Dict[str, dict]) -> dict:
     """Generate the cross-period comparison report."""
@@ -310,6 +325,10 @@ def generate_comparison_report(all_results: Dict[str, dict]) -> dict:
     total_signal_only_pnl = 0.0
     total_slippage_fills = 0
     total_slippage_pts = 0.0
+
+    # Aggregated shadow-trade analysis
+    agg_shadow_by_gate: Dict[str, Dict] = {}
+    total_shadow_signals = 0
 
     flags = []
     best_period = None
@@ -368,6 +387,22 @@ def generate_comparison_report(all_results: Dict[str, dict]) -> dict:
         # Slippage
         total_slippage_fills += slip.get("total_fills", 0)
         total_slippage_pts += slip.get("total_slippage_points", 0)
+
+        # Shadow analysis aggregation
+        shadow = output.get("shadow_analysis", {})
+        total_shadow_signals += shadow.get("total_shadow_signals", 0)
+        for gate_name, gate_data in shadow.get("by_gate", {}).items():
+            if gate_name not in agg_shadow_by_gate:
+                agg_shadow_by_gate[gate_name] = {
+                    "count": 0, "shadow_wins": 0, "shadow_losses": 0,
+                    "shadow_timeouts": 0, "shadow_total_pnl": 0.0,
+                }
+            ag = agg_shadow_by_gate[gate_name]
+            ag["count"] += gate_data.get("count", 0)
+            ag["shadow_wins"] += gate_data.get("shadow_wins", 0)
+            ag["shadow_losses"] += gate_data.get("shadow_losses", 0)
+            ag["shadow_timeouts"] += gate_data.get("shadow_timeouts", 0)
+            ag["shadow_total_pnl"] += gate_data.get("shadow_total_pnl", 0)
 
         # Flags
         if pf < 1.0:
@@ -441,6 +476,32 @@ def generate_comparison_report(all_results: Dict[str, dict]) -> dict:
             "profit_factor": round(worst_pf, 2) if worst_period else 0,
         },
         "flags": flags,
+        "shadow_analysis": {
+            "total_shadow_signals": total_shadow_signals,
+            "by_gate": {
+                gate_name: {
+                    "count": g["count"],
+                    "shadow_wins": g["shadow_wins"],
+                    "shadow_losses": g["shadow_losses"],
+                    "shadow_timeouts": g["shadow_timeouts"],
+                    "shadow_total_pnl": round(g["shadow_total_pnl"], 2),
+                    "verdict": "PROTECTING" if g["shadow_total_pnl"] < 0 else "COSTING",
+                }
+                for gate_name, g in agg_shadow_by_gate.items()
+            },
+            "gate_value_ranking": sorted(
+                [
+                    {
+                        "gate": gn,
+                        "shadow_pnl": round(gd["shadow_total_pnl"], 2),
+                        "count": gd["count"],
+                        "verdict": "PROTECTING" if gd["shadow_total_pnl"] < 0 else "COSTING",
+                    }
+                    for gn, gd in agg_shadow_by_gate.items()
+                ],
+                key=lambda x: x["shadow_pnl"],
+            ),
+        },
     }
 
     return report, all_trades_log
@@ -663,6 +724,20 @@ async def main():
             print(f"\n  FLAGS:")
             for flag in report["flags"]:
                 print(f"    {flag}")
+
+        # ── Aggregated Shadow-Trade Analysis ──
+        shadow_agg = report.get("shadow_analysis", {})
+        shadow_ranking = shadow_agg.get("gate_value_ranking", [])
+        if shadow_ranking:
+            print(f"\n{'=' * 70}")
+            print(f"  SHADOW-TRADE ANALYSIS (ALL PERIODS) — "
+                  f"{shadow_agg.get('total_shadow_signals', 0):,} rejected signals")
+            print(f"{'=' * 70}")
+            print(f"  {'Gate':<25} {'Count':>6} {'Shadow PnL':>12} {'Verdict':>12}")
+            print(f"  {'─' * 58}")
+            for g in shadow_ranking:
+                print(f"  {g['gate']:<25} {g['count']:>6} "
+                      f"${g['shadow_pnl']:>+10,.2f} {g['verdict']:>12}")
 
         # ── Monte Carlo ──
         mc_results = None
