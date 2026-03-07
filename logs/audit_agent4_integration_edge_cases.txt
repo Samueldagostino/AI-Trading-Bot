@@ -1,0 +1,269 @@
+========================================================================
+AGENT 4 — INTEGRATION & EDGE-CASE AUDIT REPORT
+========================================================================
+Date: 2026-03-06
+Scope: End-to-end integration paths and edge cases
+Mode: READ-ONLY
+
+------------------------------------------------------------------------
+1. STARTUP SEQUENCE
+------------------------------------------------------------------------
+File: scripts/run_ibkr.py — IBKRRunner
+
+Startup order (traced from main()):
+  1. .env file loaded (line ~65-71): os.environ.setdefault() for each key
+  2. validate_env() — checks IBKR_GATEWAY_HOST, IBKR_GATEWAY_PORT,
+     IBKR_ACCOUNT_TYPE are set. FAILS FAST with sys.exit(1) if missing.
+  3. IBKRConfig constructed from env vars
+  4. IBKRClient created and connect() called — gateway connection
+  5. Contract resolution via resolve_contract()
+  6. IBKROrderExecutor created
+  7. PositionManager created with state recovery (load_state())
+  8. IBKRLivePipeline constructed (orchestrator)
+  9. Data feed subscription started
+  10. Warmup phase begins — bars fed to feature engine, trading suppressed
+  11. After WARMUP_BARS bars: trading enabled
+
+Finding 1.1 [INFO]: Env vars fail fast — sys.exit(1) on missing vars.
+
+Finding 1.2 [MEDIUM]: Contract resolution can return None without raising.
+If all 4 strategies fail, resolve_contract() returns None. The caller
+must check for None before proceeding. The IBKRRunner does check this
+and logs CRITICAL, but it's a soft failure path (not an exception).
+
+Finding 1.3 [MEDIUM]: Historical backfill relies on real-time bars during
+warmup phase rather than requesting historical data. If startup happens
+mid-session, ATR-14 won't be primed for 28+ minutes (14 × 2-min bars).
+During this time, the HTF gate blocks trades (no HTF data yet), so no
+trades can fire. Safe but suboptimal.
+
+Finding 1.4 [INFO]: HTF bars warm up from real-time data. The 5m bar
+needs 5 minutes, 15m needs 15, 30m needs 30, 1H needs 60 minutes. The
+HTF staleness limits (constants.py lines 36-43) downgrade stale TFs to
+neutral, which blocks trades via the fail-safe at main.py line 609.
+
+------------------------------------------------------------------------
+2. GRACEFUL SHUTDOWN
+------------------------------------------------------------------------
+File: scripts/run_ibkr.py
+
+KeyboardInterrupt handling:
+  - Caught in the main loop's try/except (around the asyncio.run())
+  - Calls shutdown sequence:
+    1. Logs shutdown reason
+    2. Cancels data feed subscription
+    3. Calls emergency_flatten() to close positions and cancel orders
+    4. Saves position state to disk (position_state.json)
+    5. Stops reconciliation loop
+
+Finding 2.1 [MEDIUM]: If KeyboardInterrupt fires during a narrow window
+(between order submission and fill recording), there could be a race
+condition. However:
+  - Paper mode fills are instant (simulated)
+  - The emergency_flatten() call will catch any remaining positions
+  - Position state is persisted to disk for crash recovery
+
+Finding 2.2 [INFO]: Windows compatibility via 30-second timeout on
+shutdown (per security audit fix). Cross-platform Ctrl+C works.
+
+Finding 2.3 [LOW]: Paper trading journal (scripts/paper_trading_journal.py)
+is a separate script, not integrated into the shutdown sequence. Trade
+data is in the order_log.json and trades JSONL files, but the journal
+must be run separately.
+
+Verdict: Graceful shutdown is ADEQUATE. Positions are flattened,
+state is saved, but journal export is manual.
+
+------------------------------------------------------------------------
+3. GATEWAY DISCONNECT MID-TRADE
+------------------------------------------------------------------------
+
+Finding 3.1 [MEDIUM]: The Client Portal adapter (ibkr_client_portal.py)
+uses HTTP polling. If the gateway goes down:
+  - HTTP requests will fail with connection errors
+  - Errors are logged in the poll loop (line ~1500)
+  - The poll loop continues retrying on each interval
+  - HeartbeatMonitor (safety_rails.py) will trigger:
+    * ALERT after 60 seconds of no data
+    * HALT after 300 seconds (5 minutes) of no data
+
+Finding 3.2 [MEDIUM]: On HALT, the HeartbeatMonitor sets is_tripped=True,
+which causes SafetyRails.check_all() to return False, blocking new trades.
+However, it does NOT automatically flatten existing positions. The
+halt_seconds=300 timeout means positions could be orphaned for up to
+5 minutes before the system notices.
+
+Finding 3.3 [INFO]: The reconciliation loop (position_manager.py) runs
+every 30 seconds. If it can't reach the broker, _fetch_broker_positions()
+returns an empty dict, which triggers a mismatch and emergency_flatten().
+
+Combined behavior:
+  - 0-30s: Reconciliation may detect disconnect (returns empty positions)
+  - 30-60s: HeartbeatMonitor issues ALERT
+  - 60-300s: HeartbeatMonitor issues HALT, blocking new trades
+  - Reconciliation mismatch triggers emergency_flatten()
+
+Verdict: ACCEPTABLE — multiple detection layers, though reconnection
+is passive (retry on next poll) rather than active.
+
+------------------------------------------------------------------------
+4. MIDNIGHT ROLLOVER / SESSION BOUNDARIES
+------------------------------------------------------------------------
+
+Finding 4.1 [INFO]: Session transition detection
+run_ibkr.py lines 372-376: Detects RTH/ETH transitions via
+get_session_type(bar.timestamp). Calls _on_session_transition() which
+logs the transition.
+
+Finding 4.2 [MEDIUM]: Daily PnL reset
+The order_executor.reset_daily() (line 395-404) resets daily_pnl,
+daily_trades, daily_blocked, is_halted, and halt_reason. This is
+called at session boundaries. However:
+  - It clears is_halted, which means the kill switch resets at session open
+  - If kill switch fired during ETH, it resets at RTH open
+  - This is INTENTIONAL per the design (daily limits = daily)
+  - But if a catastrophic loss occurs in ETH, the system resumes at RTH
+
+Finding 4.3 [INFO]: Safety rails (safety_rails.py) have reset_daily()
+which resets daily PnL counter but does NOT clear a trip. So the SafetyRails
+kill switch persists across sessions, while the order_executor's kill
+switch resets. This is belt-and-suspenders — the safety_rails trip
+requires manual reset.
+
+Finding 4.4 [INFO]: Indicators (ATR, volume) are continuous across
+sessions. The feature engine doesn't reset at session boundaries —
+it maintains rolling windows. This is correct behavior.
+
+Verdict: ACCEPTABLE — daily reset is intentional, safety_rails persist.
+
+------------------------------------------------------------------------
+5. NaN/None PROPAGATION
+------------------------------------------------------------------------
+
+Finding 5.1 [INFO]: Comprehensive NaN guards exist (per security audit):
+  - main.py lines 527-532: NaN guard on entry_score
+  - main.py lines 662-667: NaN guard on raw_stop
+  - orchestrator.py lines 412-415, 432-433: NaN guards
+  - signal_bridge.py lines 137-142: NaN guards
+  - order_executor.py line 452: NaN guard on daily_pnl
+  - order_executor.py line 365: NaN guard on trade PnL
+  - safety_rails.py lines 110, 213: NaN guards on PnL values
+
+Finding 5.2 [LOW]: Some arithmetic operations in the feature engine
+(features/engine.py) compute ATR, VWAP, etc. without explicit NaN checks
+on individual bar prices. However, the 4-layer data pipeline defense
+(parse -> tick -> candle -> bar) from the security audit catches NaN/Inf
+before it reaches the feature engine.
+
+Finding 5.3 [INFO]: The risk engine (risk/engine.py) operates on ATR
+values that have already passed through the feature engine. NaN ATR would
+be caught by the NaN guard at main.py line 662 before the stop gate.
+
+Verdict: PASS — comprehensive NaN protection with defense-in-depth.
+
+------------------------------------------------------------------------
+6. CLOCK SYNCHRONIZATION
+------------------------------------------------------------------------
+
+Finding 6.1 [MEDIUM]: The system uses the LOCAL machine clock for:
+  - Session detection (get_session_type uses datetime.now(ET zone))
+  - Trade timestamps (datetime.now(timezone.utc))
+  - Order logging timestamps
+
+The gateway clock is NOT explicitly used for synchronization.
+
+Finding 6.2 [LOW]: If the local clock is off by >1 minute:
+  - Session detection could misclassify bars near boundaries
+  - Trade timestamps would be inaccurate
+  - Heartbeat monitoring would still work (uses monotonic clock)
+  - Reconciliation timing unaffected (interval-based)
+
+Mitigating: Docker containers typically sync with host clock.
+The IBKR gateway runs on the same machine (localhost).
+A 1-minute clock drift is extremely unlikely in a Docker environment.
+
+Verdict: ACCEPTABLE — local clock used, mitigated by deployment setup.
+
+------------------------------------------------------------------------
+7. ENV VAR VALIDATION
+------------------------------------------------------------------------
+
+Complete env var inventory:
+
+REQUIRED (fail fast on missing):
+  IBKR_GATEWAY_HOST — gateway hostname (default in config: "localhost")
+  IBKR_GATEWAY_PORT — gateway port (default in config: 5000)
+  IBKR_ACCOUNT_TYPE — "paper" or "live" (default in config: "paper")
+
+OPTIONAL with safe defaults:
+  IBKR_SYMBOL — default "MNQ"
+  SESSION_VOLATILITY_SCALING — default "false" (OFF)
+  DASHBOARD_API_TOKEN — generates ephemeral if missing
+  ALLOW_UNVALIDATED — default "false"
+  ROLLOVER_OVERRIDE — default "" (not set = normal behavior)
+  PG_HOST/PORT/DATABASE/USER/PASSWORD — database config with defaults
+  DISCORD_TOKEN — default "" (disabled)
+  TV_EXPORT_DIR — default "./data/tradingview"
+  QUANTDATA_AUTH — default "" (disabled)
+  IBKR_TWS_HOST — default "127.0.0.1"
+  IBKR_CLIENT_ID — default "1"
+
+Finding 7.1 [INFO]: Required env vars fail fast with clear error message
+and sys.exit(1). No dangerous defaults for required vars.
+
+Finding 7.2 [INFO]: IBKR_ACCOUNT_TYPE defaults to "paper" in the config
+dataclass (ibkr_client_portal.py line 56). Even if the validate_env()
+check somehow passes with a missing value, the default is safe.
+
+Finding 7.3 [INFO]: No env var defaults to "live" mode. The system
+defaults to paper trading in all cases.
+
+Verdict: PASS — safe defaults throughout, required vars validated.
+
+------------------------------------------------------------------------
+8. LOG FILE ROTATION
+------------------------------------------------------------------------
+
+Finding 8.1 [INFO]: RotatingFileHandler implemented (per security audit).
+Logs capped at ~60 MB per runner per the security audit fix.
+
+Finding 8.2 [INFO]: JSONL decision/trade logs use daily rotation (per
+hardening fix P3-M1). Bounded growth.
+
+Finding 8.3 [LOW]: The order_log.json (order_executor.py line 692) is
+append-only JSONL with no rotation. During a busy trading day with many
+rejected orders, this could grow. However, at ~200 bytes per entry and
+~1,500 trades/month, this is negligible (~300KB/month).
+
+Finding 8.4 [INFO]: safety_rail_events.json (safety_rails.py) is also
+append-only JSONL. Events are rare (only on breaker trips/resets), so
+growth is minimal.
+
+Verdict: PASS — log rotation implemented, bounded growth.
+
+========================================================================
+SUMMARY
+========================================================================
+
+| Severity | Count | Key Finding                                    |
+|----------|-------|------------------------------------------------|
+| CRITICAL | 0     | None                                           |
+| HIGH     | 0     | None                                           |
+| MEDIUM   | 6     | Contract resolution soft fail, warmup via       |
+|          |       | real-time bars, shutdown race window, gateway    |
+|          |       | disconnect 5-min window, kill switch daily       |
+|          |       | reset, local clock dependency                    |
+| LOW      | 3     | Paper journal manual, feature engine NaN,        |
+|          |       | order_log no rotation                            |
+| INFO     | 11    | Env validation, NaN guards, session handling,    |
+|          |       | log rotation, indicators continuous               |
+
+OVERALL INTEGRATION VERDICT: PASS WITH WARNINGS
+
+No critical or high issues. Medium issues are inherent architectural
+trade-offs that are acceptable for paper trading:
+  - Warmup via real-time bars is slow but safe
+  - 5-minute heartbeat halt is conservative but positions are protected
+    by reconciliation (30s interval)
+  - Kill switch daily reset is intentional design
+  - Local clock is standard in Docker deployments

@@ -210,6 +210,61 @@ def aggregate_to_2m(bars_1m: List[Dict]) -> List[Dict]:
     return result
 
 
+def _floor_to_tf(ts: datetime, tf_minutes: int) -> datetime:
+    """Floor a timestamp to the nearest timeframe boundary.
+
+    For intraday (5m–4H): floors within each day.
+    For daily (1440): floors to midnight of the same day.
+    """
+    if tf_minutes >= 1440:
+        return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    total_minutes = ts.hour * 60 + ts.minute
+    floored_minutes = (total_minutes // tf_minutes) * tf_minutes
+    return ts.replace(
+        hour=floored_minutes // 60,
+        minute=floored_minutes % 60,
+        second=0,
+        microsecond=0,
+    )
+
+
+def aggregate_1m_to_htf(bars_1m: List[Dict]) -> Dict[str, List[Dict]]:
+    """Build all HTF bars (5m, 15m, 30m, 1H, 4H, 1D) causally from 1-min data.
+
+    Uses the same bucketing logic as aggregate_to_2m but for each HTF period.
+    Returns Dict[str, List[Dict]] suitable for HTFScheduler.
+    """
+    tf_minutes = {"5m": 5, "15m": 15, "30m": 30, "1H": 60, "4H": 240, "1D": 1440}
+    htf_data: Dict[str, List[Dict]] = {}
+
+    for tf_label, tf_min in tf_minutes.items():
+        buckets: Dict[datetime, List[Dict]] = {}
+
+        for bar in bars_1m:
+            bucket_ts = _floor_to_tf(bar["timestamp"], tf_min)
+            if bucket_ts not in buckets:
+                buckets[bucket_ts] = []
+            buckets[bucket_ts].append(bar)
+
+        result = []
+        for bucket_ts in sorted(buckets.keys()):
+            group = buckets[bucket_ts]
+            group.sort(key=lambda b: b["timestamp"])
+            result.append({
+                "timestamp": bucket_ts,
+                "open": group[0]["open"],
+                "high": max(b["high"] for b in group),
+                "low": min(b["low"] for b in group),
+                "close": group[-1]["close"],
+                "volume": sum(b["volume"] for b in group),
+            })
+
+        htf_data[tf_label] = result
+        print(f"    {tf_label}: {len(result):>8,} bars (built from 1m)")
+
+    return htf_data
+
+
 # =====================================================================
 #  SESSION UTILITIES
 # =====================================================================
@@ -700,6 +755,9 @@ class CausalReplayEngine:
         self._daily_pnl: float = 0.0
         self._cumulative_pnl: float = 0.0
         self._kill_switch_active: bool = False
+        self._htf_bars_completed: Dict[str, int] = {
+            "5m": 0, "15m": 0, "30m": 0, "1H": 0, "4H": 0, "1D": 0,
+        }
 
         # ── Pending signal (signal at bar N, execute at bar N+1) ──
         self._pending_entry: Optional[Dict] = None
@@ -1045,6 +1103,32 @@ class CausalReplayEngine:
         # Count as a directional signal (regardless of HC outcome)
         self._signals_with_direction += 1
 
+        # ── HTF DIRECTIONAL GATE (choke-point — ALL signal sources pass through) ──
+        # Mirrors main.py lines 582-617: sweep-only and confluence entries
+        # must also respect HTF directional consensus.  Without this gate,
+        # sweep entries bypass the aggregator's internal HTF check.
+        htf_bias = self._htf_bias
+        if htf_bias is not None:
+            if entry_direction == "long" and not htf_bias.htf_allows_long:
+                self._record_shadow_signal(
+                    bar, features, entry_direction, entry_score, None,
+                    "HTF gate blocks long", 1)
+                self._rejection_count += 1
+                return
+            if entry_direction == "short" and not htf_bias.htf_allows_short:
+                self._record_shadow_signal(
+                    bar, features, entry_direction, entry_score, None,
+                    "HTF gate blocks short", 1)
+                self._rejection_count += 1
+                return
+        elif htf_bias is None:
+            # Fail-safe: no HTF data → block all trades
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, None,
+                "No HTF data — fail-safe block", 1)
+            self._rejection_count += 1
+            return
+
         # ── NaN Guard ──
         if not math.isfinite(entry_score):
             logger.debug("NaN entry_score — blocking")
@@ -1358,6 +1442,7 @@ class CausalReplayEngine:
             )
             self.htf_engine.update_bar(tf, htf_bar)
             self._htf_bias = self.htf_engine.get_bias(ts)
+            self._htf_bars_completed[tf] = self._htf_bars_completed.get(tf, 0) + 1
 
         # ── Step 1: Execute pending entry from previous bar ──
         await self._execute_pending_entry(bar)
@@ -1379,6 +1464,24 @@ class CausalReplayEngine:
         # ── Step 4: Generate signal (if flat, not warmup) ──
         await self._generate_signal(bar, features, self._htf_bias, exec_bar)
 
+        # ── ONE-TIME diagnostic at bar 25,000 ──
+        if self._bars_processed == 25_000:
+            sched_loaded = {tf: len(q) for tf, q in htf_scheduler._queues.items()}
+            sched_delivered = {tf: htf_scheduler._indices[tf] for tf in htf_scheduler._indices}
+            htf_data_in_engine = {
+                tf: len(bars) for tf, bars in self.htf_engine._bars.items()
+            }
+            print(
+                f"\n  [DIAGNOSTIC bar 25,000]\n"
+                f"    HTFScheduler loaded:       {sched_loaded}\n"
+                f"    HTFScheduler delivered:    {sched_delivered}\n"
+                f"    HTFBiasEngine bars cached: {htf_data_in_engine}\n"
+                f"    htf_bias is None:          {self._htf_bias is None}\n"
+                f"    htf_bias value:            {self._htf_bias}\n"
+                f"    Aggregator htf_blocked:    {self.signal_aggregator._htf_blocked_count}\n"
+                f"    HTF bars completed:        {self._htf_bars_completed}\n"
+            )
+
         # ── Progress reporting ──
         if self._bars_processed % PROGRESS_INTERVAL == 0:
             bias_str = "n/a"
@@ -1387,12 +1490,16 @@ class CausalReplayEngine:
                     f"{self._htf_bias.consensus_direction}"
                     f"({self._htf_bias.consensus_strength:.2f})"
                 )
+            htf_1h = self._htf_bars_completed.get("1H", 0)
+            htf_4h = self._htf_bars_completed.get("4H", 0)
+            htf_1d = self._htf_bars_completed.get("1D", 0)
             print(
                 f"  [{self._bars_processed:>10,}] "
                 f"{ts.strftime('%Y-%m-%d %H:%M')} | "
                 f"Trades: {self._entry_count} | "
                 f"PnL: ${self._cumulative_pnl:+,.2f} | "
                 f"HTF: {bias_str} | "
+                f"HTF bars [1H:{htf_1h} 4H:{htf_4h} 1D:{htf_1d}] | "
                 f"Regime: {self._current_regime}"
             )
 
@@ -2092,13 +2199,13 @@ async def run_backtest(
         )
     print()
 
+    # ── Build HTF data causally from 1-min bars ──
+    print("Building HTF bars from 1-min data...")
+    htf_data = aggregate_1m_to_htf(bars_1m)
+    print()
+
     # Free 1m data to save memory
     del bars_1m
-
-    # ── Load HTF data ──
-    print("Loading HTF data...")
-    htf_data = load_all_htf(htf_dir)
-    print()
 
     # ── Initialize engine ──
     config = BotConfig()
