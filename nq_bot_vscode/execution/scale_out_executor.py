@@ -36,6 +36,7 @@ from typing import Optional, List, Dict
 from enum import Enum
 import uuid
 
+from execution.adaptive_exit_config import AdaptiveExitConfig
 from monitoring.alerting import get_alert_manager
 from monitoring.alert_templates import AlertTemplates
 
@@ -156,6 +157,8 @@ class ScaleOutExecutor:
     Works in two modes:
     - Paper: Simulated fills (default)
     - Live: Routes through TradovateClient
+
+    TODO: Thread ADX value from data pipeline through update() method to enable regime adaptation
     """
 
     def __init__(self, config, tradovate_client=None, execution_analytics=None, instrument: str = "MNQ"):
@@ -168,6 +171,10 @@ class ScaleOutExecutor:
 
         self._active_trade: Optional[ScaleOutTrade] = None
         self._trade_history: List[ScaleOutTrade] = []
+
+        # Regime-adaptive exit parameters (disabled by default — enable after walk-forward validation)
+        self._adaptive_exits = AdaptiveExitConfig(enabled=config.scale_out.adaptive_exits_enabled)
+        self._last_regime = "unknown"
 
     @property
     def has_active_trade(self) -> bool:
@@ -637,7 +644,18 @@ class ScaleOutExecutor:
             mfe = (trade.c2_best_price - trade.entry_price if direction == "long"
                    else trade.entry_price - trade.c2_best_price)
             stop_dist = abs(trade.entry_price - trade.initial_stop)
-            threshold = stop_dist * getattr(cfg, "c2_be_delay_multiplier", 1.5)
+
+            # Use adaptive BE multiplier if regime adaptation is enabled
+            if self._adaptive_exits.enabled and trade.atr_at_entry > 0:
+                adaptive_params = self._adaptive_exits.get_exit_params(
+                    adx=0.0,  # TODO: thread ADX from data pipeline
+                    previous_regime=self._last_regime
+                )
+                self._last_regime = adaptive_params.regime
+                be_multiplier = adaptive_params.be_delay_multiplier
+            else:
+                be_multiplier = getattr(cfg, "c2_be_delay_multiplier", 1.5)
+            threshold = stop_dist * be_multiplier
             if mfe >= threshold:
                 buf = cfg.c2_breakeven_buffer_points
                 new_stop = (trade.entry_price + buf if direction == "long"
@@ -727,7 +745,16 @@ class ScaleOutExecutor:
         cfg = self.scale_config
 
         if cfg.c2_trailing_stop_type == "atr":
-            distance = trade.atr_at_entry * cfg.c2_trailing_atr_multiplier
+            # Use adaptive trail multiplier if regime adaptation is enabled
+            if self._adaptive_exits.enabled:
+                adaptive_params = self._adaptive_exits.get_exit_params(
+                    adx=0.0,  # TODO: thread ADX from data pipeline
+                    previous_regime=self._last_regime
+                )
+                multiplier = adaptive_params.trailing_atr_multiplier
+            else:
+                multiplier = cfg.c2_trailing_atr_multiplier
+            distance = trade.atr_at_entry * multiplier
         elif cfg.c2_trailing_stop_type == "fixed":
             distance = cfg.c2_trailing_fixed_points
         else:
