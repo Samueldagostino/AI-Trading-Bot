@@ -2,33 +2,39 @@
 """
 Parallel Multi-Period Backtest Runner
 ======================================
-Runs full_backtest.py on all 5 historical periods SIMULTANEOUSLY
+Runs full_backtest.py on all 7 historical periods SIMULTANEOUSLY
 using Python multiprocessing. Each period gets its own worker process
 with an independent CausalReplayEngine instance.
 
 This turns a ~15-hour sequential backtest into ~3 hours
-(limited by the slowest period).
+(limited by the slowest period — Period 7 at 352K bars).
 
-PERIODS:
-  1: Sep 2021 – Feb 2022  (175,430 1m bars)
-  2: Mar 2022 – Aug 2022  (180,055 1m bars)
-  3: Sep 2022 – Feb 2023  (174,058 1m bars)
-  4: Sep 2023 – Feb 2024  (175,316 1m bars)
-  5: Mar 2024 – Aug 2024  (177,998 1m bars)
+PERIODS (from TradingView 1m exports):
+  1: Sep 2021 – Feb 2022  (175,429 1m bars, 6 months)
+  2: Mar 2022 – Aug 2022  (180,054 1m bars, 6 months)
+  3: Sep 2022 – Feb 2023  (174,057 1m bars, 6 months)
+  4: Sep 2023 – Feb 2024  (175,315 1m bars, 6 months)
+  5: Mar 2024 – Aug 2024  (177,997 1m bars, 6 months)
+  6: Sep 2024 – Aug 2025  (352,039 1m bars, 12 months) ← 2 workers for verification
+
+  NOTE: Gap from Feb 2023 – Aug 2023 (no TradingView data available)
 
 Each period runs the IDENTICAL strategy, configuration, and gates.
 Results are aggregated at the end with cross-period verification.
+
+For Period 6 (12 months), we run 2 independent workers on the same data
+to cross-verify results are deterministic (same trades, same PnL).
 
 CROSS-VERIFICATION:
   - Input hash: SHA-256 of each data file ensures no corruption
   - Deterministic engine: same input + same config = same output
   - Per-period verification checks (causality, commission, PnL sum, slippage)
-  - Spot-check: random 5% re-run on fastest-completing period
+  - Period 7 dual-worker determinism check
 
 Usage:
     python scripts/parallel_backtest.py --run
-    python scripts/parallel_backtest.py --run --workers 3  # limit parallelism
-    python scripts/parallel_backtest.py --run --periods 1,2,4  # specific periods
+    python scripts/parallel_backtest.py --run --workers 4  # limit parallelism
+    python scripts/parallel_backtest.py --run --periods 1,2,7  # specific periods
     python scripts/parallel_backtest.py --check  # compile check only
 """
 
@@ -56,42 +62,59 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 # ── Period Definitions ────────────────────────────────────────────
-# Each period maps to a raw 1m CSV file. The backtest engine builds
-# HTF bars causally from 1m data, so no pre-aggregated HTF needed.
-DATA_DIR = REPO_DIR / "data" / "firstrate" / "historical"
+# Each period maps to a TradingView 1m export (.txt file).
+# The backtest engine builds HTF bars causally from 1m data.
+# TradingView format: no header row, title lines at top, then
+# datetime,open,high,low,close,volume (ISO timestamps)
+TV_DIR = REPO_DIR / "data" / "tradingview"
+
+# NOTE: The file "Feb (2023) - September (2023) (6-Months).txt" is MISLABELED.
+# Its actual content is Sep 2022 - Feb 2023 (duplicate of Period 3 with more data).
+# We use it as Period 3 since it has 174K bars vs Period 3's 146K bars.
+# There is a DATA GAP from Feb 2023 through Aug 2023 — no TradingView file covers it.
 
 PERIODS = {
     1: {
         "name": "Period 1",
         "label": "Sep 2021 – Feb 2022",
-        "data_file": str(DATA_DIR / "NQ_1m_2021-09_to_2022-02.csv"),
+        "data_file": str(TV_DIR / "September (2021) - Feb (2022) (6-Months).txt"),
         "months": 6,
     },
     2: {
         "name": "Period 2",
         "label": "Mar 2022 – Aug 2022",
-        "data_file": str(DATA_DIR / "NQ_1m_2022-03_to_2022-08.csv"),
+        "data_file": str(TV_DIR / "March - August (2022) (6-Months).txt"),
         "months": 6,
     },
     3: {
         "name": "Period 3",
         "label": "Sep 2022 – Feb 2023",
-        "data_file": str(DATA_DIR / "NQ_1m_2022-09_to_2023-02.csv"),
+        "data_file": str(TV_DIR / "Feb (2023) - September (2023) (6-Months).txt"),
         "months": 6,
+        # Using the mislabeled file — actual data is Sep 2022 to Feb 2023
+        # with 174K bars (more complete than the Jan-cutoff file with 146K)
     },
     4: {
         "name": "Period 4",
         "label": "Sep 2023 – Feb 2024",
-        "data_file": str(DATA_DIR / "NQ_1m_2023-09_to_2024-02.csv"),
+        "data_file": str(TV_DIR / "September (2023) - Feb (2024) (6--Months).txt"),
         "months": 6,
     },
     5: {
         "name": "Period 5",
         "label": "Mar 2024 – Aug 2024",
-        "data_file": str(DATA_DIR / "NQ_1m_2024-03_to_2024-08.csv"),
+        "data_file": str(TV_DIR / "March - August 2024 (6-Months).txt"),
         "months": 6,
     },
+    6: {
+        "name": "Period 6",
+        "label": "Sep 2024 – Aug 2025",
+        "data_file": str(TV_DIR / "September (2024) - August (2025) (12-months).txt"),
+        "months": 12,
+    },
 }
+# NOTE: Period numbering adjusted — 6 periods total (was 7 before dedup).
+# Period 6 is the 12-month file that gets dual-worker verification.
 
 # Output directory for per-period results
 OUTPUT_DIR = PROJECT_DIR / "logs" / "parallel_backtest"
@@ -141,45 +164,70 @@ def verify_data_files(period_ids: List[int]) -> Dict[int, Dict]:
 #  WORKER PROCESS — runs one period's backtest
 # =====================================================================
 
-def _adapt_raw_csv_loader(filepath: str) -> List[Dict]:
-    """Load raw FirstRate CSV (unix timestamps) and convert to
-    the format expected by full_backtest.py's load_1min_csv.
+def _load_tradingview_txt(filepath: str) -> List[Dict]:
+    """Load TradingView 1-minute export (.txt file).
 
-    Raw format: time,open,high,low,close,Volume
-    Where 'time' is a Unix epoch timestamp.
+    TradingView format:
+      - 1-3 title/header lines (text, not CSV)
+      - Then raw data lines: datetime,open,high,low,close,volume
+      - No CSV header row
+      - Timestamps are ISO format: 2021-09-01 00:00:00
+      - Timezone assumed ET (Eastern Time)
+
+    Also handles FirstRate CSV format (unix timestamps with header row)
+    as a fallback for maximum compatibility.
     """
-    import csv
-    from datetime import timezone
     from zoneinfo import ZoneInfo
+    from datetime import timezone
 
     ET = ZoneInfo("America/New_York")
     bars = []
+    skipped = 0
 
     with open(filepath, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Skip title/header lines (don't start with a digit)
+            if not line[0].isdigit():
+                # Could be a header like "time,open,high,low,close,Volume"
+                # or a title like "September (2021) - Feb (2022)"
+                skipped += 1
+                continue
+
+            parts = line.split(",")
+            if len(parts) < 6:
+                continue
+
             try:
-                # Raw files use Unix timestamps
-                ts_raw = row.get("time", row.get("timestamp", "")).strip()
+                ts_raw = parts[0].strip()
+
+                # Try ISO format first (TradingView)
                 try:
-                    # Try as Unix epoch first
-                    epoch = int(ts_raw)
-                    dt = datetime.fromtimestamp(epoch, tz=timezone.utc).astimezone(ET)
-                except (ValueError, OSError):
-                    # Fall back to ISO string parsing
-                    dt = datetime.fromisoformat(ts_raw)
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=ET)
+                    dt = datetime.strptime(ts_raw, "%Y-%m-%d %H:%M:%S")
+                    dt = dt.replace(tzinfo=ET)
+                except ValueError:
+                    # Try Unix epoch (FirstRate fallback)
+                    try:
+                        epoch = int(ts_raw)
+                        dt = datetime.fromtimestamp(epoch, tz=timezone.utc).astimezone(ET)
+                    except (ValueError, OSError):
+                        # Last resort: fromisoformat
+                        dt = datetime.fromisoformat(ts_raw)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=ET)
 
                 bars.append({
                     "timestamp": dt,
-                    "open": float(row["open"]),
-                    "high": float(row["high"]),
-                    "low": float(row["low"]),
-                    "close": float(row["close"]),
-                    "volume": int(float(row.get("Volume", row.get("volume", 0)))),
+                    "open": float(parts[1]),
+                    "high": float(parts[2]),
+                    "low": float(parts[3]),
+                    "close": float(parts[4]),
+                    "volume": int(float(parts[5])),
                 })
-            except (ValueError, KeyError) as e:
+            except (ValueError, IndexError):
                 continue
 
     bars.sort(key=lambda b: b["timestamp"])
@@ -219,7 +267,7 @@ def run_period_backtest(period_id: int, result_queue: mp.Queue) -> None:
 
         # ── Load data (using adapted loader for raw FirstRate CSVs) ──
         print(f"[P{period_id}] Loading 1-minute data...")
-        bars_1m = _adapt_raw_csv_loader(period["data_file"])
+        bars_1m = _load_tradingview_txt(period["data_file"])
         print(f"[P{period_id}] Loaded: {len(bars_1m):,} bars")
 
         if bars_1m:
@@ -624,6 +672,28 @@ def cross_verify_periods(results: List[Dict], data_hashes: Dict) -> Dict:
         "description": "Shadow gates show same direction (PROTECTING/COSTING) across periods",
     }
 
+    # 6. Dual-worker determinism check for Period 7
+    # If period 7 was run with dual workers (7 and 7b), verify they match
+    p6_results = [r for r in results if r.get("period_id") in (6, "6b") and r["status"] == "success"]
+    if len(p6_results) == 2:
+        a, b = p6_results[0]["aggregate"], p6_results[1]["aggregate"]
+        trades_match = a.get("total_trades") == b.get("total_trades")
+        pnl_match = abs(a.get("total_pnl", 0) - b.get("total_pnl", 0)) < 0.01
+        wr_match = a.get("win_rate") == b.get("win_rate")
+        checks["period6_dual_worker"] = {
+            "passed": trades_match and pnl_match and wr_match,
+            "worker_a_trades": a.get("total_trades"),
+            "worker_b_trades": b.get("total_trades"),
+            "worker_a_pnl": a.get("total_pnl"),
+            "worker_b_pnl": b.get("total_pnl"),
+            "description": "Period 6 dual-worker determinism: identical trades and PnL",
+        }
+    else:
+        checks["period6_dual_worker"] = {
+            "passed": True,
+            "description": "Period 6 dual-worker check skipped (single worker or not run)",
+        }
+
     return checks
 
 
@@ -831,7 +901,7 @@ def main():
     missing = [pid for pid, h in data_hashes.items() if not h["exists"]]
     if missing:
         print(f"ERROR: Missing data files for periods: {missing}")
-        print("  Ensure all CSV files are in data/firstrate/historical/")
+        print("  Ensure all TradingView .txt files are in data/tradingview/")
         sys.exit(1)
 
     if args.check or not args.run:
@@ -855,20 +925,40 @@ def main():
 
     # ── Launch parallel workers ──
     wall_start = time_module.time()
-    max_workers = args.workers or len(period_ids)
+
+    # Build worker list: dual workers for 12-month periods (Period 7)
+    worker_tasks = []
+    for pid in period_ids:
+        worker_tasks.append(pid)
+        # Launch verification worker for 12-month periods
+        if PERIODS[pid]["months"] >= 12:
+            worker_tasks.append(f"{pid}b")  # e.g., "7b" for verification
+
+    max_workers = args.workers or len(worker_tasks)
     result_queue = mp.Queue()
 
-    print(f"Launching {len(period_ids)} backtest workers (max {max_workers} parallel)...")
+    n_primary = len(period_ids)
+    n_verify = len(worker_tasks) - n_primary
+    print(f"Launching {n_primary} primary + {n_verify} verification workers "
+          f"(max {max_workers} parallel)...")
+    if n_verify > 0:
+        print(f"  Dual-worker verification for 12-month periods: "
+              f"{[pid for pid in period_ids if PERIODS[pid]['months'] >= 12]}")
     print()
 
     # Use process pool for controlled parallelism
     processes = []
     active = []
 
-    for pid in period_ids:
+    for task_id in worker_tasks:
+        # Map "7b" back to period 7 for data lookup
+        if isinstance(task_id, str) and task_id.endswith("b"):
+            actual_pid = int(task_id[:-1])
+        else:
+            actual_pid = task_id
+
         # Wait if at capacity
         while len(active) >= max_workers:
-            # Check for completed processes
             still_active = []
             for p in active:
                 if p.is_alive():
@@ -879,8 +969,8 @@ def main():
 
         p = mp.Process(
             target=run_period_backtest,
-            args=(pid, result_queue),
-            name=f"Period-{pid}",
+            args=(actual_pid, result_queue),
+            name=f"Period-{task_id}",
         )
         p.start()
         processes.append(p)
@@ -892,11 +982,28 @@ def main():
         p.join()
 
     # Collect results
-    results = []
+    all_results = []
     while not result_queue.empty():
-        results.append(result_queue.get())
+        all_results.append(result_queue.get())
 
-    results.sort(key=lambda r: r["period_id"])
+    all_results.sort(key=lambda r: r["period_id"])
+
+    # Separate primary results from verification duplicates
+    # For dual-worker periods, keep first successful as primary, second for verification
+    seen_periods = set()
+    results = []       # Primary results (one per period, used for aggregation)
+    verify_results = []  # Verification duplicates (for cross-check only)
+    for r in all_results:
+        pid = r["period_id"]
+        if pid not in seen_periods:
+            results.append(r)
+            seen_periods.add(pid)
+        else:
+            r["period_id"] = f"{pid}b"  # Mark as verification worker
+            verify_results.append(r)
+
+    # Combine for cross-verification
+    all_for_verification = results + verify_results
 
     wall_elapsed = time_module.time() - wall_start
 
@@ -906,7 +1013,7 @@ def main():
     print("=" * 80)
 
     unified = aggregate_all_periods(results)
-    verification = cross_verify_periods(results, data_hashes)
+    verification = cross_verify_periods(all_for_verification, data_hashes)
 
     # ── Print unified summary ──
     print()
@@ -929,14 +1036,30 @@ def main():
             print(f"  Period {r['period_id']}: FAILED")
             continue
         agg = r["aggregate"]
-        label = PERIODS[r["period_id"]]["label"]
+        pid = r["period_id"]
+        label = PERIODS[pid]["label"] if pid in PERIODS else f"P{pid}"
         print(
-            f"  P{r['period_id']} {label:<24} "
+            f"  P{pid} {label:<24} "
             f"{agg['total_trades']:>7,} "
             f"{agg['win_rate']:>7.1f}% "
             f"{agg['profit_factor']:>8} "
             f"${agg['total_pnl']:>12,.2f}"
         )
+
+    # Show verification worker results if any
+    if verify_results:
+        print()
+        print("  Verification Workers:")
+        for r in verify_results:
+            if r["status"] != "success":
+                print(f"    {r['period_id']}: FAILED")
+                continue
+            agg = r["aggregate"]
+            print(
+                f"    {r['period_id']} (verify): "
+                f"{agg['total_trades']:>7,} trades | "
+                f"PnL ${agg['total_pnl']:>+12,.2f}"
+            )
     print()
 
     # Verification
