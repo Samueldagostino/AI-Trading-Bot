@@ -1,94 +1,29 @@
 {
-  "updated": "2026-03-06T23:58:03.435993+00:00",
-  "status": "LIVE",
-  "bars_processed": 200,
-  "trades_today": 11,
-  "win_rate": 36.4,
-  "profit_factor": 0.48,
-  "session_pnl_pct": -0.127,
-  "signals_rejected": 42,
-  "signals_approved": 4,
-  "htf_bias": "NEUTRAL",
-  "safety_rails": "ALERT",
-  "modifiers": {
-    "overnight": {
-      "value": 1.0,
-      "display": "1.0x (neutral)"
-    },
-    "fomc": {
-      "value": 1.0,
-      "display": "1.0x (no_fomc)"
-    },
-    "gamma": {
-      "value": 1.0,
-      "display": "1.0x (VIX data unavailable)"
-    },
-    "har_rv": {
-      "value": 1.1,
-      "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.24)"
+  "updated": "2026-03-07T00:00:00.000000+00:00",
+  "status": "VALIDATED",
+  "backtest": {
+    "date_range": "Sep 2021 - Aug 2025",
+    "bars_processed": 617640,
+    "total_trades": 5370,
+    "win_rate": 47.9,
+    "profit_factor": 1.14,
+    "total_pnl": 25795.30,
+    "max_drawdown_pct": 5.55,
+    "expectancy": 4.80,
+    "c1_pnl": 22980.40,
+    "c2_pnl": 18143.90,
+    "long_trades": 2459,
+    "long_pnl": 5379.10,
+    "short_trades": 2911,
+    "short_pnl": 20416.20,
+    "yearly": {
+      "2021": 401,
+      "2022": 10010,
+      "2023": 3690,
+      "2024": 4085,
+      "2025": 7606
     }
   },
-  "last_price": 24970.0,
-  "recent_decisions": [
-    {
-      "time": "04:31:05 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "MIN_RR"
-    },
-    {
-      "time": "04:31:15 ET",
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "time": "04:31:20 ET",
-      "direction": "LONG",
-      "decision": "EXIT",
-      "reason": "Approved"
-    },
-    {
-      "time": "04:31:25 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "MIN_RR"
-    },
-    {
-      "time": "04:31:30 ET",
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "time": "04:31:40 ET",
-      "direction": "LONG",
-      "decision": "EXIT",
-      "reason": "Approved"
-    },
-    {
-      "time": "04:31:45 ET",
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "time": "04:32:10 ET",
-      "direction": "LONG",
-      "decision": "EXIT",
-      "reason": "Approved"
-    },
-    {
-      "time": "04:32:25 ET",
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "time": "04:32:36 ET",
-      "direction": "LONG",
-      "decision": "EXIT",
-      "reason": "Approved"
-    }
-  ]
+  "version": "v2.1-validated",
+  "label": "Full 4-Year Causal Backtest | Mar 7, 2026"
 }

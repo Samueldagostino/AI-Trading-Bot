@@ -439,6 +439,63 @@ function MonthlyHeatmap({ weeks }) {
   );
 }
 
+/* ── Yearly Breakdown ── */
+function YearlyBreakdown({ weeks }) {
+  const yearly = useMemo(() => {
+    const map = {};
+    for (const w of weeks) {
+      const y = w.year;
+      if (!map[y]) map[y] = { trades: 0, wins: 0, pnl: 0, c1: 0, c2: 0, gp: 0, gl: 0 };
+      const p = map[y];
+      p.trades += w.trades; p.wins += w.wins; p.pnl += w.pnl;
+      p.c1 += w.c1_pnl; p.c2 += w.c2_pnl;
+      if (w.pnl > 0) p.gp += w.pnl; else p.gl += Math.abs(w.pnl);
+    }
+    return Object.entries(map).sort((a,b) => a[0] - b[0]).map(([year, d]) => ({
+      year, ...d,
+      wr: d.trades > 0 ? d.wins / d.trades * 100 : 0,
+      pf: d.gl > 0 ? d.gp / d.gl : 999,
+      exp: d.trades > 0 ? d.pnl / d.trades : 0,
+    }));
+  }, [weeks]);
+
+  return (
+    <div className="chart-section">
+      <div className="chart-title">Yearly Breakdown</div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style={{textAlign:'left'}}>Year</th>
+              <th>Trades</th>
+              <th>WR</th>
+              <th>PF</th>
+              <th>PnL</th>
+              <th>C1 PnL</th>
+              <th>C2 PnL</th>
+              <th>Expectancy</th>
+            </tr>
+          </thead>
+          <tbody>
+            {yearly.map(y => (
+              <tr key={y.year}>
+                <td style={{textAlign:'left', fontWeight:600}}>{y.year}</td>
+                <td>{fmt(y.trades)}</td>
+                <td>{fmtPct(y.wr)}</td>
+                <td className={y.pf >= 1.3 ? 'green' : y.pf >= 1.0 ? 'yellow' : 'red'}>{y.pf > 99 ? '∞' : fmt(y.pf, 2)}</td>
+                <td className={pnlClass(y.pnl)}>{fmtPnl(y.pnl)}</td>
+                <td className={pnlClass(y.c1)}>{fmtPnl(y.c1)}</td>
+                <td className={pnlClass(y.c2)}>{fmtPnl(y.c2)}</td>
+                <td className={pnlClass(y.exp)}>${fmt(y.exp, 2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /* ── Period Comparison ── */
 function PeriodComparison({ weeks }) {
   const periods = useMemo(() => {
@@ -689,6 +746,7 @@ function App() {
         <MonthlyHeatmap weeks={filtered} />
         <StreakChart weeks={filtered} />
       </div>
+      <YearlyBreakdown weeks={allWeeks} />
       <PeriodComparison weeks={allWeeks} />
       <WeeksTable weeks={filtered} />
 
