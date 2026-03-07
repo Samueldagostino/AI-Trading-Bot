@@ -9,20 +9,19 @@ with an independent CausalReplayEngine instance.
 This turns a ~15-hour sequential backtest into ~3 hours
 (limited by the slowest period — Period 7 at 352K bars).
 
-PERIODS (from TradingView 1m exports):
+PERIODS (from TradingView 1m exports — CONTINUOUS Sep 2021 to Aug 2025):
   1: Sep 2021 – Feb 2022  (175,429 1m bars, 6 months)
   2: Mar 2022 – Aug 2022  (180,054 1m bars, 6 months)
   3: Sep 2022 – Feb 2023  (174,057 1m bars, 6 months)
-  4: Sep 2023 – Feb 2024  (175,315 1m bars, 6 months)
-  5: Mar 2024 – Aug 2024  (177,997 1m bars, 6 months)
-  6: Sep 2024 – Aug 2025  (352,039 1m bars, 12 months) ← 2 workers for verification
-
-  NOTE: Gap from Feb 2023 – Aug 2023 (no TradingView data available)
+  4: Feb 2023 – Aug 2023  (208,060 1m bars, 7 months)
+  5: Sep 2023 – Feb 2024  (175,315 1m bars, 6 months)
+  6: Mar 2024 – Aug 2024  (177,997 1m bars, 6 months)
+  7: Sep 2024 – Aug 2025  (352,039 1m bars, 12 months) ← 2 workers for verification
 
 Each period runs the IDENTICAL strategy, configuration, and gates.
 Results are aggregated at the end with cross-period verification.
 
-For Period 6 (12 months), we run 2 independent workers on the same data
+For Period 7 (12 months), we run 2 independent workers on the same data
 to cross-verify results are deterministic (same trades, same PnL).
 
 CROSS-VERIFICATION:
@@ -69,9 +68,8 @@ if str(PROJECT_DIR) not in sys.path:
 TV_DIR = REPO_DIR / "data" / "tradingview"
 
 # NOTE: The file "Feb (2023) - September (2023) (6-Months).txt" is MISLABELED.
-# Its actual content is Sep 2022 - Feb 2023 (duplicate of Period 3 with more data).
-# We use it as Period 3 since it has 174K bars vs Period 3's 146K bars.
-# There is a DATA GAP from Feb 2023 through Aug 2023 — no TradingView file covers it.
+# Its actual content is Sep 2022 - Feb 2023 (same range as Period 3 but more complete).
+# We use it as Period 3 since it has 174K bars vs the Jan-cutoff file with 146K.
 
 PERIODS = {
     1: {
@@ -96,25 +94,32 @@ PERIODS = {
     },
     4: {
         "name": "Period 4",
+        "label": "Feb 2023 – Aug 2023",
+        "data_file": str(TV_DIR / "Feb 2023 - August 2023 ) (6-months).txt"),
+        "months": 7,
+        # Fills the former data gap — 208K bars
+    },
+    5: {
+        "name": "Period 5",
         "label": "Sep 2023 – Feb 2024",
         "data_file": str(TV_DIR / "September (2023) - Feb (2024) (6--Months).txt"),
         "months": 6,
     },
-    5: {
-        "name": "Period 5",
+    6: {
+        "name": "Period 6",
         "label": "Mar 2024 – Aug 2024",
         "data_file": str(TV_DIR / "March - August 2024 (6-Months).txt"),
         "months": 6,
     },
-    6: {
-        "name": "Period 6",
+    7: {
+        "name": "Period 7",
         "label": "Sep 2024 – Aug 2025",
         "data_file": str(TV_DIR / "September (2024) - August (2025) (12-months).txt"),
         "months": 12,
     },
 }
-# NOTE: Period numbering adjusted — 6 periods total (was 7 before dedup).
-# Period 6 is the 12-month file that gets dual-worker verification.
+# 7 periods covering Sep 2021 through Aug 2025 — CONTINUOUS coverage.
+# Period 7 is the 12-month file that gets dual-worker verification.
 
 # Output directory for per-period results
 OUTPUT_DIR = PROJECT_DIR / "logs" / "parallel_backtest"
@@ -674,24 +679,24 @@ def cross_verify_periods(results: List[Dict], data_hashes: Dict) -> Dict:
 
     # 6. Dual-worker determinism check for Period 7
     # If period 7 was run with dual workers (7 and 7b), verify they match
-    p6_results = [r for r in results if r.get("period_id") in (6, "6b") and r["status"] == "success"]
-    if len(p6_results) == 2:
-        a, b = p6_results[0]["aggregate"], p6_results[1]["aggregate"]
+    p7_results = [r for r in results if r.get("period_id") in (7, "7b") and r["status"] == "success"]
+    if len(p7_results) == 2:
+        a, b = p7_results[0]["aggregate"], p7_results[1]["aggregate"]
         trades_match = a.get("total_trades") == b.get("total_trades")
         pnl_match = abs(a.get("total_pnl", 0) - b.get("total_pnl", 0)) < 0.01
         wr_match = a.get("win_rate") == b.get("win_rate")
-        checks["period6_dual_worker"] = {
+        checks["period7_dual_worker"] = {
             "passed": trades_match and pnl_match and wr_match,
             "worker_a_trades": a.get("total_trades"),
             "worker_b_trades": b.get("total_trades"),
             "worker_a_pnl": a.get("total_pnl"),
             "worker_b_pnl": b.get("total_pnl"),
-            "description": "Period 6 dual-worker determinism: identical trades and PnL",
+            "description": "Period 7 dual-worker determinism: identical trades and PnL",
         }
     else:
-        checks["period6_dual_worker"] = {
+        checks["period7_dual_worker"] = {
             "passed": True,
-            "description": "Period 6 dual-worker check skipped (single worker or not run)",
+            "description": "Period 7 dual-worker check skipped (single worker or not run)",
         }
 
     return checks
