@@ -154,19 +154,19 @@ class ScaleOutConfig:
     """
     total_contracts: int = 2
 
-    # Contract 1 — Trail-from-profit (Variant C, validated Feb 2026)
+    # Contract 1 — B:5 bars time-based exit (validated Mar 2026, PF 1.81)
     c1_contracts: int = 1
-    c1_profit_threshold_pts: float = 3.0    # Activate trailing once profit >= this
-    c1_trail_distance_pts: float = 2.5      # Trail distance from HWM
-    c1_max_bars_fallback: int = 12          # Fallback market exit if trail never activates
+    c1_time_exit_bars: int = 5             # Exit C1 at market after N bars if profitable
+    c1_max_bars_fallback: int = 12         # Fallback: exit at market if still profitable after N bars
 
-    # Legacy: Time-based exit (archived, use for A/B testing only)
-    c1_time_exit_bars: int = 10             # Old: exit C1 after N bars if profitable
+    # Legacy: Trail-from-profit params (archived, use for A/B testing only)
+    c1_profit_threshold_pts: float = 3.0   # Archived: trailing activation threshold
+    c1_trail_distance_pts: float = 2.5     # Archived: trail distance from HWM
 
     # Contract 2 — Runner
     c2_contracts: int = 1
     c2_move_stop_to_breakeven: bool = True
-    c2_breakeven_buffer_points: float = 1.0   # Entry + 1pt = guaranteed small win
+    c2_breakeven_buffer_points: float = 2.0   # Entry + 2pts = avoids stop-hunting at exact entry (Osler 2005)
     c2_trailing_stop_enabled: bool = True
     c2_trailing_stop_type: str = "atr"        # "atr", "fixed", "swing"
     c2_trailing_atr_multiplier: float = 2.0
@@ -181,6 +181,11 @@ class ScaleOutConfig:
     # "D" = Current/immediate: BE at entry+1 the instant C1 exits (original behavior)
     c2_be_variant: str = "B"                  # Default: delayed BE to prevent stolen runners
     c2_be_delay_multiplier: float = 1.5       # Variant B: MFE threshold = stop_distance × this
+
+    # Adaptive Exit Configuration (regime-aware parameters)
+    # Requires walk-forward validation before enabling in production.
+    # Research: Kaminski & Lo (2014), Nystrup et al. (2017) — 2-param adaptation optimal
+    adaptive_exits_enabled: bool = False      # Enable regime-adaptive BE + trail (requires walk-forward validation)
 
 
 @dataclass
