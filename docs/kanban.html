@@ -3,16 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NQ Bot — Algo Trading Kanban</title>
+  <title>NQ Bot — Algo Trading To-Do List</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0e1a; }
+    body { background: #FDFBF9; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
     ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: #0d1221; }
-    ::-webkit-scrollbar-thumb { background: #1e2a4a; border-radius: 3px; }
+    ::-webkit-scrollbar-track { background: #FAF7F4; }
+    ::-webkit-scrollbar-thumb { background: #DDD0C0; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #C4AD93; }
   </style>
 </head>
 <body>
@@ -21,116 +25,90 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
+    // ── Theme ──
+    const THEME = {
+      bg: "#FDFBF9", surface: "#FFFFFF", surfaceAlt: "#FAF7F4",
+      border: "#E8DDD3", borderLight: "#F0EAE3",
+      text: "#3D2E22", textSecondary: "#8B7355", textMuted: "#B8A48E",
+      accent: "#8B6914", accentSoft: "#F5ECD7",
+      brown: { 900:"#3D2E22", 700:"#5C4333", 500:"#8B7355", 400:"#A89070", 300:"#C4AD93", 200:"#DDD0C0", 100:"#EDE5DA", 50:"#F7F3EE" },
+    };
+
+    const P_COLORS = {
+      High:   { bg:"#FDF0EC", text:"#C53D1B", border:"#F4C4B3", dot:"#E25822", cardBg:"#FEF7F5", cardBorder:"#F5D5CA" },
+      Medium: { bg:"#FEF6E7", text:"#92670A", border:"#F0D68A", dot:"#C49A2A", cardBg:"#FFFBF2", cardBorder:"#F2E4C3" },
+      Low:    { bg:"#EDF6F0", text:"#2D7A4F", border:"#A8D5B8", dot:"#3DA66A", cardBg:"#F5FAF7", cardBorder:"#C8E4D2" },
+    };
+
+    const COL_STYLES = {
+      "To Do":       { accent: THEME.brown[500], label: "#8B7355", icon: "○" },
+      "In Progress": { accent: THEME.accent,     label: "#8B6914", icon: "◑" },
+      "Done":        { accent: "#3DA66A",        label: "#2D7A4F", icon: "●" },
+    };
+
     const COLS = ["To Do", "In Progress", "Done"];
     const PRIORITIES = ["High", "Medium", "Low"];
-    const P_COLOR = { High: "#ef4444", Medium: "#f59e0b", Low: "#22c55e" };
 
     const DEFAULT_TASKS = [
-      {
-        id: "t1", col: "To Do", priority: "High",
-        title: "IBKR Auto-Launch & Self-Authentication System",
-        desc: "Build a fully automated startup pipeline: headless IBKR Client Portal Gateway launch, credential injection, session keepalive, health-check polling, and relaunch-on-failure logic. Bot must be able to cold-start and re-authenticate without manual intervention."
-      },
-      {
-        id: "t2", col: "To Do", priority: "High",
-        title: "HTF-Bearish Long Filter Correction",
-        desc: "Implement highest-confidence logic correction: block long entries when HTF bias is bearish. This is a logic fix, not an optimisation — implement immediately."
-      },
-      {
-        id: "t3", col: "To Do", priority: "High",
-        title: "Max Stop Gate Forensic Analysis",
-        desc: "Determine why 30pt stop cap is blocking high-PF trades (PF ~3.00, avg MFE ~66pts). Compare stop formula output vs. structural stop below sweep low on blocked trade subset."
-      },
-      {
-        id: "t4", col: "To Do", priority: "High",
-        title: "Multi-Signal Architecture Audit",
-        desc: "Map all 14 knowledge base concepts against implementation status. Design four-layer decision engine: HTF Gate → Signal Detection → Confluence Scoring → UCL Routing."
-      },
-      {
-        id: "t5", col: "To Do", priority: "Medium",
-        title: "High-Volatility Regime Filter Investigation",
-        desc: "Investigate before implementing. Must assess impact on fat-tail capture — filters that improve average-trade metrics can destroy PnL by clipping rare large winners."
-      },
-      {
-        id: "t6", col: "To Do", priority: "Medium",
-        title: "FVG Detector Integration into Confluence Engine",
-        desc: "Promote fvg_detector.py from a standalone module to a scored confluence input. Define OB + FVG overlap bonus and validate contribution to signal quality."
-      },
-      {
-        id: "t7", col: "To Do", priority: "Medium",
-        title: "Signal Source Evaluation: Sweep vs. Confluence",
-        desc: "Sweep signals PF ~1.74 vs. confluence signals PF ~0.99. Determine whether confluence signals should be redesigned or removed. Data-driven decision required."
-      },
-      {
-        id: "t8", col: "To Do", priority: "Low",
-        title: "HAR-RV Volatility Forecasting Module",
-        desc: "Implement Corsi (2009) HAR-RV model from 5-minute MNQ returns. Rolling daily/weekly/monthly RV components. Replace ATR-only stop sizing with model-informed dynamic sizing."
-      },
-      {
-        id: "t9", col: "In Progress", priority: "High",
-        title: "Paper Trading on Tradovate Demo",
-        desc: "System is v2.0.0-rc1 — PAPER TRADING APPROVED. Deploy bot against Tradovate demo account. Monitor live PnL vs backtest baseline (PF 1.73, 61.9% WR, $4,264/month avg). Watch for fill slippage vs. calibrated model."
-      },
-      {
-        id: "t9b", col: "In Progress", priority: "High",
-        title: "IBKR Live Data Connector",
-        desc: "Sub-modules partially built. Complete WebSocket feed integration, ensure process_bar() interface parity between historical CSV replay and live feed. Validate tick format match."
-      },
-      {
-        id: "t10", col: "In Progress", priority: "High",
-        title: "UCL v2 Routing Audit",
-        desc: "UCL v2 added lower-quality trades that diluted metrics. Audit watch-state routing thresholds. Confirm signals ≥0.75 route to immediate entry, not watch state."
-      },
-      {
-        id: "t11", col: "Done", priority: "High",
-        title: "Causal Replay Engine",
-        desc: "CausalReplayEngine / ReplaySimulator built. HTF bars constructed incrementally from 1-minute source data. Look-ahead bias eliminated."
-      },
-      {
-        id: "t12", col: "Done", priority: "High",
-        title: "UCL v2 Implementation",
-        desc: "Score 0.60–0.74 → watch state (RECLAIM → FVG_FORM → FVG_TAP). Score ≥0.75 → immediate entry with FVG boost (+0.05). Wide-stop sweeps → tight-stop conversion."
-      },
-      {
-        id: "t13", col: "Done", priority: "Medium",
-        title: "607-Trade Profile Analysis",
-        desc: "Fat-tail dependency confirmed: top 10% of trades = ~241% of profit. C2 runner = ~60% total PnL. Sweep PF ~1.74 vs. confluence PF ~0.99. HTF gate identified as highest-value filter."
-      },
+      // TO DO
+      { id:"td1", col:"To Do", priority:"High", title:"IBKR Auto-Launch & Self-Authentication", desc:"Build fully automated startup pipeline: headless IBKR Gateway launch, credential injection, session keepalive, health-check polling, and relaunch-on-failure." },
+      { id:"td2", col:"To Do", priority:"High", title:"Test C2 Trail at 2.5× ATR", desc:"Current C2 runner uses 2.0× ATR trail. Backtest 2.5× multiplier to determine if wider trail captures more runner profit without giving back too much." },
+      { id:"td3", col:"To Do", priority:"High", title:"Paper Trade 500+ Trades Validation", desc:"Deploy bot against Tradovate demo account. Accumulate 500+ paper trades to validate backtest metrics (PF 1.73, 61.9% WR) under live market conditions." },
+      { id:"td4", col:"To Do", priority:"Medium", title:"Regime-Adaptive Exits (Post Walk-Forward)", desc:"Enable regime-aware C1/C2 exit parameters after walk-forward validation confirms stability. Trending markets get wider trails, choppy markets get tighter exits." },
+      { id:"td5", col:"To Do", priority:"Medium", title:"HAR-RV Volatility Forecasting Module", desc:"Implement Corsi (2009) HAR-RV model from 5-min MNQ returns. Rolling daily/weekly/monthly RV components. Replace ATR-only stop sizing with model-informed dynamic sizing." },
+      { id:"td6", col:"To Do", priority:"Medium", title:"High-Volatility Regime Filter Investigation", desc:"Investigate before implementing. Must assess impact on fat-tail capture — filters that improve average-trade metrics can destroy PnL by clipping rare large winners." },
+
+      // IN PROGRESS
+      { id:"ip1", col:"In Progress", priority:"High", title:"7-Period Parallel Backtest (Running)", desc:"All 7 periods (Sep 2021–Aug 2025, ~1.44M bars) running in parallel via parallel_backtest.py. 8 workers active including dual-worker verification on Period 7. ETA ~3 hours." },
+      { id:"ip2", col:"In Progress", priority:"High", title:"IBKR Live Data Connector", desc:"Sub-modules partially built. Complete WebSocket feed integration, ensure process_bar() interface parity between historical CSV replay and live feed." },
+
+      // DONE
+      { id:"d1", col:"Done", priority:"High", title:"Causality Audit + OB/FVG Look-Ahead Fix", desc:"Comprehensive audit found OB and FVG detection used current bar as displacement confirmation (look-ahead bias). Fixed by shifting detection window back by 1 bar. 9 other areas verified strictly causal." },
+      { id:"d2", col:"Done", priority:"High", title:"Parallel Multi-Period Backtest Runner", desc:"Built parallel_backtest.py — Python multiprocessing engine running all 7 periods simultaneously (~3hr vs ~15hr sequential). SHA-256 integrity, dual-worker determinism for 12-month periods." },
+      { id:"d3", col:"Done", priority:"High", title:"Continuous Data Coverage (Sep 2021–Aug 2025)", desc:"Filled former Feb–Aug 2023 data gap. 7 periods now cover 4 continuous years with ~1.44M 1-minute bars from TradingView exports." },
+      { id:"d4", col:"Done", priority:"High", title:"CausalReplayEngine + HTF Causal Delivery", desc:"Built CausalReplayEngine for strict bar-by-bar replay. Signal at bar N → entry at bar N+1 open + adversarial slippage. HTF bars only fed after completion. Zero look-ahead." },
+      { id:"d5", col:"Done", priority:"High", title:"C1 Trail-from-Profit Exit (Variant C)", desc:"Replaced old Time 10 bars exit. C1 activates 2.5pt trailing stop once unrealized profit >= 3.0pts. Validated across 6/6 months profitable. PF 1.61." },
+      { id:"d6", col:"Done", priority:"High", title:"2-Contract Scale-Out System", desc:"C1 (time-based exit) + C2 (ATR trailing runner). C2 captures ~60% of total PnL via fat-tail runners. BE buffer +2pts avoids stop-hunting." },
+      { id:"d7", col:"Done", priority:"High", title:"High-Conviction Filter (Score ≥ 0.75 + Stop ≤ 30pts)", desc:"Two non-negotiable hard gates enforced in main.py. Only intersection of tight stops + strong signals produces durable edge. HTF strength gate >= 0.3." },
+      { id:"d8", col:"Done", priority:"High", title:"Multi-Timeframe HTF Bias Engine", desc:"6 timeframes (5m/15m/30m/1H/4H/1D) built causally from 1m data. Directional consensus gates all entries. Staleness limits per TF." },
+      { id:"d9", col:"Done", priority:"High", title:"Liquidity Sweep Detector", desc:"Institutional stop-hunt detection at PDH/PDL, session H/L, PWH/PWL, VWAP, round numbers. Three entry modes: signal-only, sweep-only, confluence (+0.05 boost)." },
+      { id:"d10", col:"Done", priority:"High", title:"UCL v2 Implementation", desc:"Score 0.60–0.74 → watch state (RECLAIM → FVG_FORM → FVG_TAP). Score ≥0.75 → immediate entry with FVG boost (+0.05). Wide-stop sweeps → tight-stop conversion." },
+      { id:"d11", col:"Done", priority:"High", title:"Kill Switch Redesign (Removed Consecutive-Loss)", desc:"Forensic analysis proved consecutive-loss kill switch was net negative — clipped recovery trades. Removed entirely. Daily drawdown limit retained." },
+      { id:"d12", col:"Done", priority:"High", title:"C2 Delayed Breakeven (Variant B)", desc:"C2 BE stop activates after delay instead of immediately. Prevents premature stop-outs on pullbacks. +2pt BE buffer to survive stop-hunting wicks." },
+      { id:"d13", col:"Done", priority:"Medium", title:"607-Trade Profile Analysis", desc:"Fat-tail dependency confirmed: top 10% of trades = ~241% of profit. C2 runner = ~60% total PnL. Sweep PF ~1.74 vs. confluence PF ~0.99." },
+      { id:"d14", col:"Done", priority:"Medium", title:"Security Audit (3 Phases)", desc:"Full security audit across API keys, authentication, data pipeline, and broker connections. All findings documented." },
+      { id:"d15", col:"Done", priority:"Medium", title:"Dashboard + Website (GitHub Pages)", desc:"Live dashboard with trade metrics, kanban board, and weekly reports deployed to GitHub Pages. Real-time stats JSON feed." },
     ];
 
     function genId() { return "t" + Date.now() + Math.random().toString(36).slice(2, 6); }
-
-    const STORAGE_KEY = "algo-kanban-v1";
+    const STORAGE_KEY = "algo-kanban-v3";
 
     function App() {
-      const [tasks, setTasks] = useState(() => {
-        try {
-          const saved = localStorage.getItem(STORAGE_KEY);
-          return saved ? JSON.parse(saved) : DEFAULT_TASKS;
-        } catch (_) { return DEFAULT_TASKS; }
-      });
+      const [tasks, setTasks] = useState(DEFAULT_TASKS);
+      const [loaded, setLoaded] = useState(false);
       const [dragging, setDragging] = useState(null);
       const [dragOver, setDragOver] = useState(null);
       const [modal, setModal] = useState(null);
-      const [aiLoading, setAiLoading] = useState(false);
-      const [aiSuggestions, setAiSuggestions] = useState([]);
-      const [aiError, setAiError] = useState(null);
-      const [saveStatus, setSaveStatus] = useState("saved");
-      const [apiKey, setApiKey] = useState("");
+      const [doneExpanded, setDoneExpanded] = useState(false);
+      const DONE_PREVIEW = 5;
 
       useEffect(() => {
-        setSaveStatus("saving");
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) setTasks(JSON.parse(stored));
+        } catch (_) {}
+        setLoaded(true);
+      }, []);
+
+      useEffect(() => {
+        if (!loaded) return;
         const t = setTimeout(() => {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-            setSaveStatus("saved");
-          } catch (_) { setSaveStatus("error"); }
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); } catch (_) {}
         }, 600);
         return () => clearTimeout(t);
-      }, [tasks]);
+      }, [tasks, loaded]);
 
       const moveTask = (id, col) => setTasks(prev => prev.map(t => t.id === id ? { ...t, col } : t));
-
       const saveTask = (task) => {
         setTasks(prev => {
           const exists = prev.find(t => t.id === task.id);
@@ -138,123 +116,136 @@
         });
         setModal(null);
       };
-
       const deleteTask = (id) => { setTasks(prev => prev.filter(t => t.id !== id)); setModal(null); };
-
       const handleDrop = (col) => {
         if (dragging && dragging !== col) moveTask(dragging, col);
         setDragging(null); setDragOver(null);
       };
 
-      const fetchAISuggestions = async () => {
-        setAiLoading(true); setAiError(null); setAiSuggestions([]);
-        const summary = COLS.map(c => {
-          const ts = tasks.filter(t => t.col === c).map(t => `- [${t.priority}] ${t.title}`).join("\n");
-          return `${c}:\n${ts || "  (empty)"}`;
-        }).join("\n\n");
-        try {
-          const res = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-            body: JSON.stringify({
-              model: "claude-sonnet-4-6",
-              max_tokens: 1000,
-              messages: [{
-                role: "user",
-                content: `You are an expert systematic trading system architect. Analyse this Kanban board for an institutional-grade NQ/MNQ futures algo trading bot and suggest the next 3 high-priority tasks that should be added or actioned. Be specific, technical, and concise. Respond ONLY with a JSON array of exactly 3 objects: [{"title": "...", "priority": "High|Medium|Low", "desc": "..."}]. No markdown, no preamble.\n\nBoard state:\n${summary}`
-              }]
-            })
-          });
-          const data = await res.json();
-          const text = data.content?.find(b => b.type === "text")?.text || "[]";
-          const clean = text.replace(/```json|```/g, "").trim();
-          setAiSuggestions(JSON.parse(clean));
-        } catch (e) {
-          setAiError("AI suggestion failed. Check API key and connectivity.");
-        }
-        setAiLoading(false);
-      };
-
-      const addSuggestion = (s) => {
-        setTasks(prev => [...prev, { ...s, id: genId(), col: "To Do" }]);
-        setAiSuggestions(prev => prev.filter(x => x !== s));
-      };
+      const TaskCard = ({ task }) => (
+        React.createElement('div', {
+          draggable: true,
+          onDragStart: () => setDragging(task.id),
+          onDragEnd: () => { setDragging(null); setDragOver(null); },
+          onClick: () => setModal({ mode: "edit", task: { ...task } }),
+          style: {
+            background: P_COLORS[task.priority].cardBg,
+            border: `1px solid ${P_COLORS[task.priority].cardBorder}`,
+            borderLeft: `4px solid ${P_COLORS[task.priority].dot}`,
+            borderRadius: 10, padding: "14px 16px", marginBottom: 10,
+            cursor: "grab", transition: "all 0.2s ease",
+            boxShadow: "0 1px 3px rgba(61,46,34,0.04)",
+          },
+          onMouseEnter: e => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(61,46,34,0.08)"; e.currentTarget.style.transform = "translateY(-1px)"; },
+          onMouseLeave: e => { e.currentTarget.style.boxShadow = "0 1px 3px rgba(61,46,34,0.04)"; e.currentTarget.style.transform = "translateY(0)"; },
+        },
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
+            <div style={{ fontSize:13, fontWeight:600, color:THEME.text, lineHeight:1.5, flex:1 }}>{task.title}</div>
+            <span style={{
+              fontSize:9, color:P_COLORS[task.priority].text,
+              background:P_COLORS[task.priority].bg,
+              border:`1px solid ${P_COLORS[task.priority].border}`,
+              borderRadius:4, padding:"2px 7px", whiteSpace:"nowrap",
+              letterSpacing:1, fontWeight:600,
+            }}>{task.priority.toUpperCase()}</span>
+          </div>,
+          task.desc && <div style={{
+            fontSize:11.5, color:THEME.textSecondary, marginTop:8, lineHeight:1.6,
+            display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden",
+          }}>{task.desc}</div>
+        )
+      );
 
       return (
-        <div style={{ minHeight: "100vh", background: "#0a0e1a", color: "#e2e8f0", fontFamily: "'IBM Plex Mono', 'Courier New', monospace", padding: "24px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div style={{ minHeight:"100vh", background:THEME.bg, color:THEME.text, fontFamily:"'Inter', system-ui, -apple-system, sans-serif", padding:"32px 24px" }}>
+          {/* Header */}
+          <div style={{ maxWidth:1400, margin:"0 auto 28px", display:"flex", alignItems:"flex-end", justifyContent:"space-between", flexWrap:"wrap", gap:16 }}>
             <div>
-              <div style={{ fontSize: 11, color: "#3b82f6", letterSpacing: 3, textTransform: "uppercase", marginBottom: 4 }}>NQ BOT SYSTEM BUILD</div>
-              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#f1f5f9" }}>Algo Trading Kanban</h1>
+              <div style={{ fontSize:10.5, color:THEME.accent, letterSpacing:3.5, textTransform:"uppercase", fontWeight:600, marginBottom:6 }}>NQ BOT SYSTEM BUILD</div>
+              <h1 style={{ margin:0, fontSize:26, fontWeight:700, color:THEME.brown[900], letterSpacing:-0.5 }}>Algo Trading To-Do List</h1>
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 10, color: saveStatus === "saved" ? "#22c55e" : saveStatus === "saving" ? "#f59e0b" : "#ef4444", letterSpacing: 1 }}>
-                {saveStatus === "saved" ? "● SAVED" : saveStatus === "saving" ? "● SAVING..." : "● SAVE ERROR"}
-              </span>
-              <input value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Anthropic API key..."
-                type="password"
-                style={{ background: "#111827", border: "1px solid #1e2a4a", color: "#f1f5f9", borderRadius: 6, padding: "7px 10px", fontSize: 11, fontFamily: "inherit", width: 180 }} />
-              <button onClick={fetchAISuggestions} disabled={aiLoading || !apiKey}
-                style={{ background: aiLoading || !apiKey ? "#1e2a4a" : "#1d4ed8", color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 12, cursor: aiLoading || !apiKey ? "not-allowed" : "pointer", letterSpacing: 1 }}>
-                {aiLoading ? "ANALYSING..." : "⚡ AI SUGGEST"}
-              </button>
+            <div style={{ display:"flex", gap:16, alignItems:"center" }}>
+              <div style={{ fontSize:11, color:THEME.textMuted, background:THEME.surfaceAlt, border:`1px solid ${THEME.borderLight}`, borderRadius:8, padding:"8px 14px", fontWeight:500 }}>
+                <span style={{ color:"#3DA66A", marginRight:6 }}>●</span>
+                {tasks.filter(t => t.col === "Done").length} completed
+                <span style={{ margin:"0 8px", color:THEME.border }}>|</span>
+                <span style={{ color:THEME.accent, marginRight:6 }}>◑</span>
+                {tasks.filter(t => t.col === "In Progress").length} active
+                <span style={{ margin:"0 8px", color:THEME.border }}>|</span>
+                <span style={{ color:THEME.brown[400], marginRight:6 }}>○</span>
+                {tasks.filter(t => t.col === "To Do").length} queued
+              </div>
             </div>
           </div>
 
-          {(aiSuggestions.length > 0 || aiError) && (
-            <div style={{ marginBottom: 20, background: "#0f172a", border: "1px solid #1d4ed8", borderRadius: 8, padding: 16 }}>
-              <div style={{ fontSize: 11, color: "#3b82f6", letterSpacing: 2, marginBottom: 12 }}>AI RECOMMENDATIONS</div>
-              {aiError && <div style={{ color: "#ef4444", fontSize: 12 }}>{aiError}</div>}
-              {aiSuggestions.map((s, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 0", borderBottom: i < aiSuggestions.length - 1 ? "1px solid #1e2a4a" : "none" }}>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontSize: 11, color: P_COLOR[s.priority], fontWeight: 700, marginRight: 8 }}>{s.priority.toUpperCase()}</span>
-                    <span style={{ fontSize: 13, color: "#f1f5f9" }}>{s.title}</span>
-                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>{s.desc}</div>
-                  </div>
-                  <button onClick={() => addSuggestion(s)}
-                    style={{ background: "#14532d", color: "#22c55e", border: "1px solid #22c55e", borderRadius: 4, padding: "4px 10px", fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }}>
-                    + ADD
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+          {/* Columns */}
+          <div style={{ maxWidth:1400, margin:"0 auto", display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:20 }}>
             {COLS.map(col => {
-              const colTasks = tasks.filter(t => t.col === col);
+              const allColTasks = tasks.filter(t => t.col === col);
+              const isDone = col === "Done";
+              const visibleTasks = isDone && !doneExpanded ? allColTasks.slice(0, DONE_PREVIEW) : allColTasks;
+              const hiddenCount = isDone ? allColTasks.length - DONE_PREVIEW : 0;
               const isOver = dragOver === col;
+              const colStyle = COL_STYLES[col];
+
               return (
                 <div key={col}
                   onDragOver={e => { e.preventDefault(); setDragOver(col); }}
                   onDragLeave={() => setDragOver(null)}
                   onDrop={() => handleDrop(col)}
-                  style={{ background: isOver ? "#0f1f3d" : "#0d1221", border: `1px solid ${isOver ? "#3b82f6" : "#1e2a4a"}`, borderRadius: 10, padding: 14, minHeight: 400, transition: "border-color 0.15s, background 0.15s" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                    <div>
-                      <span style={{ fontSize: 11, letterSpacing: 2, color: col === "To Do" ? "#94a3b8" : col === "In Progress" ? "#3b82f6" : "#22c55e", textTransform: "uppercase", fontWeight: 700 }}>{col}</span>
-                      <span style={{ marginLeft: 8, fontSize: 11, background: "#1e2a4a", color: "#94a3b8", borderRadius: 10, padding: "1px 7px" }}>{colTasks.length}</span>
+                  style={{
+                    background: isOver ? THEME.accentSoft : THEME.surfaceAlt,
+                    border: `1px solid ${isOver ? THEME.accent : THEME.borderLight}`,
+                    borderRadius: 14, padding: 18, minHeight: 420,
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  {/* Column Header */}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, paddingBottom:12, borderBottom:`1px solid ${THEME.borderLight}` }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <span style={{ fontSize:14, color:colStyle.accent }}>{colStyle.icon}</span>
+                      <span style={{ fontSize:11.5, letterSpacing:2, color:colStyle.label, textTransform:"uppercase", fontWeight:700 }}>{col}</span>
+                      <span style={{ fontSize:11, background:THEME.brown[100], color:THEME.brown[500], borderRadius:12, padding:"1px 9px", fontWeight:600 }}>{allColTasks.length}</span>
                     </div>
-                    <button onClick={() => setModal({ mode: "add", task: { id: genId(), col, priority: "Medium", title: "", desc: "" } })}
-                      style={{ background: "none", border: "1px solid #1e2a4a", color: "#94a3b8", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontSize: 16, lineHeight: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+                    <button
+                      onClick={() => setModal({ mode:"add", task:{ id:genId(), col, priority:"Medium", title:"", desc:"" } })}
+                      style={{
+                        background:THEME.surface, border:`1px solid ${THEME.border}`,
+                        color:THEME.brown[400], borderRadius:6, width:26, height:26,
+                        cursor:"pointer", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = THEME.accentSoft; e.currentTarget.style.color = THEME.accent; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = THEME.surface; e.currentTarget.style.color = THEME.brown[400]; }}
+                    >+</button>
                   </div>
-                  {colTasks.map(task => (
-                    <div key={task.id} draggable
-                      onDragStart={() => setDragging(task.id)}
-                      onDragEnd={() => { setDragging(null); setDragOver(null); }}
-                      onClick={() => setModal({ mode: "edit", task: { ...task } })}
-                      style={{ background: "#111827", border: "1px solid #1e2a4a", borderLeft: `3px solid ${P_COLOR[task.priority]}`, borderRadius: 6, padding: "10px 12px", marginBottom: 10, cursor: "grab", transition: "border-color 0.15s", userSelect: "none" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#f1f5f9", lineHeight: 1.4, flex: 1 }}>{task.title}</div>
-                        <span style={{ fontSize: 9, color: P_COLOR[task.priority], border: `1px solid ${P_COLOR[task.priority]}`, borderRadius: 3, padding: "1px 5px", whiteSpace: "nowrap", letterSpacing: 1 }}>{task.priority.toUpperCase()}</span>
-                      </div>
-                      {task.desc && <div style={{ fontSize: 10, color: "#64748b", marginTop: 6, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{task.desc}</div>}
-                    </div>
-                  ))}
+
+                  {visibleTasks.map(task => <TaskCard key={task.id} task={task} />)}
+
+                  {isDone && hiddenCount > 0 && (
+                    <button
+                      onClick={() => setDoneExpanded(!doneExpanded)}
+                      style={{
+                        width:"100%",
+                        background: doneExpanded ? THEME.surface : "linear-gradient(135deg, #F5ECD7 0%, #EDE5DA 100%)",
+                        border:`1px solid ${THEME.border}`, borderRadius:10,
+                        padding:"12px 16px", cursor:"pointer", fontSize:12,
+                        fontWeight:600, color:THEME.accent, letterSpacing:0.5,
+                        marginTop:4, transition:"all 0.2s", fontFamily:"inherit",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = THEME.accentSoft; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = doneExpanded ? THEME.surface : "linear-gradient(135deg, #F5ECD7 0%, #EDE5DA 100%)"; }}
+                    >
+                      {doneExpanded ? "Show Less ▲" : `Show ${hiddenCount} More ▼`}
+                    </button>
+                  )}
                 </div>
               );
             })}
+          </div>
+
+          {/* Footer */}
+          <div style={{ maxWidth:1400, margin:"24px auto 0", textAlign:"center" }}>
+            <div style={{ fontSize:10, color:THEME.textMuted, letterSpacing:2 }}>NW TRADING SYSTEMS — MNQ FUTURES</div>
           </div>
 
           {modal && <TaskModal modal={modal} onSave={saveTask} onDelete={deleteTask} onClose={() => setModal(null)} />}
@@ -267,38 +258,48 @@
       const set = (k, v) => setTask(p => ({ ...p, [k]: v }));
 
       return (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16 }}
-          onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-          <div style={{ background: "#0d1221", border: "1px solid #1e2a4a", borderRadius: 10, padding: 24, width: "100%", maxWidth: 520 }}>
-            <div style={{ fontSize: 11, color: "#3b82f6", letterSpacing: 2, marginBottom: 16 }}>{modal.mode === "add" ? "NEW TASK" : "EDIT TASK"}</div>
+        <div
+          style={{ position:"fixed", inset:0, background:"rgba(61,46,34,0.4)", backdropFilter:"blur(4px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:100, padding:16 }}
+          onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+        >
+          <div style={{ background:THEME.surface, border:`1px solid ${THEME.border}`, borderRadius:16, padding:28, width:"100%", maxWidth:520, boxShadow:"0 20px 60px rgba(61,46,34,0.15)" }}>
+            <div style={{ fontSize:11, color:THEME.accent, letterSpacing:2.5, marginBottom:20, fontWeight:600 }}>
+              {modal.mode === "add" ? "NEW TASK" : "EDIT TASK"}
+            </div>
             <input value={task.title} onChange={e => set("title", e.target.value)} placeholder="Task title..."
-              style={{ width: "100%", background: "#111827", border: "1px solid #1e2a4a", color: "#f1f5f9", borderRadius: 6, padding: "8px 12px", fontSize: 13, marginBottom: 12, boxSizing: "border-box", fontFamily: "inherit" }} />
+              style={{ width:"100%", background:THEME.surfaceAlt, border:`1px solid ${THEME.borderLight}`, color:THEME.text, borderRadius:10, padding:"10px 14px", fontSize:14, marginBottom:14, boxSizing:"border-box", fontFamily:"inherit", outline:"none" }}
+              onFocus={e => e.currentTarget.style.borderColor = THEME.accent}
+              onBlur={e => e.currentTarget.style.borderColor = THEME.borderLight}
+            />
             <textarea value={task.desc} onChange={e => set("desc", e.target.value)} placeholder="Description..." rows={4}
-              style={{ width: "100%", background: "#111827", border: "1px solid #1e2a4a", color: "#f1f5f9", borderRadius: 6, padding: "8px 12px", fontSize: 12, marginBottom: 12, boxSizing: "border-box", fontFamily: "inherit", resize: "vertical" }} />
-            <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 120 }}>
-                <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1, marginBottom: 6 }}>PRIORITY</div>
+              style={{ width:"100%", background:THEME.surfaceAlt, border:`1px solid ${THEME.borderLight}`, color:THEME.text, borderRadius:10, padding:"10px 14px", fontSize:12.5, marginBottom:14, boxSizing:"border-box", fontFamily:"inherit", resize:"vertical", outline:"none", lineHeight:1.6 }}
+              onFocus={e => e.currentTarget.style.borderColor = THEME.accent}
+              onBlur={e => e.currentTarget.style.borderColor = THEME.borderLight}
+            />
+            <div style={{ display:"flex", gap:12, marginBottom:24, flexWrap:"wrap" }}>
+              <div style={{ flex:1, minWidth:120 }}>
+                <div style={{ fontSize:10, color:THEME.textMuted, letterSpacing:1.5, marginBottom:6, fontWeight:600 }}>PRIORITY</div>
                 <select value={task.priority} onChange={e => set("priority", e.target.value)}
-                  style={{ width: "100%", background: "#111827", border: "1px solid #1e2a4a", color: "#f1f5f9", borderRadius: 6, padding: "7px 10px", fontSize: 12, fontFamily: "inherit" }}>
+                  style={{ width:"100%", background:THEME.surfaceAlt, border:`1px solid ${THEME.borderLight}`, color:THEME.text, borderRadius:10, padding:"8px 12px", fontSize:12.5, fontFamily:"inherit" }}>
                   {PRIORITIES.map(p => <option key={p}>{p}</option>)}
                 </select>
               </div>
-              <div style={{ flex: 1, minWidth: 120 }}>
-                <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 1, marginBottom: 6 }}>COLUMN</div>
+              <div style={{ flex:1, minWidth:120 }}>
+                <div style={{ fontSize:10, color:THEME.textMuted, letterSpacing:1.5, marginBottom:6, fontWeight:600 }}>COLUMN</div>
                 <select value={task.col} onChange={e => set("col", e.target.value)}
-                  style={{ width: "100%", background: "#111827", border: "1px solid #1e2a4a", color: "#f1f5f9", borderRadius: 6, padding: "7px 10px", fontSize: 12, fontFamily: "inherit" }}>
+                  style={{ width:"100%", background:THEME.surfaceAlt, border:`1px solid ${THEME.borderLight}`, color:THEME.text, borderRadius:10, padding:"8px 12px", fontSize:12.5, fontFamily:"inherit" }}>
                   {COLS.map(c => <option key={c}>{c}</option>)}
                 </select>
               </div>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}>
               {modal.mode === "edit"
-                ? <button onClick={() => onDelete(task.id)} style={{ background: "none", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 6, padding: "8px 16px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>DELETE</button>
+                ? <button onClick={() => onDelete(task.id)} style={{ background:"none", border:"1px solid #E25822", color:"#E25822", borderRadius:10, padding:"9px 18px", fontSize:12, cursor:"pointer", fontFamily:"inherit", fontWeight:600, letterSpacing:0.5 }}>DELETE</button>
                 : <div />}
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={onClose} style={{ background: "none", border: "1px solid #1e2a4a", color: "#94a3b8", borderRadius: 6, padding: "8px 16px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>CANCEL</button>
+              <div style={{ display:"flex", gap:10 }}>
+                <button onClick={onClose} style={{ background:"none", border:`1px solid ${THEME.border}`, color:THEME.textSecondary, borderRadius:10, padding:"9px 18px", fontSize:12, cursor:"pointer", fontFamily:"inherit", fontWeight:600, letterSpacing:0.5 }}>CANCEL</button>
                 <button onClick={() => onSave(task)} disabled={!task.title.trim()}
-                  style={{ background: task.title.trim() ? "#1d4ed8" : "#1e2a4a", color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 12, cursor: task.title.trim() ? "pointer" : "not-allowed", fontFamily: "inherit" }}>SAVE</button>
+                  style={{ background: task.title.trim() ? THEME.accent : THEME.brown[200], color:"#FFF", border:"none", borderRadius:10, padding:"9px 20px", fontSize:12, cursor: task.title.trim() ? "pointer" : "not-allowed", fontFamily:"inherit", fontWeight:600, letterSpacing:0.5 }}>SAVE</button>
               </div>
             </div>
           </div>
@@ -306,8 +307,7 @@
       );
     }
 
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 </body>
 </html>
