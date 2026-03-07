@@ -7,7 +7,8 @@ every trade signal and execution decision. It cannot be bypassed.
 Design principles:
 1. The risk engine runs in its own evaluation loop
 2. It can ONLY reduce exposure, never increase it
-3. Kill switch operates on a separate logical path
+3. Kill switch operates on a separate logical path (drawdown-triggered only;
+   consecutive-loss kill switch removed — evidence showed net negative impact)
 4. All limits are HARD — no exceptions for "high confidence" signals
 """
 
@@ -193,22 +194,6 @@ class RiskEngine:
                 decision=RiskDecision.KILL_SWITCH,
                 max_contracts=0,
                 reason=f"Max drawdown: {self.state.current_drawdown_pct:.2f}%",
-                suggested_stop_distance=0,
-                suggested_target_distance=0,
-                risk_per_contract=0,
-                total_risk_dollars=0,
-            )
-
-        # === CONSECUTIVE LOSS CHECK ===
-        if self.state.consecutive_losses >= self.config.kill_switch_max_consecutive_losses:
-            self._activate_kill_switch(
-                f"Consecutive losses: {self.state.consecutive_losses}",
-                current_time,
-            )
-            return RiskAssessment(
-                decision=RiskDecision.KILL_SWITCH,
-                max_contracts=0,
-                reason=f"Consecutive losses: {self.state.consecutive_losses}",
                 suggested_stop_distance=0,
                 suggested_target_distance=0,
                 risk_per_contract=0,
@@ -468,27 +453,19 @@ class RiskEngine:
     def _deactivate_kill_switch(self) -> None:
         """Deactivate kill switch after cooldown.
 
-        Only reset consecutive_losses if that was the trigger.
-        If triggered by drawdown, the drawdown condition may still be
-        true and resetting losses would cause an immediate re-trigger
-        loop when the drawdown check fires again on the next
-        evaluate_trade() call.  Instead, reset the peak equity to
-        current equity so the drawdown percentage resets.
+        Only drawdown-triggered kill switches remain. Reset peak equity
+        to current equity so the drawdown percentage starts fresh after
+        cooldown (prevents immediate re-trigger loop).
         """
-        triggered_by_losses = "Consecutive losses" in self.state.kill_switch_reason
         self.state.kill_switch_active = False
         self.state.kill_switch_reason = ""
         self.state.kill_switch_resume_at = None
-        if triggered_by_losses:
-            # Reset consecutive losses to prevent immediate re-trigger
-            self.state.consecutive_losses = 0
-        else:
-            # Drawdown-triggered: reset peak equity to current equity
-            # so the drawdown percentage starts fresh after cooldown
-            self.state.peak_equity = self.state.current_equity
-            self.state.current_drawdown_pct = 0.0
-            self.state.max_drawdown_pct = max(self.state.max_drawdown_pct,
-                                               self.state.current_drawdown_pct)
+        # Drawdown-triggered: reset peak equity to current equity
+        # so the drawdown percentage starts fresh after cooldown
+        self.state.peak_equity = self.state.current_equity
+        self.state.current_drawdown_pct = 0.0
+        self.state.max_drawdown_pct = max(self.state.max_drawdown_pct,
+                                           self.state.current_drawdown_pct)
 
     def _can_resume(self, current_time: datetime) -> bool:
         """Check if kill switch cooldown has elapsed."""
