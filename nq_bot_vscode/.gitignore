@@ -1,0 +1,84 @@
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+
+# ── Virtual Environments ─────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── IDE / Editor ─────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Secrets & Credentials (NEVER COMMIT) ────────────────────
+.env
+.env.local
+.env.production
+*.pem
+*.key
+credentials.json
+token.json
+
+# ── Trading Data (too large / sensitive for git) ─────────────
+data/tradingview/*.csv
+data/tradingview/*.json
+data/backtest_results/
+data/live_logs/
+*.parquet
+*.h5
+*.hdf5
+
+# ── Backtest Outputs ─────────────────────────────────────────
+backtest_viz_data.json
+backtest_results_*.json
+equity_curve_*.json
+
+# ── Dashboard Generated Data ────────────────────────────────
+dashboard/viz_data.json
+dashboard/data_anomalies.json
+
+# ── Database ─────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+pg_data/
+
+# ── Logs ─────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── OS Files ─────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# ── Node (if dashboard uses npm) ─────────────────────────────
+node_modules/
+package-lock.json
+
+# ── Jupyter / Notebooks ──────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Coverage / Testing ───────────────────────────────────────
+htmlcov/
+.coverage
+.pytest_cache/
+.tox/

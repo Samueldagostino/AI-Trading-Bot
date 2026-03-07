@@ -1,0 +1,60 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# macOS specific
+.DS_Store
+
+# Virtual environments
+venv/
+.venv/
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# VSCode settings
+.vscode/
+
+# JetBrains IDEs settings
+.idea/
+
+# Other common exclusions
+*.pyd
+*.db
+*.sqlite3
+*.log
+
+# Generated backtest outputs
+backtest_viz_data.json
+
+# FirstRate data (large CSV files, not committed)
+nq_bot_vscode/data/firstrate/
+data/firstrate/raw/
+data/firstrate/historical/
+
+# Large archives
+*.zip
+
+# Large data files
+docs/viz_data_full.json
+
+# Large raw historical data text files
+Historical Data/
+
+# Log directories
+logs/
+
+# Cowork orchestration prompts (not for repo)
+prompts/
+
+# Build artifacts & local-only dirs
+.vertx/
+bin/
+root/
+data/replay_week/
+doc/

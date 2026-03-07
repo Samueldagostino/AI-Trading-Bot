@@ -1,0 +1,149 @@
+# Git Workflow for NQ Trading Bot
+
+## Branch Structure
+
+```
+main ──────────────────────────────────────── production
+  │
+  └── develop ─────────────────────────────── active development
+        │
+        ├── feature/chart-overlay-tab ──────── new features
+        ├── feature/regime-gate ────────────── new features
+        ├── backtest/stop-cap-25 ───────────── parameter experiments
+        └── fix/trailing-stop-rounding ─────── bug fixes
+```
+
+## Daily Workflow
+
+### Starting new work
+```bash
+# Always start from develop
+git checkout develop
+git pull origin develop
+
+# Create a feature branch
+git checkout -b feature/your-feature-name
+```
+
+### Saving progress
+```bash
+# Stage and commit with clear messages
+git add -A
+git commit -m "feat: add trending_down regime gate to HC filter"
+
+# Push to GitHub
+git push origin feature/your-feature-name
+```
+
+### After backtest validates the change
+```bash
+# Merge into develop
+git checkout develop
+git pull origin develop
+git merge feature/your-feature-name
+git push origin develop
+
+# Delete the feature branch
+git branch -d feature/your-feature-name
+git push origin --delete feature/your-feature-name
+```
+
+### Promoting to production
+```bash
+# Only after thorough validation
+git checkout main
+git pull origin main
+git merge develop
+git push origin main
+git tag -a v1.2.0 -m "HC filter + 1.5:1 TP1 R:R"
+git push origin --tags
+```
+
+## Commit Message Format
+
+Use prefixes so history is scannable:
+
+```
+feat:     new functionality         feat: add regime gate for trending_down
+fix:      bug fix                   fix: trailing stop rounding error
+refactor: code cleanup              refactor: remove Discord signal pipeline
+perf:     performance improvement   perf: reduce feature engine memory usage
+test:     backtest or test changes  test: validate stop cap at 25pts
+docs:     documentation             docs: update CLAUDE.md baseline metrics
+config:   configuration changes     config: adjust c2 trailing ATR multiplier
+```
+
+## Backtest Experiment Branches
+
+When testing parameter changes (like tightening the stop cap):
+
+```bash
+# Create experiment branch
+git checkout develop
+git checkout -b backtest/stop-cap-25
+
+# Make the change, run backtest, save results
+# If results are better than baseline:
+git checkout develop
+git merge backtest/stop-cap-25
+
+# If results are worse:
+git branch -d backtest/stop-cap-25   # just delete it
+```
+
+## What NOT to Commit
+
+These are handled by .gitignore but worth knowing:
+
+- `.env` — your credentials (use `.env.example` as template)
+- `backtest_viz_data.json` — large, regenerated on each run
+- `data/tradingview/*.csv` — large data files
+- `__pycache__/` — Python cache
+- `logs/` — runtime logs
+
+## Recovering from Mistakes
+
+```bash
+# Undo last commit (keep changes staged)
+git reset --soft HEAD~1
+
+# Undo last commit (keep changes unstaged)
+git reset HEAD~1
+
+# Discard all uncommitted changes (DESTRUCTIVE)
+git checkout -- .
+
+# See what changed since last commit
+git diff
+
+# See commit history (compact)
+git log --oneline -20
+```
+
+## Tags for Milestones
+
+Tag significant versions so you can always go back:
+
+```bash
+git tag -a v1.0.0 -m "Initial HC filter: PF 2.35, 62 trades"
+git tag -a v1.1.0 -m "Added regime gate, PF improved to 2.5"
+git push origin --tags
+```
+
+## Using GitHub with Claude Code
+
+Claude Code reads your repo directly. Key tips:
+
+- Keep `CLAUDE.md` updated after every significant change
+- Commit before starting a Claude Code session (clean working tree)
+- After Claude Code makes changes, review the diff before committing:
+  ```bash
+  git diff                    # see what changed
+  git add -p                  # stage selectively (recommended)
+  git commit -m "feat: ..."   # commit with clear message
+  ```
+- If Claude Code breaks something:
+  ```bash
+  git stash                   # save current mess
+  git checkout -- .           # restore to last commit
+  ```

@@ -1,0 +1,18 @@
+76d630cfb6896b9f2918f25c9d8c32ed903f15807d88610a71a3727d03dc64eb  docs/analyzer.html
+49485b53e0e2caa5938f94a13e5d79fb2219ffdcfe002ee8834b17f708861cb2  docs/dashboard.html
+1b7676a63c724e8a18ede4f21906c4dcc569ad50eb3894db88c62b5afd738bb4  docs/index.html
+15340786a7fa592d0a5995f9a22835b3933d47c85eabf0af5eb5c3a9bb9974b4  docs/report.html
+a52f099649a25d7bb39af4a5ffce862bdb7ddb46c82cc943b437a9c5495e7c11  docs/sample_viz_data.json
+d8c48e438f8be4df9c99a01d620f68f28a33eb99ffa7d6cef3f9150bd6f002ed  docs/viz_data.json
+27d3f307e981d0a7d81332946880715d4316df44ff874cc8e65b8fa08cb0943e  docs/viz_data_full.json
+cb0417062c77cf34b128eb9f61cc1f6dec0e930c5de5e14c2217a3a40165d573  docs/weekly_breakdown.json
+c6738dc77d867b2ea0065e4b5e4cea2eeb07f2d33bb899cf05c701b3f90eecfc  docs/weekly-dashboard.html
+187a528f2e4717c0be81625ad60f93542bc158e919e9bb47f88b4c6eafddfb85  docs/SECURITY_AUDIT.md
+f25afe59543f87ca84a44689c48c139cc70476c9f493a28dc7b88f541ad191f2  docs/assets/style.css
+cfa5a7f4932998b3a9bc833e03b29beb6cd3c53947a8064b7609162b1e9e0dd8  logs/multi_period_report.json
+---
+Generated: 2026-02-28T03:50:13Z
+Total weeks: 240
+Total trades: 14,848
+Total PnL: +$166,997
+Periods: 7 (continuous Sep 2021 - Feb 2026)

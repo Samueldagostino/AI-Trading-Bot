@@ -1,0 +1,1706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NQ Forensic Trade Visualizer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root { height: 100%; width: 100%; overflow: hidden; }
+    body { background: #080b12; }
+  </style>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// ═══════════════════════════════════════════════════════════════
+// NQ FORENSIC TRADE VISUALIZER — Institutional-Grade Chart System
+// Canvas-based OHLCV + Trade Overlay + Session Logic + Analytics
+// ═══════════════════════════════════════════════════════════════
+// ── THEME ──────────────────────────────────────────────────────
+const T = {
+  bg: "#080b12", bgPanel: "#0c1018", bgCard: "#111620",
+  bgHover: "#161d2a", bgActive: "#1a2332",
+  border: "#1a2030", borderLight: "#232d40",
+  grid: "#141c28", gridMajor: "#1a2435",
+  text: "#8892a4", textMuted: "#556178", textBright: "#c8d0e0",
+  textWhite: "#e8ecf4",
+  green: "#00c087", greenDim: "#00c08730", greenBg: "#00c08712",
+  red: "#e5334b", redDim: "#e5334b30", redBg: "#e5334b12",
+  blue: "#3b82f6", blueDim: "#3b82f620",
+  amber: "#f59e0b", amberDim: "#f59e0b20",
+  purple: "#a855f7", purpleDim: "#a855f720",
+  cyan: "#06b6d4",
+  maintenanceShade: "#f59e0b08", maintenanceBorder: "#f59e0b15",
+  crosshair: "#3b82f650",
+  selection: "#3b82f620",
+  vwap: "#e68a00", vwapDim: "#e68a0040",
+  sma20: "#22d3ee", sma50: "#f472b6", sma200: "#fbbf24",
+  atrBand: "#3b82f610",
+  volProfile: "#3b82f618",
+  regimeUp: "#00c087", regimeDown: "#e5334b", regimeRange: "#f59e0b", regimeUnk: "#556178",
+  htfBull: "#00c087", htfBear: "#e5334b", htfNeutral: "#556178",
+  gold: "#fbbf24",
+};
+// ── DATA LOADING ──────────────────────────────────────────────
+// Handles both viz_data.json (data_adapter output) and raw backtest_viz_data.json
+function toEpoch(t) { return typeof t === "string" ? new Date(t).getTime() : t; }
+function mapExitType(e) {
+  const r1 = (e.c1_exit_reason || "").toLowerCase();
+  const r2 = (e.c2_exit_reason || "").toLowerCase();
+  if (r2 === "trailing") return "trailing_stop";
+  if (r1 === "target" && r2 === "trailing") return "trailing_stop";
+  if (r1 === "target" && r2 === "target") return "pt2_target";
+  if (r1 === "target") return "pt1_partial";
+  if (r1 === "stop" || r2 === "stop") return "stop_loss";
+  if (r2 === "breakeven" || r2 === "be_plus") return "be_plus";
+  return "stop_loss";
+}
+function pairTradeEvents(events) {
+  const trades = []; let entry = null;
+  events.forEach(e => {
+    if (e.action === "entry") { entry = e; }
+    else if (e.action === "trade_closed" && entry) {
+      const sd = Math.abs(entry.entry_price - entry.stop);
+      const tp1 = entry.c1_target || entry.entry_price + sd * 1.5 * (entry.direction === "long" ? 1 : -1);
+      const tp2 = entry.entry_price + sd * 3 * (entry.direction === "long" ? 1 : -1);
+      const pnl = e.total_pnl || 0;
+      const avgExit = e.c2_exit_price || e.c1_exit_price || entry.entry_price;
+      trades.push({
+        id: trades.length + 1,
+        entryTime: toEpoch(entry.timestamp), exitTime: toEpoch(e.close_timestamp),
+        side: entry.direction || "long", qty: entry.contracts || 2,
+        entryPrice: entry.entry_price, exitPrice: avgExit,
+        stopPrice: entry.stop, tp1Price: tp1, tp2Price: tp2, stopDist: sd,
+        signalScore: entry.signal_score || 0,
+        regime: entry.regime || e.regime || "unknown",
+        htfBias: entry.htf_bias || "neutral",
+        htfStrength: entry.htf_strength || 0,
+        exitType: mapExitType(e), pnl: pnl,
+        c1Pnl: e.c1_pnl || 0, c2Pnl: e.c2_pnl || 0,
+        slippage: 0,
+        rMultiple: sd > 0 ? parseFloat((pnl / (sd * 2 * 2)).toFixed(2)) : 0,
+        mfe: 0, mae: 0, holdBars: 0, isCompliant: true,
+      });
+      entry = null;
+    }
+  });
+  return trades;
+}
+function normalizeTrade(t, i) {
+  return {
+    id: t.id || i + 1,
+    entryTime: toEpoch(t.entryTime), exitTime: toEpoch(t.exitTime),
+    side: t.side || "long", qty: t.qty || 2,
+    entryPrice: t.entryPrice || 0, exitPrice: t.exitPrice || 0,
+    stopPrice: t.stopPrice || 0, tp1Price: t.tp1Price || 0, tp2Price: t.tp2Price || 0,
+    stopDist: t.stopDist || 0, signalScore: t.signalScore || 0,
+    regime: t.regime || "unknown", htfBias: t.htfBias || "neutral",
+    htfStrength: t.htfStrength || 0,
+    exitType: t.exitType || "stop_loss", pnl: t.pnl || 0,
+    c1Pnl: t.c1Pnl || 0, c2Pnl: t.c2Pnl || 0,
+    slippage: t.slippage || 0, rMultiple: t.rMultiple || 0,
+    mfe: t.mfe || 0, mae: t.mae || 0, holdBars: t.holdBars || 0,
+    isCompliant: t.isCompliant !== undefined ? t.isCompliant : true,
+  };
+}
+function loadVizData(jsonData) {
+  // Candles: support both formats
+  const raw = jsonData.candles || jsonData.bars || [];
+  const candles = raw.map(c => ({
+    time: toEpoch(c.time), open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0,
+  })).sort((a, b) => a.time - b.time);
+  // Trades: detect format
+  const rawT = jsonData.trades || [];
+  let trades;
+  if (rawT.length > 0 && rawT[0].action) {
+    trades = pairTradeEvents(rawT);
+  } else {
+    trades = rawT.map((t, i) => normalizeTrade(t, i));
+  }
+  // HTF bias snapshots
+  const htfBias = (jsonData.htf_bias || jsonData.htfBias || []).map(h => ({
+    time: toEpoch(h.time), direction: h.direction, strength: h.strength,
+    allowsLong: h.allows_long ?? h.allowsLong ?? true,
+    allowsShort: h.allows_short ?? h.allowsShort ?? true,
+  })).sort((a, b) => a.time - b.time);
+  // Equity curve
+  const equityCurve = (jsonData.equity_curve || jsonData.equityCurve || []).map(e => ({
+    equity: e.equity, time: e.time === "start" ? null : toEpoch(e.time),
+  }));
+  const summary = jsonData.summary || jsonData.meta || {};
+  return { candles, trades, htfBias, equityCurve, summary };
+}
+// ── UTILITIES ─────────────────────────────────────────────────
+function formatPrice(p) { return p.toFixed(2); }
+function formatTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+function formatDate(ts) {
+  const d = new Date(ts);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+function formatFull(ts) {
+  const d = new Date(ts);
+  return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} ${formatTime(ts)}`;
+}
+function isMaintenance(ts) {
+  const d = new Date(ts);
+  const h = d.getHours(), m = d.getMinutes();
+  return (h === 16 && m >= 30) || h === 17 || (h === 18 && m === 0);
+}
+function getSession(ts) {
+  const d = new Date(ts);
+  const h = d.getHours(), m = d.getMinutes(), t = h * 60 + m;
+  if (t >= 240 && t < 570) return "premarket";
+  if (t >= 570 && t < 720) return "am_rth";
+  if (t >= 720 && t < 960) return "pm_rth";
+  if (t >= 960 || t < 240) return "off_hours";
+  return "overnight";
+}
+const SESSION_COLORS = {
+  premarket: "#06b6d406", am_rth: "#00c08706", pm_rth: "transparent", off_hours: "#f59e0b06", overnight: "#a855f704",
+};
+const SESSION_LABELS = {
+  premarket: "Pre-Mkt", am_rth: "AM RTH", pm_rth: "PM RTH", off_hours: "Off-Hrs",
+};
+// ── MAIN COMPONENT ────────────────────────────────────────────
+function NQForensicVisualizer() {
+  // Data
+  const [candles, setCandles] = useState([]);
+  const [trades, setTrades] = useState([]);
+  const [htfBiasData, setHtfBiasData] = useState([]);
+  const [equityCurve, setEquityCurve] = useState([]);
+  const [dataSummary, setDataSummary] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [dataSource, setDataSource] = useState("");
+  const [loadError, setLoadError] = useState(null);
+  const fileInputRef = useRef(null);
+  // View state
+  const [viewStart, setViewStart] = useState(0);
+  const [viewEnd, setViewEnd] = useState(200);
+  const [selectedTrade, setSelectedTrade] = useState(null);
+  const [crosshairPos, setCrosshairPos] = useState(null);
+  const [hoveredCandle, setHoveredCandle] = useState(null);
+  const [timeframe, setTimeframe] = useState("5m");
+  // Overlay toggles
+  const [showVWAP, setShowVWAP] = useState(true);
+  const [showSMA, setShowSMA] = useState(true);
+  const [showATR, setShowATR] = useState(false);
+  const [showVolProfile, setShowVolProfile] = useState(true);
+  // Hover tooltip
+  const [hoveredTrade, setHoveredTrade] = useState(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  // HTF filter threshold (from clicking HTF subpane)
+  const [filterHtfMinStrength, setFilterHtfMinStrength] = useState(0);
+  // Filters
+  const [filterRegime, setFilterRegime] = useState("all");
+  const [filterSide, setFilterSide] = useState("all");
+  const [filterExit, setFilterExit] = useState("all");
+  const [filterMinScore, setFilterMinScore] = useState(0.75);
+  // Phase 4: A/B mode, sort, sessions
+  const [abMode, setAbMode] = useState(false);
+  const [abSplitIndex, setAbSplitIndex] = useState(0);
+  const [sortCol, setSortCol] = useState("id");
+  const [sortDir, setSortDir] = useState(1);
+  const [showSessions, setShowSessions] = useState(false);
+  // Phase 5: Performance panel
+  const [showPerfPanel, setShowPerfPanel] = useState(false);
+  // Refs
+  const chartRef = useRef(null);
+  const equityRef = useRef(null);
+  const volRef = useRef(null);
+  const regimeRef = useRef(null);
+  const htfRef = useRef(null);
+  const signalRef = useRef(null);
+  const containerRef = useRef(null);
+  const isDragging = useRef(false);
+  const dragStart = useRef(0);
+  const dragViewStart = useRef(0);
+  // Chart dimensions
+  const CHART_H = 380;
+  const VOL_H = 60;
+  const REGIME_H = 28;
+  const HTF_H = 48;
+  const SIGNAL_H = 38;
+  const PRICE_AXIS_W = 85;
+  const TIME_AXIS_H = 28;
+  const MIN_CANDLE_W = 3;
+  const MAX_CANDLE_W = 24;
+  // Load data from viz_data.json or accept file upload
+  const applyData = useCallback((jsonData, source) => {
+    const { candles: c, trades: t, htfBias: hb, equityCurve: ec, summary: sm } = loadVizData(jsonData);
+    if (c.length === 0) {
+      setLoadError("No candle data found in file");
+      return;
+    }
+    setCandles(c);
+    setTrades(t);
+    setHtfBiasData(hb);
+    setEquityCurve(ec);
+    setDataSummary(sm);
+    setViewStart(Math.max(0, c.length - 250));
+    setViewEnd(c.length);
+    setDataSource(source);
+    setLoadError(null);
+    setLoading(false);
+    setSelectedTrade(null);
+  }, []);
+  const handleFileUpload = useCallback((file) => {
+    if (!file) return;
+    setLoading(true);
+    setLoadError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        applyData(data, `file:${file.name}`);
+      } catch (err) {
+        setLoadError(`Failed to parse ${file.name}: ${err.message}`);
+        setLoading(false);
+      }
+    };
+    reader.onerror = () => {
+      setLoadError(`Failed to read ${file.name}`);
+      setLoading(false);
+    };
+    reader.readAsText(file);
+  }, [applyData]);
+  // Init: try to fetch viz_data.json from same directory, fall back to waiting for upload
+  useEffect(() => {
+    fetch("viz_data.json")
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(data => applyData(data, "fetch:viz_data.json"))
+      .catch(() => {
+        // No pre-built file available — wait for drag-drop
+        setLoading(false);
+        setLoadError(null);
+      });
+  }, [applyData]);
+  // Drag-drop handler for the whole page
+  useEffect(() => {
+    const onDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
+    const onDrop = (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file && file.name.endsWith(".json")) handleFileUpload(file);
+    };
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, [handleFileUpload]);
+  // Filtered trades
+  const filteredTrades = useMemo(() => {
+    return trades.filter(t => {
+      if (filterRegime !== "all" && t.regime !== filterRegime) return false;
+      if (filterSide !== "all" && t.side !== filterSide) return false;
+      if (filterExit !== "all" && t.exitType !== filterExit) return false;
+      if (t.signalScore < filterMinScore) return false;
+      if (filterHtfMinStrength > 0 && (t.htfStrength || 0) < filterHtfMinStrength) return false;
+      return true;
+    });
+  }, [trades, filterRegime, filterSide, filterExit, filterMinScore, filterHtfMinStrength]);
+  // Visible candles
+  const visibleCandles = useMemo(() => {
+    return candles.slice(viewStart, viewEnd);
+  }, [candles, viewStart, viewEnd]);
+  // Price range
+  const priceRange = useMemo(() => {
+    if (visibleCandles.length === 0) return { min: 0, max: 1 };
+    let min = Infinity, max = -Infinity;
+    visibleCandles.forEach(c => { min = Math.min(min, c.low); max = Math.max(max, c.high); });
+    // Include trade levels if a trade is selected
+    if (selectedTrade) {
+      min = Math.min(min, selectedTrade.stopPrice, selectedTrade.entryPrice);
+      max = Math.max(max, selectedTrade.tp2Price, selectedTrade.entryPrice);
+    }
+    const pad = (max - min) * 0.08;
+    return { min: min - pad, max: max + pad };
+  }, [visibleCandles, selectedTrade]);
+  // Volume range
+  const volRange = useMemo(() => {
+    if (visibleCandles.length === 0) return { max: 1 };
+    return { max: Math.max(...visibleCandles.map(c => c.volume)) };
+  }, [visibleCandles]);
+  // ── COMPUTED INDICATORS ────────────────────────────────────
+  const indicators = useMemo(() => {
+    if (candles.length === 0) return { vwap: [], sma20: [], sma50: [], sma200: [], atr: [] };
+    // SMA helper
+    const sma = (data, period) => {
+      const out = new Array(data.length).fill(null);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        sum += data[i].close;
+        if (i >= period) sum -= data[i - period].close;
+        if (i >= period - 1) out[i] = sum / period;
+      }
+      return out;
+    };
+    // VWAP — resets each day (by UTC date)
+    const vwap = new Array(candles.length).fill(null);
+    let cumTPV = 0, cumVol = 0, lastDay = -1;
+    for (let i = 0; i < candles.length; i++) {
+      const c = candles[i];
+      const day = new Date(c.time).getUTCDate();
+      if (day !== lastDay) { cumTPV = 0; cumVol = 0; lastDay = day; }
+      const tp = (c.high + c.low + c.close) / 3;
+      cumTPV += tp * c.volume;
+      cumVol += c.volume;
+      vwap[i] = cumVol > 0 ? cumTPV / cumVol : null;
+    }
+    // ATR (14-period)
+    const atrPeriod = 14;
+    const atr = new Array(candles.length).fill(null);
+    let atrSum = 0;
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i], p = candles[i - 1];
+      const tr = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+      if (i <= atrPeriod) { atrSum += tr; if (i === atrPeriod) atr[i] = atrSum / atrPeriod; }
+      else { atr[i] = (atr[i - 1] * (atrPeriod - 1) + tr) / atrPeriod; }
+    }
+    return { vwap, sma20: sma(candles, 20), sma50: sma(candles, 50), sma200: sma(candles, 200), atr };
+  }, [candles]);
+  // Volume profile for visible range
+  const volumeProfile = useMemo(() => {
+    if (visibleCandles.length === 0) return [];
+    const { min, max } = priceRange;
+    const buckets = 40;
+    const step = (max - min) / buckets;
+    if (step <= 0) return [];
+    const profile = new Array(buckets).fill(0);
+    visibleCandles.forEach(c => {
+      const idx = Math.min(buckets - 1, Math.max(0, Math.floor((c.close - min) / step)));
+      profile[idx] += c.volume;
+    });
+    const maxVol = Math.max(...profile);
+    return profile.map((v, i) => ({ price: min + (i + 0.5) * step, volume: v, pct: maxVol > 0 ? v / maxVol : 0 }));
+  }, [visibleCandles, priceRange]);
+  // Regime per candle (derived from SMA crossovers)
+  const regimePerCandle = useMemo(() => {
+    const { sma20, sma50 } = indicators;
+    return candles.map((c, i) => {
+      if (!sma20[i] || !sma50[i]) return "unknown";
+      if (c.close > sma20[i] && sma20[i] > sma50[i]) return "trending_up";
+      if (c.close < sma20[i] && sma20[i] < sma50[i]) return "trending_down";
+      return "ranging";
+    });
+  }, [candles, indicators]);
+  // HTF bias interpolated per candle
+  const htfPerCandle = useMemo(() => {
+    if (htfBiasData.length === 0 || candles.length === 0) return [];
+    const out = new Array(candles.length).fill(null);
+    let hIdx = 0;
+    for (let i = 0; i < candles.length; i++) {
+      while (hIdx < htfBiasData.length - 1 && htfBiasData[hIdx + 1].time <= candles[i].time) hIdx++;
+      if (htfBiasData[hIdx].time <= candles[i].time) out[i] = htfBiasData[hIdx];
+    }
+    return out;
+  }, [candles, htfBiasData]);
+  // Get chart width
+  const getChartWidth = useCallback(() => {
+    if (!containerRef.current) return 800;
+    return containerRef.current.offsetWidth - PRICE_AXIS_W;
+  }, []);
+  // Coordinate transforms
+  const priceToY = useCallback((price) => {
+    const { min, max } = priceRange;
+    return CHART_H - ((price - min) / (max - min)) * CHART_H;
+  }, [priceRange]);
+  const indexToX = useCallback((idx) => {
+    const w = getChartWidth();
+    const count = viewEnd - viewStart;
+    if (count === 0) return 0;
+    return ((idx - viewStart) / count) * w;
+  }, [viewStart, viewEnd, getChartWidth]);
+  const xToIndex = useCallback((x) => {
+    const w = getChartWidth();
+    const count = viewEnd - viewStart;
+    return Math.floor((x / w) * count) + viewStart;
+  }, [viewStart, viewEnd, getChartWidth]);
+  // ── RENDER CHART ──────────────────────────────────────────
+  useEffect(() => {
+    const canvas = chartRef.current;
+    const volCanvas = volRef.current;
+    if (!canvas || !volCanvas || visibleCandles.length === 0) return;
+    const w = getChartWidth() + PRICE_AXIS_W;
+    const dpr = window.devicePixelRatio || 1;
+    // Setup main canvas
+    canvas.width = w * dpr;
+    canvas.height = CHART_H * dpr;
+    canvas.style.width = w + "px";
+    canvas.style.height = CHART_H + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    // Setup volume canvas
+    volCanvas.width = w * dpr;
+    volCanvas.height = VOL_H * dpr;
+    volCanvas.style.width = w + "px";
+    volCanvas.style.height = VOL_H + "px";
+    const vctx = volCanvas.getContext("2d");
+    vctx.scale(dpr, dpr);
+    const chartW = w - PRICE_AXIS_W;
+    const count = visibleCandles.length;
+    const candleW = Math.max(MIN_CANDLE_W, Math.min(MAX_CANDLE_W, chartW / count - 1));
+    const bodyW = Math.max(1, candleW - 2);
+    // ── Background
+    ctx.fillStyle = T.bg;
+    ctx.fillRect(0, 0, w, CHART_H);
+    vctx.fillStyle = T.bg;
+    vctx.fillRect(0, 0, w, VOL_H);
+    // ── Grid lines (horizontal)
+    const { min: pMin, max: pMax } = priceRange;
+    const pRange = pMax - pMin;
+    const gridStep = pRange > 200 ? 50 : pRange > 100 ? 25 : pRange > 50 ? 10 : 5;
+    const gridStart = Math.ceil(pMin / gridStep) * gridStep;
+    ctx.strokeStyle = T.grid;
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([]);
+    for (let p = gridStart; p <= pMax; p += gridStep) {
+      const y = priceToY(p);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(chartW, y);
+      ctx.stroke();
+      // Price labels on axis
+      ctx.fillStyle = T.textMuted;
+      ctx.font = "11px 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(formatPrice(p), w - 8, y + 4);
+    }
+    // ── Session shading (replaces simple maintenance shading when enabled)
+    if (showSessions) {
+      let lastSess = "";
+      let sessStart = 0;
+      visibleCandles.forEach((c, i) => {
+        const sess = getSession(c.time);
+        const x = (i / count) * chartW;
+        const bw = chartW / count;
+        if (SESSION_COLORS[sess] && SESSION_COLORS[sess] !== "transparent") {
+          ctx.fillStyle = SESSION_COLORS[sess];
+          ctx.fillRect(x, 0, bw + 1, CHART_H);
+        }
+        if (sess !== lastSess && lastSess !== "" && SESSION_LABELS[sess]) {
+          ctx.fillStyle = T.textMuted; ctx.font = "7px monospace"; ctx.textAlign = "left"; ctx.globalAlpha = 0.5;
+          ctx.fillText(SESSION_LABELS[sess], x + 2, 10); ctx.globalAlpha = 1;
+        }
+        lastSess = sess;
+      });
+    } else {
+      visibleCandles.forEach((c, i) => {
+        if (isMaintenance(c.time)) {
+          const x = (i / count) * chartW;
+          ctx.fillStyle = T.maintenanceShade;
+          ctx.fillRect(x, 0, candleW + 1, CHART_H);
+        }
+      });
+    }
+    // ── Day separators
+    let lastDay = -1;
+    visibleCandles.forEach((c, i) => {
+      const d = new Date(c.time);
+      const day = d.getDate();
+      if (day !== lastDay && lastDay !== -1) {
+        const x = (i / count) * chartW;
+        ctx.strokeStyle = T.gridMajor;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, CHART_H);
+        ctx.stroke();
+        ctx.fillStyle = T.textMuted;
+        ctx.font = "10px 'SF Mono', monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(formatDate(c.time), x, CHART_H - 4);
+      }
+      lastDay = day;
+    });
+    // ── SELECTED TRADE OVERLAY (rich overlay)
+    if (selectedTrade) {
+      const st = selectedTrade;
+      const entryIdx = candles.findIndex(c => c.time >= st.entryTime);
+      const exitIdx = candles.findIndex(c => c.time >= st.exitTime);
+      if (entryIdx >= viewStart && entryIdx < viewEnd) {
+        const eX = ((entryIdx - viewStart) / count) * chartW + (chartW / count) / 2;
+        const xX = exitIdx >= viewStart ? ((exitIdx - viewStart) / count) * chartW + (chartW / count) / 2 : chartW;
+        const entryY = priceToY(st.entryPrice);
+        const exitY = priceToY(st.exitPrice);
+        const stopY = priceToY(st.stopPrice);
+        const tp1Y = priceToY(st.tp1Price);
+        const tp2Y = priceToY(st.tp2Price);
+        const stopDollar = (st.stopDist * 2 * 2).toFixed(0); // 2 contracts, $2/pt
+        // TP1/TP2 shaded bands
+        const tpTopY = Math.min(tp1Y, tp2Y);
+        const tpBotY = Math.max(tp1Y, tp2Y);
+        ctx.fillStyle = T.blueDim; ctx.globalAlpha = 0.12;
+        ctx.fillRect(eX, Math.min(entryY, tp1Y), xX - eX, Math.abs(tp1Y - entryY));
+        ctx.fillStyle = T.purpleDim;
+        ctx.fillRect(eX, Math.min(tp1Y, tp2Y), xX - eX, Math.abs(tp2Y - tp1Y));
+        ctx.globalAlpha = 1;
+        // Stop level line — dashed, labeled with pts and dollars
+        ctx.strokeStyle = T.red; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(eX, stopY); ctx.lineTo(xX, stopY); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = T.redBg; ctx.fillRect(eX - 1, stopY - 9, 110, 16);
+        ctx.fillStyle = T.red; ctx.font = "bold 9px monospace"; ctx.textAlign = "left";
+        ctx.fillText(`STOP ${formatPrice(st.stopPrice)} (${st.stopDist.toFixed(1)}pt $${stopDollar})`, eX + 3, stopY + 3);
+        // TP1 level — labeled with R-multiple
+        const tp1R = st.stopDist > 0 ? (Math.abs(st.tp1Price - st.entryPrice) / st.stopDist).toFixed(1) : "?";
+        ctx.strokeStyle = T.blue; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(eX, tp1Y); ctx.lineTo(xX, tp1Y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = T.blueDim; ctx.fillRect(eX - 1, tp1Y - 9, 90, 16);
+        ctx.fillStyle = T.blue; ctx.font = "bold 9px monospace";
+        ctx.fillText(`TP1 ${formatPrice(st.tp1Price)} (${tp1R}R)`, eX + 3, tp1Y + 3);
+        // TP2 level
+        const tp2R = st.stopDist > 0 ? (Math.abs(st.tp2Price - st.entryPrice) / st.stopDist).toFixed(1) : "?";
+        ctx.strokeStyle = T.purple; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(eX, tp2Y); ctx.lineTo(xX, tp2Y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = T.purpleDim; ctx.fillRect(eX - 1, tp2Y - 9, 90, 16);
+        ctx.fillStyle = T.purple; ctx.font = "bold 9px monospace";
+        ctx.fillText(`TP2 ${formatPrice(st.tp2Price)} (${tp2R}R)`, eX + 3, tp2Y + 3);
+        // Entry level line
+        ctx.strokeStyle = T.textBright; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, entryY); ctx.stroke(); ctx.setLineDash([]);
+        // Trade path line — colored by PnL, thickness by R-multiple
+        const pathWidth = Math.max(1, Math.min(4, Math.abs(st.rMultiple) * 1.5));
+        ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red;
+        ctx.lineWidth = pathWidth; ctx.globalAlpha = 0.7;
+        ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, exitY); ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Trade zone shading
+        const zTop = Math.min(entryY, exitY), zBot = Math.max(entryY, exitY);
+        ctx.fillStyle = st.pnl >= 0 ? T.greenBg : T.redBg;
+        ctx.fillRect(eX, zTop, xX - eX, zBot - zTop);
+        // MFE/MAE markers — small vertical lines from entry
+        if (st.mfe > 0) {
+          const mfeY = priceToY(st.entryPrice + (st.side === "long" ? st.mfe : -st.mfe));
+          ctx.strokeStyle = T.green; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+          ctx.beginPath(); ctx.moveTo(eX + 3, entryY); ctx.lineTo(eX + 3, mfeY); ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = T.green; ctx.font = "7px monospace"; ctx.textAlign = "left";
+          ctx.fillText(`MFE ${st.mfe.toFixed(1)}`, eX + 6, mfeY + (st.side === "long" ? -2 : 8));
+        }
+        if (st.mae > 0) {
+          const maeY = priceToY(st.entryPrice + (st.side === "long" ? -st.mae : st.mae));
+          ctx.strokeStyle = T.red; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+          ctx.beginPath(); ctx.moveTo(eX - 3, entryY); ctx.lineTo(eX - 3, maeY); ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = T.red; ctx.font = "7px monospace"; ctx.textAlign = "right";
+          ctx.fillText(`MAE ${st.mae.toFixed(1)}`, eX - 6, maeY + (st.side === "long" ? 8 : -2));
+        }
+        // Entry marker — triangle with signal score label + HTF halo
+        const htfHaloColor = st.htfBias === "bullish" ? T.green : st.htfBias === "bearish" ? T.red : T.textMuted;
+        // HTF consensus halo ring
+        ctx.strokeStyle = htfHaloColor; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+        ctx.beginPath(); ctx.arc(eX, entryY, 12, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+        // Direction triangle
+        ctx.fillStyle = st.side === "long" ? T.green : T.red;
+        ctx.beginPath();
+        if (st.side === "long") {
+          ctx.moveTo(eX, entryY + 6); ctx.lineTo(eX - 5, entryY + 14); ctx.lineTo(eX + 5, entryY + 14);
+        } else {
+          ctx.moveTo(eX, entryY - 6); ctx.lineTo(eX - 5, entryY - 14); ctx.lineTo(eX + 5, entryY - 14);
+        }
+        ctx.fill();
+        // Signal score label on entry
+        ctx.fillStyle = T.blue; ctx.font = "bold 8px monospace"; ctx.textAlign = "center";
+        const scoreLabelY = st.side === "long" ? entryY + 22 : entryY - 18;
+        ctx.fillText(st.signalScore.toFixed(2), eX, scoreLabelY);
+        // Exit marker — diamond, colored by exit type
+        const exitTypeColors = { pt1_partial: T.gold, trailing_stop: T.blue, stop_loss: T.red, pt2_target: T.cyan, be_plus: T.amber, max_target: T.cyan };
+        const exColor = exitTypeColors[st.exitType] || T.text;
+        ctx.fillStyle = exColor;
+        ctx.beginPath();
+        ctx.moveTo(xX, exitY - 6); ctx.lineTo(xX + 5, exitY); ctx.lineTo(xX, exitY + 6); ctx.lineTo(xX - 5, exitY);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = T.bg; ctx.lineWidth = 1; ctx.stroke();
+        // Compliance badge — small shield on entry
+        const shieldX = eX + 14, shieldY = entryY - 4;
+        const compColor = st.isCompliant ? T.green : (isMaintenance(st.entryTime) ? T.amber : T.red);
+        ctx.fillStyle = compColor; ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(shieldX, shieldY - 5); ctx.lineTo(shieldX + 4, shieldY - 3);
+        ctx.lineTo(shieldX + 4, shieldY + 2); ctx.lineTo(shieldX, shieldY + 5);
+        ctx.lineTo(shieldX - 4, shieldY + 2); ctx.lineTo(shieldX - 4, shieldY - 3);
+        ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+        // Trade summary label
+        const labelX = eX + (xX - eX) / 2;
+        const labelY = st.side === "long" ? Math.min(tp1Y, entryY) - 24 : Math.max(stopY, entryY) + 34;
+        const labelText = `${st.rMultiple > 0 ? "+" : ""}${st.rMultiple}R  $${st.pnl > 0 ? "+" : ""}${st.pnl.toFixed(0)}  ${st.exitType.replace(/_/g, " ").toUpperCase()}`;
+        ctx.font = "bold 9px monospace";
+        const lw = ctx.measureText(labelText).width + 12;
+        ctx.fillStyle = st.pnl >= 0 ? "#0a2a1a" : "#2a0a0e";
+        ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red; ctx.lineWidth = 1;
+        const lx = labelX - lw / 2, ly = labelY - 8, lh = 18;
+        ctx.beginPath(); ctx.roundRect(lx, ly, lw, lh, 4); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = st.pnl >= 0 ? T.green : T.red; ctx.textAlign = "center";
+        ctx.fillText(labelText, labelX, labelY + 4);
+      }
+    }
+    // ── CANDLES
+    visibleCandles.forEach((c, i) => {
+      const x = (i / count) * chartW + (chartW / count - bodyW) / 2;
+      const xCenter = (i / count) * chartW + (chartW / count) / 2;
+      const isGreen = c.close >= c.open;
+      const color = isGreen ? T.green : T.red;
+      const oY = priceToY(c.open);
+      const cY = priceToY(c.close);
+      const hY = priceToY(c.high);
+      const lY = priceToY(c.low);
+      // Wick
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(xCenter, hY);
+      ctx.lineTo(xCenter, lY);
+      ctx.stroke();
+      // Body
+      ctx.fillStyle = isGreen ? color : color;
+      const bodyTop = Math.min(oY, cY);
+      const bodyHeight = Math.max(1, Math.abs(oY - cY));
+      if (isGreen) {
+        ctx.fillStyle = T.bg;
+        ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, bodyTop, bodyW, bodyHeight);
+      } else {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
+      }
+      // Volume bars
+      const vH = (c.volume / volRange.max) * (VOL_H - 8);
+      vctx.fillStyle = isGreen ? T.greenDim : T.redDim;
+      vctx.fillRect(x, VOL_H - vH, bodyW, vH);
+    });
+    // ── VOLUME PROFILE (left side histogram)
+    if (showVolProfile && volumeProfile.length > 0) {
+      const vpMaxW = chartW * 0.12;
+      volumeProfile.forEach(vp => {
+        const y = priceToY(vp.price);
+        const bH = Math.max(1, (priceRange.max - priceRange.min) / 40 / (priceRange.max - priceRange.min) * CHART_H);
+        const bW = vp.pct * vpMaxW;
+        ctx.fillStyle = T.volProfile;
+        ctx.fillRect(0, y - bH / 2, bW, bH);
+      });
+    }
+    // ── VWAP LINE
+    if (showVWAP) {
+      ctx.strokeStyle = T.vwap;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      let started = false;
+      visibleCandles.forEach((c, i) => {
+        const gi = viewStart + i;
+        const v = indicators.vwap[gi];
+        if (v === null) { started = false; return; }
+        const x = (i / count) * chartW + (chartW / count) / 2;
+        const y = priceToY(v);
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+    // ── SMA LINES (20=cyan, 50=pink, 200=gold)
+    if (showSMA) {
+      const smaConfigs = [
+        { data: indicators.sma20, color: T.sma20, width: 1 },
+        { data: indicators.sma50, color: T.sma50, width: 1 },
+        { data: indicators.sma200, color: T.sma200, width: 1.2 },
+      ];
+      smaConfigs.forEach(({ data, color, width }) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        let started = false;
+        visibleCandles.forEach((c, i) => {
+          const v = data[viewStart + i];
+          if (v === null) { started = false; return; }
+          const x = (i / count) * chartW + (chartW / count) / 2;
+          const y = priceToY(v);
+          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      });
+    }
+    // ── ATR BANDS
+    if (showATR) {
+      ctx.fillStyle = T.atrBand;
+      visibleCandles.forEach((c, i) => {
+        const a = indicators.atr[viewStart + i];
+        if (a === null) return;
+        const x = (i / count) * chartW;
+        const w2 = chartW / count;
+        const yTop = priceToY(c.close + a);
+        const yBot = priceToY(c.close - a);
+        ctx.fillRect(x, yTop, w2, yBot - yTop);
+      });
+    }
+    // ── Non-selected trade markers (enriched)
+    filteredTrades.forEach(t => {
+      if (selectedTrade && t.id === selectedTrade.id) return;
+      const entryIdx = candles.findIndex(c => c.time >= t.entryTime);
+      if (entryIdx < viewStart || entryIdx >= viewEnd) return;
+      const x = ((entryIdx - viewStart) / count) * chartW + (chartW / count) / 2;
+      const y = priceToY(t.entryPrice);
+      // HTF halo (subtle ring)
+      const htfC = t.htfBias === "bullish" ? T.green : t.htfBias === "bearish" ? T.red : T.textMuted;
+      ctx.strokeStyle = htfC; ctx.lineWidth = 1; ctx.globalAlpha = 0.25;
+      ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+      // Direction triangle
+      ctx.fillStyle = t.pnl >= 0 ? T.green : T.red;
+      ctx.globalAlpha = 0.8;
+      if (t.side === "long") {
+        ctx.beginPath(); ctx.moveTo(x, y + 4); ctx.lineTo(x - 4, y + 10); ctx.lineTo(x + 4, y + 10); ctx.fill();
+      } else {
+        ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x - 4, y - 10); ctx.lineTo(x + 4, y - 10); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      // Exit marker — small diamond at exit
+      const exitIdx = candles.findIndex(c => c.time >= t.exitTime);
+      if (exitIdx >= viewStart && exitIdx < viewEnd) {
+        const ex = ((exitIdx - viewStart) / count) * chartW + (chartW / count) / 2;
+        const ey = priceToY(t.exitPrice);
+        const ecMap = { pt1_partial: T.gold, trailing_stop: T.blue, stop_loss: T.red, pt2_target: T.cyan, be_plus: T.amber };
+        ctx.fillStyle = ecMap[t.exitType] || T.text; ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(ex, ey - 3); ctx.lineTo(ex + 3, ey); ctx.lineTo(ex, ey + 3); ctx.lineTo(ex - 3, ey);
+        ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+      }
+      // Compliance dot
+      if (!t.isCompliant || isMaintenance(t.entryTime)) {
+        const dotColor = !t.isCompliant ? T.red : T.amber;
+        ctx.fillStyle = dotColor; ctx.globalAlpha = 0.8;
+        ctx.beginPath(); ctx.arc(x + 6, y - 6, 2.5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+      }
+    });
+    // ── Crosshair
+    if (crosshairPos) {
+      const { x, y } = crosshairPos;
+      ctx.strokeStyle = T.crosshair;
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, CHART_H);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(chartW, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Price label on axis
+      const price = pMin + ((CHART_H - y) / CHART_H) * pRange;
+      ctx.fillStyle = T.bgActive;
+      ctx.fillRect(chartW + 2, y - 10, PRICE_AXIS_W - 4, 20);
+      ctx.fillStyle = T.textBright;
+      ctx.font = "bold 11px monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(formatPrice(price), w - 8, y + 4);
+    }
+    // ── Price axis border
+    ctx.strokeStyle = T.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(chartW, 0);
+    ctx.lineTo(chartW, CHART_H);
+    ctx.stroke();
+    vctx.strokeStyle = T.border;
+    vctx.lineWidth = 1;
+    vctx.beginPath();
+    vctx.moveTo(chartW, 0);
+    vctx.lineTo(chartW, VOL_H);
+    vctx.stroke();
+  }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, indexToX, getChartWidth, indicators, volumeProfile, showVWAP, showSMA, showATR, showVolProfile, showSessions]);
+  // ── RENDER SUBPANES ──────────────────────────────────────
+  useEffect(() => {
+    if (visibleCandles.length === 0) return;
+    const w = getChartWidth() + PRICE_AXIS_W;
+    const chartW = w - PRICE_AXIS_W;
+    const count = visibleCandles.length;
+    const dpr = window.devicePixelRatio || 1;
+    // Helper to set up a canvas
+    const setupCanvas = (ref, h) => {
+      const canvas = ref.current;
+      if (!canvas) return null;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = w + "px"; canvas.style.height = h + "px";
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = T.bg; ctx.fillRect(0, 0, w, h);
+      // Right border
+      ctx.strokeStyle = T.border; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(chartW, 0); ctx.lineTo(chartW, h); ctx.stroke();
+      return ctx;
+    };
+    // ── REGIME SUBPANE
+    const rctx = setupCanvas(regimeRef, REGIME_H);
+    if (rctx) {
+      const regimeColors = { trending_up: T.regimeUp, trending_down: T.regimeDown, ranging: T.regimeRange, unknown: T.regimeUnk };
+      visibleCandles.forEach((c, i) => {
+        const gi = viewStart + i;
+        const regime = regimePerCandle[gi] || "unknown";
+        const x = (i / count) * chartW;
+        const bw = chartW / count;
+        rctx.fillStyle = regimeColors[regime] || T.regimeUnk;
+        rctx.globalAlpha = 0.6;
+        rctx.fillRect(x, 2, bw, REGIME_H - 4);
+        rctx.globalAlpha = 1;
+      });
+      rctx.fillStyle = T.textMuted; rctx.font = "bold 8px monospace"; rctx.textAlign = "right";
+      rctx.fillText("REGIME", w - 8, REGIME_H / 2 + 3);
+    }
+    // ── HTF BIAS SUBPANE
+    const hctx = setupCanvas(htfRef, HTF_H);
+    if (hctx && htfPerCandle.length > 0) {
+      // Gate threshold lines
+      [0.3, 0.7].forEach(gate => {
+        const y = HTF_H - gate * (HTF_H - 8) - 4;
+        hctx.strokeStyle = T.textMuted; hctx.lineWidth = 0.5; hctx.setLineDash([2, 3]);
+        hctx.beginPath(); hctx.moveTo(0, y); hctx.lineTo(chartW, y); hctx.stroke();
+        hctx.setLineDash([]);
+        hctx.fillStyle = T.textMuted; hctx.font = "7px monospace"; hctx.textAlign = "left";
+        hctx.fillText(gate.toFixed(1), 4, y - 2);
+      });
+      // Strength line
+      hctx.beginPath();
+      let started = false;
+      visibleCandles.forEach((c, i) => {
+        const gi = viewStart + i;
+        const hb = htfPerCandle[gi];
+        if (!hb) { started = false; return; }
+        const x = (i / count) * chartW + (chartW / count) / 2;
+        const y = HTF_H - hb.strength * (HTF_H - 8) - 4;
+        if (!started) { hctx.moveTo(x, y); started = true; } else hctx.lineTo(x, y);
+      });
+      hctx.strokeStyle = T.cyan; hctx.lineWidth = 1.5; hctx.stroke();
+      // Direction shading
+      visibleCandles.forEach((c, i) => {
+        const gi = viewStart + i;
+        const hb = htfPerCandle[gi];
+        if (!hb) return;
+        const x = (i / count) * chartW; const bw = chartW / count;
+        const dirColor = hb.direction === "bullish" ? T.htfBull : hb.direction === "bearish" ? T.htfBear : T.htfNeutral;
+        hctx.fillStyle = dirColor; hctx.globalAlpha = 0.08;
+        hctx.fillRect(x, 0, bw, HTF_H); hctx.globalAlpha = 1;
+      });
+      hctx.fillStyle = T.textMuted; hctx.font = "bold 8px monospace"; hctx.textAlign = "right";
+      hctx.fillText("HTF BIAS", w - 8, HTF_H / 2 + 3);
+    } else if (hctx) {
+      hctx.fillStyle = T.textMuted; hctx.font = "9px monospace"; hctx.textAlign = "center";
+      hctx.fillText("No HTF data — load backtest_viz_data.json", chartW / 2, HTF_H / 2 + 3);
+    }
+    // ── SIGNAL SCORE SUBPANE
+    const sctx = setupCanvas(signalRef, SIGNAL_H);
+    if (sctx) {
+      // 0.75 threshold line
+      const threshY = SIGNAL_H - 0.75 * (SIGNAL_H - 6) - 3;
+      sctx.strokeStyle = T.amber; sctx.lineWidth = 0.5; sctx.setLineDash([3, 3]);
+      sctx.beginPath(); sctx.moveTo(0, threshY); sctx.lineTo(chartW, threshY); sctx.stroke();
+      sctx.setLineDash([]); sctx.fillStyle = T.amber; sctx.font = "7px monospace"; sctx.textAlign = "left";
+      sctx.fillText("0.75", 4, threshY - 2);
+      // Plot signal scores at trade entry times
+      filteredTrades.forEach(t => {
+        const idx = candles.findIndex(c => c.time >= t.entryTime);
+        if (idx < viewStart || idx >= viewEnd) return;
+        const x = ((idx - viewStart) / count) * chartW + (chartW / count) / 2;
+        const barH = t.signalScore * (SIGNAL_H - 6);
+        const y = SIGNAL_H - barH - 3;
+        sctx.fillStyle = t.signalScore >= 0.75 ? T.blue : T.textMuted;
+        sctx.globalAlpha = 0.8;
+        sctx.fillRect(x - 2, y, 4, barH);
+        sctx.globalAlpha = 1;
+      });
+      sctx.fillStyle = T.textMuted; sctx.font = "bold 8px monospace"; sctx.textAlign = "right";
+      sctx.fillText("SIGNAL", w - 8, SIGNAL_H / 2 + 3);
+    }
+  }, [visibleCandles, candles, viewStart, viewEnd, getChartWidth, regimePerCandle, htfPerCandle, filteredTrades]);
+  // ── MOUSE HANDLERS ──────────────────────────────────────────
+  // Find trade near a chart position
+  const findTradeAt = useCallback((x, y) => {
+    const chartW = getChartWidth();
+    const count = viewEnd - viewStart;
+    if (count === 0) return null;
+    for (const t of filteredTrades) {
+      const idx = candles.findIndex(c => c.time >= t.entryTime);
+      if (idx < viewStart || idx >= viewEnd) continue;
+      const tx = ((idx - viewStart) / count) * chartW + (chartW / count) / 2;
+      const ty = priceToY(t.entryPrice);
+      if (Math.abs(x - tx) < 12 && Math.abs(y - ty) < 16) return t;
+    }
+    return null;
+  }, [candles, filteredTrades, viewStart, viewEnd, getChartWidth, priceToY]);
+  const handleMouseMove = useCallback((e) => {
+    const rect = chartRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const chartW = getChartWidth();
+    if (x > chartW) { setCrosshairPos(null); setHoveredCandle(null); setHoveredTrade(null); return; }
+    setCrosshairPos({ x, y });
+    const idx = xToIndex(x);
+    if (idx >= 0 && idx < candles.length) {
+      setHoveredCandle(candles[idx]);
+    }
+    // Detect trade hover
+    if (!isDragging.current) {
+      const trade = findTradeAt(x, y);
+      setHoveredTrade(trade);
+      if (trade) setTooltipPos({ x: e.clientX, y: e.clientY });
+    }
+    if (isDragging.current) {
+      setHoveredTrade(null);
+      const dx = e.clientX - dragStart.current;
+      const pixelsPerCandle = chartW / (viewEnd - viewStart);
+      const shift = Math.round(-dx / pixelsPerCandle);
+      const newStart = Math.max(0, Math.min(candles.length - 50, dragViewStart.current + shift));
+      const range = viewEnd - viewStart;
+      setViewStart(newStart);
+      setViewEnd(Math.min(candles.length, newStart + range));
+    }
+  }, [candles, viewStart, viewEnd, getChartWidth, xToIndex, findTradeAt]);
+  const handleChartClick = useCallback((e) => {
+    const rect = chartRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const trade = findTradeAt(x, y);
+    if (trade) { focusTrade(trade); } else { setSelectedTrade(null); }
+  }, [findTradeAt, focusTrade]);
+  const handleMouseDown = useCallback((e) => {
+    isDragging.current = true;
+    dragStart.current = e.clientX;
+    dragViewStart.current = viewStart;
+    e.preventDefault();
+  }, [viewStart]);
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+  }, []);
+  const handleMouseLeave = useCallback(() => {
+    setCrosshairPos(null);
+    setHoveredCandle(null);
+    isDragging.current = false;
+  }, []);
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 1.1 : 0.9;
+    const range = viewEnd - viewStart;
+    const newRange = Math.max(30, Math.min(candles.length, Math.round(range * delta)));
+    const chartW = getChartWidth();
+    const rect = chartRef.current?.getBoundingClientRect();
+    const mouseX = rect ? (e.clientX - rect.left) / chartW : 0.5;
+    const center = viewStart + range * mouseX;
+    const newStart = Math.max(0, Math.round(center - newRange * mouseX));
+    const newEnd = Math.min(candles.length, newStart + newRange);
+    setViewStart(newStart);
+    setViewEnd(newEnd);
+  }, [candles, viewStart, viewEnd, getChartWidth]);
+  // Focus on trade
+  const focusTrade = useCallback((trade) => {
+    setSelectedTrade(trade);
+    const entryIdx = candles.findIndex(c => c.time >= trade.entryTime);
+    const exitIdx = candles.findIndex(c => c.time >= trade.exitTime);
+    const pad = 30;
+    const newStart = Math.max(0, entryIdx - pad);
+    const newEnd = Math.min(candles.length, exitIdx + pad);
+    setViewStart(newStart);
+    setViewEnd(newEnd);
+  }, [candles]);
+  // Double-click to reset zoom
+  const handleDoubleClick = useCallback(() => {
+    setViewStart(Math.max(0, candles.length - 250));
+    setViewEnd(candles.length);
+    setSelectedTrade(null);
+  }, [candles]);
+  // Navigate to prev/next trade
+  const navigateTrade = useCallback((dir) => {
+    if (filteredTrades.length === 0) return;
+    if (!selectedTrade) {
+      focusTrade(filteredTrades[dir > 0 ? 0 : filteredTrades.length - 1]);
+    } else {
+      const curIdx = filteredTrades.findIndex(t => t.id === selectedTrade.id);
+      const nextIdx = curIdx + dir;
+      if (nextIdx >= 0 && nextIdx < filteredTrades.length) {
+        focusTrade(filteredTrades[nextIdx]);
+      }
+    }
+  }, [filteredTrades, selectedTrade, focusTrade]);
+  // Regime subpane click — toggle filter by regime at clicked position
+  const handleRegimeClick = useCallback((e) => {
+    const rect = regimeRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const chartW = getChartWidth();
+    const count = viewEnd - viewStart;
+    const idx = Math.floor((x / chartW) * count) + viewStart;
+    if (idx >= 0 && idx < candles.length) {
+      const regime = regimePerCandle[idx];
+      if (regime) {
+        setFilterRegime(prev => prev === regime ? "all" : regime);
+      }
+    }
+  }, [candles, viewStart, viewEnd, getChartWidth, regimePerCandle]);
+  // HTF subpane click — set strength filter threshold from Y position
+  const handleHtfClick = useCallback((e) => {
+    const rect = htfRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const y = e.clientY - rect.top;
+    const strength = Math.max(0, Math.min(1, (HTF_H - y - 4) / (HTF_H - 8)));
+    if (Math.abs(strength - filterHtfMinStrength) < 0.05) {
+      setFilterHtfMinStrength(0);
+    } else {
+      setFilterHtfMinStrength(parseFloat(strength.toFixed(2)));
+    }
+  }, [filterHtfMinStrength]);
+  // Reset all filters
+  const resetFilters = useCallback(() => {
+    setFilterRegime("all");
+    setFilterSide("all");
+    setFilterExit("all");
+    setFilterMinScore(0.75);
+    setFilterHtfMinStrength(0);
+  }, []);
+  const hasActiveFilters = filterRegime !== "all" || filterSide !== "all" || filterExit !== "all" || filterMinScore !== 0.75 || filterHtfMinStrength > 0;
+  // Keyboard navigation
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+      if (e.key === "Escape") { setSelectedTrade(null); return; }
+      if (e.key === "Home") {
+        setViewStart(Math.max(0, candles.length - 250));
+        setViewEnd(candles.length);
+        return;
+      }
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        navigateTrade(e.key === "ArrowRight" ? 1 : -1);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [candles, navigateTrade]);
+  // Stats
+  const stats = useMemo(() => {
+    const ft = filteredTrades;
+    if (ft.length === 0) return null;
+    const wins = ft.filter(t => t.pnl > 0);
+    const losses = ft.filter(t => t.pnl <= 0);
+    const totalPnl = ft.reduce((s, t) => s + t.pnl, 0);
+    const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+    return {
+      count: ft.length,
+      winRate: ((wins.length / ft.length) * 100).toFixed(1),
+      pf: grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : "∞",
+      totalPnl: totalPnl.toFixed(2),
+      avgPnl: (totalPnl / ft.length).toFixed(2),
+      avgWin: wins.length > 0 ? (grossWin / wins.length).toFixed(2) : "0",
+      avgLoss: losses.length > 0 ? (grossLoss / losses.length).toFixed(2) : "0",
+    };
+  }, [filteredTrades]);
+  // Sorted trades for table
+  const sortedTrades = useMemo(() => {
+    const sorted = [...filteredTrades];
+    const get = (t) => {
+      switch (sortCol) {
+        case "id": return t.id;
+        case "side": return t.side;
+        case "entry": return t.entryPrice;
+        case "stop": return t.stopDist;
+        case "pnl": return t.pnl;
+        case "exit": return t.exitType;
+        case "regime": return t.regime;
+        case "time": return t.entryTime;
+        case "score": return t.signalScore;
+        case "r": return t.rMultiple;
+        default: return t.id;
+      }
+    };
+    sorted.sort((a, b) => {
+      const va = get(a), vb = get(b);
+      if (typeof va === "string") return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    return sorted;
+  }, [filteredTrades, sortCol, sortDir]);
+  // Sort handler
+  const handleSort = useCallback((col) => {
+    if (sortCol === col) { setSortDir(d => -d); }
+    else { setSortCol(col); setSortDir(1); }
+  }, [sortCol]);
+  // A/B mode stats
+  const abStats = useMemo(() => {
+    if (!abMode || filteredTrades.length < 2) return null;
+    const split = Math.max(1, Math.min(filteredTrades.length - 1, abSplitIndex || Math.floor(filteredTrades.length / 2)));
+    const calcStats = (arr) => {
+      if (arr.length === 0) return null;
+      const wins = arr.filter(t => t.pnl > 0);
+      const losses = arr.filter(t => t.pnl <= 0);
+      const totalPnl = arr.reduce((s, t) => s + t.pnl, 0);
+      const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+      const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+      return {
+        count: arr.length,
+        winRate: ((wins.length / arr.length) * 100).toFixed(1),
+        pf: grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : "∞",
+        totalPnl: totalPnl.toFixed(2),
+        avgPnl: (totalPnl / arr.length).toFixed(2),
+      };
+    };
+    return { a: calcStats(filteredTrades.slice(0, split)), b: calcStats(filteredTrades.slice(split)), split };
+  }, [abMode, abSplitIndex, filteredTrades]);
+  // Extended stats for performance panel
+  const extStats = useMemo(() => {
+    const ft = filteredTrades;
+    if (ft.length === 0) return null;
+    const pnls = ft.map(t => t.pnl);
+    const totalPnl = pnls.reduce((s, v) => s + v, 0);
+    // Max drawdown
+    let peak = 0, equity = 0, maxDD = 0;
+    const eqCurve = [0];
+    pnls.forEach(p => {
+      equity += p; eqCurve.push(equity);
+      if (equity > peak) peak = equity;
+      const dd = peak - equity;
+      if (dd > maxDD) maxDD = dd;
+    });
+    // Consecutive wins/losses
+    let maxConsecWin = 0, maxConsecLoss = 0, cw = 0, cl = 0;
+    pnls.forEach(p => {
+      if (p > 0) { cw++; cl = 0; maxConsecWin = Math.max(maxConsecWin, cw); }
+      else { cl++; cw = 0; maxConsecLoss = Math.max(maxConsecLoss, cl); }
+    });
+    // Best/worst
+    const bestTrade = ft.reduce((b, t) => t.pnl > b.pnl ? t : b, ft[0]);
+    const worstTrade = ft.reduce((w, t) => t.pnl < w.pnl ? t : w, ft[0]);
+    // Avg hold bars
+    const avgHold = ft.reduce((s, t) => s + (t.holdBars || 0), 0) / ft.length;
+    // Win/loss streaks array
+    const streaks = [];
+    let streakType = null, streakLen = 0;
+    ft.forEach((t, i) => {
+      const w = t.pnl > 0;
+      if (streakType === null || w !== streakType) {
+        if (streakType !== null) streaks.push({ win: streakType, len: streakLen });
+        streakType = w; streakLen = 1;
+      } else { streakLen++; }
+      if (i === ft.length - 1) streaks.push({ win: streakType, len: streakLen });
+    });
+    // Sharpe-like: mean(pnl) / stdev(pnl)
+    const mean = totalPnl / ft.length;
+    const variance = pnls.reduce((s, p) => s + (p - mean) ** 2, 0) / ft.length;
+    const sharpe = variance > 0 ? (mean / Math.sqrt(variance)).toFixed(2) : "N/A";
+    // Heatmap: PnL by day of week and hour
+    const heatmap = {};
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    ft.forEach(t => {
+      const d = new Date(t.entryTime);
+      const day = days[d.getDay()];
+      const hour = d.getHours();
+      const key = `${day}-${hour}`;
+      if (!heatmap[key]) heatmap[key] = { pnl: 0, count: 0 };
+      heatmap[key].pnl += t.pnl;
+      heatmap[key].count++;
+    });
+    return { eqCurve, maxDD, maxConsecWin, maxConsecLoss, bestTrade, worstTrade, avgHold, streaks, sharpe, heatmap, days };
+  }, [filteredTrades]);
+  // Render equity curve canvas
+  useEffect(() => {
+    if (!showPerfPanel || !extStats || !equityRef.current) return;
+    const canvas = equityRef.current;
+    const w = canvas.parentElement?.offsetWidth || 400;
+    const h = 120;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = T.bg; ctx.fillRect(0, 0, w, h);
+    const eq = extStats.eqCurve;
+    if (eq.length < 2) return;
+    const minE = Math.min(...eq), maxE = Math.max(...eq);
+    const range = maxE - minE || 1;
+    const pad = 6;
+    const chartW = w - pad * 2, chartH = h - pad * 2;
+    // Zero line
+    const zeroY = pad + chartH - ((0 - minE) / range) * chartH;
+    ctx.strokeStyle = T.textMuted; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(pad, zeroY); ctx.lineTo(w - pad, zeroY); ctx.stroke(); ctx.setLineDash([]);
+    // Equity line
+    ctx.beginPath();
+    eq.forEach((v, i) => {
+      const x = pad + (i / (eq.length - 1)) * chartW;
+      const y = pad + chartH - ((v - minE) / range) * chartH;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = T.green; ctx.lineWidth = 1.5; ctx.stroke();
+    // Fill under curve
+    const lastX = pad + chartW;
+    const lastY = pad + chartH - ((eq[eq.length - 1] - minE) / range) * chartH;
+    ctx.lineTo(lastX, zeroY); ctx.lineTo(pad, zeroY); ctx.closePath();
+    ctx.fillStyle = eq[eq.length - 1] >= 0 ? T.greenBg : T.redBg; ctx.fill();
+    // Labels
+    ctx.fillStyle = T.textMuted; ctx.font = "9px monospace"; ctx.textAlign = "left";
+    ctx.fillText(`$${maxE.toFixed(0)}`, pad + 2, pad + 10);
+    ctx.fillText(`$${minE.toFixed(0)}`, pad + 2, h - pad - 2);
+    ctx.textAlign = "right";
+    ctx.fillStyle = eq[eq.length - 1] >= 0 ? T.green : T.red;
+    ctx.font = "bold 10px monospace";
+    ctx.fillText(`$${eq[eq.length - 1] >= 0 ? "+" : ""}${eq[eq.length - 1].toFixed(0)}`, w - pad - 2, pad + 10);
+  }, [showPerfPanel, extStats]);
+  // CSV export
+  const exportCSV = useCallback(() => {
+    const headers = ["ID","Side","EntryTime","ExitTime","EntryPrice","ExitPrice","StopPrice","StopDist","TP1","SignalScore","Regime","HTFBias","HTFStrength","ExitType","PnL","C1PnL","C2PnL","RMultiple","MFE","MAE","HoldBars","Compliant"];
+    const rows = filteredTrades.map(t => [
+      t.id, t.side, new Date(t.entryTime).toISOString(), new Date(t.exitTime).toISOString(),
+      t.entryPrice, t.exitPrice, t.stopPrice, t.stopDist.toFixed(1), t.tp1Price,
+      t.signalScore.toFixed(3), t.regime, t.htfBias, t.htfStrength,
+      t.exitType, t.pnl.toFixed(2), t.c1Pnl.toFixed(2), t.c2Pnl.toFixed(2),
+      t.rMultiple, t.mfe.toFixed(1), t.mae.toFixed(1), t.holdBars, t.isCompliant ? "Y" : "N",
+    ].join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `nq_trades_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }, [filteredTrades]);
+  if (loading) {
+    return (
+      <div style={{ background: T.bg, color: T.text, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'SF Mono', monospace" }}>
+        <div>Loading viz data...</div>
+      </div>
+    );
+  }
+  // No data loaded yet — show upload prompt
+  if (candles.length === 0) {
+    return (
+      <div style={{ background: T.bg, color: T.text, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'SF Mono', monospace", flexDirection: "column", gap: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: T.textWhite, letterSpacing: 1 }}>NQ FORENSIC VISUALIZER</div>
+        <div style={{ color: T.textMuted, fontSize: 12, maxWidth: 440, textAlign: "center", lineHeight: 1.6 }}>
+          Drop a <span style={{ color: T.blue }}>viz_data.json</span> file here, or click below to select one.
+          <br/>Generate it with: <span style={{ color: T.textBright }}>python -m dashboard.data_adapter --help</span>
+        </div>
+        {loadError && <div style={{ color: T.red, fontSize: 11 }}>{loadError}</div>}
+        <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }}
+          onChange={e => handleFileUpload(e.target.files[0])} />
+        <button onClick={() => fileInputRef.current?.click()} style={{
+          background: T.bgCard, color: T.textBright, border: `1px solid ${T.borderLight}`,
+          padding: "8px 24px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "inherit",
+        }}>Select viz_data.json</button>
+        <div style={{ color: T.textMuted, fontSize: 9, marginTop: 8 }}>
+          Or place viz_data.json alongside this page and refresh
+        </div>
+      </div>
+    );
+  }
+  const exitColor = (type) => {
+    const m = { pt1_partial: T.blue, pt2_target: T.purple, trailing_stop: T.green, stop_loss: T.red, be_plus: T.amber };
+    return m[type] || T.text;
+  };
+  const regimeColor = (r) => {
+    const m = { trending_up: T.green, trending_down: T.red, ranging: T.amber, unknown: T.textMuted };
+    return m[r] || T.text;
+  };
+  return (
+    <div style={{ background: T.bg, color: T.text, minHeight: "100vh", fontFamily: "'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace", fontSize: 12, overflow: "hidden" }}>
+      {/* ── HEADER BAR */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 16px", borderBottom: `1px solid ${T.border}`, background: T.bgPanel }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: T.textWhite, letterSpacing: 1 }}>NQ FORENSIC</span>
+          <span style={{ color: T.textMuted, fontSize: 10, letterSpacing: 2 }}>MNQ · $2/pt · 2-LOT SCALE-OUT</span>
+          <div style={{ display: "flex", gap: 2 }}>
+            {["1m", "5m", "15m"].map(tf => (
+              <button key={tf} onClick={() => setTimeframe(tf)} style={{
+                background: timeframe === tf ? T.bgActive : "transparent", color: timeframe === tf ? T.textBright : T.textMuted,
+                border: `1px solid ${timeframe === tf ? T.borderLight : "transparent"}`, padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 10,
+              }}>{tf}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 2, marginLeft: 8 }}>
+            {[
+              { label: "VWAP", active: showVWAP, toggle: () => setShowVWAP(v => !v), color: T.vwap },
+              { label: "SMA", active: showSMA, toggle: () => setShowSMA(v => !v), color: T.sma20 },
+              { label: "ATR", active: showATR, toggle: () => setShowATR(v => !v), color: T.blue },
+              { label: "VP", active: showVolProfile, toggle: () => setShowVolProfile(v => !v), color: T.blue },
+              { label: "SESS", active: showSessions, toggle: () => setShowSessions(v => !v), color: T.amber },
+              { label: "A/B", active: abMode, toggle: () => { setAbMode(v => !v); setAbSplitIndex(Math.floor(filteredTrades.length / 2)); }, color: T.purple },
+              { label: "PERF", active: showPerfPanel, toggle: () => setShowPerfPanel(v => !v), color: T.cyan },
+            ].map(b => (
+              <button key={b.label} onClick={b.toggle} style={{
+                background: b.active ? T.bgActive : "transparent",
+                color: b.active ? b.color : T.textMuted,
+                border: `1px solid ${b.active ? b.color + "40" : "transparent"}`,
+                padding: "2px 6px", borderRadius: 3, cursor: "pointer", fontSize: 9, fontWeight: 600,
+              }}>{b.label}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }}
+              onChange={e => { handleFileUpload(e.target.files[0]); e.target.value = ""; }} />
+            <button onClick={() => fileInputRef.current?.click()} style={{
+              background: "transparent", color: T.textMuted, border: `1px solid ${T.border}`,
+              padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+            }}>LOAD JSON</button>
+            {dataSource && <span style={{ color: T.textMuted, fontSize: 8 }}>{dataSource}</span>}
+          </div>
+        </div>
+        {hoveredCandle && (
+          <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
+            <span style={{ color: T.textMuted }}>{formatFull(hoveredCandle.time)}</span>
+            <span>O <span style={{ color: T.textBright }}>{formatPrice(hoveredCandle.open)}</span></span>
+            <span>H <span style={{ color: T.green }}>{formatPrice(hoveredCandle.high)}</span></span>
+            <span>L <span style={{ color: T.red }}>{formatPrice(hoveredCandle.low)}</span></span>
+            <span>C <span style={{ color: hoveredCandle.close >= hoveredCandle.open ? T.green : T.red }}>{formatPrice(hoveredCandle.close)}</span></span>
+            <span>Vol <span style={{ color: T.textBright }}>{hoveredCandle.volume.toLocaleString()}</span></span>
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", height: "calc(100vh - 42px)" }}>
+        {/* ── CHART AREA */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }} ref={containerRef}>
+          {/* Main chart canvas */}
+          <div style={{ position: "relative", cursor: isDragging.current ? "grabbing" : "crosshair" }}
+            onMouseMove={handleMouseMove} onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeave}
+            onWheel={handleWheel} onClick={handleChartClick} onDoubleClick={handleDoubleClick}
+          >
+            <canvas ref={chartRef} style={{ display: "block" }} />
+            {/* Hover tooltip */}
+            {hoveredTrade && !selectedTrade && (
+              <div style={{
+                position: "fixed", left: tooltipPos.x + 14, top: tooltipPos.y - 8,
+                background: T.bgCard, border: `1px solid ${T.borderLight}`,
+                borderRadius: 6, padding: "8px 10px", fontSize: 10, zIndex: 100,
+                pointerEvents: "none", minWidth: 190, boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ color: hoveredTrade.side === "long" ? T.green : T.red, fontWeight: 700 }}>
+                    {hoveredTrade.side.toUpperCase()} #{hoveredTrade.id}
+                  </span>
+                  <span style={{ color: hoveredTrade.pnl >= 0 ? T.green : T.red, fontWeight: 700 }}>
+                    ${hoveredTrade.pnl >= 0 ? "+" : ""}{hoveredTrade.pnl.toFixed(2)}
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 10px", color: T.textMuted }}>
+                  <span>Entry <span style={{ color: T.textBright }}>{formatPrice(hoveredTrade.entryPrice)}</span></span>
+                  <span>Stop <span style={{ color: T.red }}>{hoveredTrade.stopDist.toFixed(1)}pt</span></span>
+                  <span>Score <span style={{ color: T.blue }}>{hoveredTrade.signalScore.toFixed(2)}</span></span>
+                  <span>R <span style={{ color: hoveredTrade.rMultiple > 0 ? T.green : T.red }}>{hoveredTrade.rMultiple > 0 ? "+" : ""}{hoveredTrade.rMultiple}R</span></span>
+                  <span>Regime <span style={{ color: regimeColor(hoveredTrade.regime) }}>{hoveredTrade.regime}</span></span>
+                  <span>HTF <span style={{ color: T.textBright }}>{hoveredTrade.htfBias}</span></span>
+                </div>
+                <div style={{ marginTop: 4, color: exitColor(hoveredTrade.exitType), fontSize: 9, fontWeight: 600 }}>
+                  {hoveredTrade.exitType.replace(/_/g, " ").toUpperCase()}
+                </div>
+                <div style={{ marginTop: 2, fontSize: 8, color: T.textMuted }}>Click to inspect · Dbl-click reset</div>
+              </div>
+            )}
+          </div>
+          {/* Volume canvas */}
+          <div style={{ borderTop: `1px solid ${T.border}` }}>
+            <canvas ref={volRef} style={{ display: "block" }} />
+          </div>
+          {/* Regime subpane — click to filter */}
+          <div style={{ borderTop: `1px solid ${T.border}`, cursor: "pointer" }} onClick={handleRegimeClick} title="Click to filter by regime">
+            <canvas ref={regimeRef} style={{ display: "block" }} />
+          </div>
+          {/* HTF Bias subpane — click to set strength threshold */}
+          <div style={{ borderTop: `1px solid ${T.border}`, cursor: "pointer" }} onClick={handleHtfClick} title="Click to set HTF strength threshold">
+            <canvas ref={htfRef} style={{ display: "block" }} />
+          </div>
+          {/* Signal score subpane */}
+          <div style={{ borderTop: `1px solid ${T.border}` }}>
+            <canvas ref={signalRef} style={{ display: "block" }} />
+          </div>
+          {/* ── STATS BAR */}
+          {stats && (
+            <div style={{ display: "flex", gap: 1, padding: 0, borderTop: `1px solid ${T.border}`, background: T.bgPanel }}>
+              {[
+                { label: "TRADES", value: stats.count, color: T.textBright },
+                { label: "WIN%", value: `${stats.winRate}%`, color: parseFloat(stats.winRate) > 55 ? T.green : T.amber },
+                { label: "PF", value: stats.pf, color: parseFloat(stats.pf) > 2 ? T.green : parseFloat(stats.pf) > 1.5 ? T.amber : T.red },
+                { label: "TOTAL", value: `$${parseFloat(stats.totalPnl) >= 0 ? "+" : ""}${stats.totalPnl}`, color: parseFloat(stats.totalPnl) >= 0 ? T.green : T.red },
+                { label: "AVG", value: `$${stats.avgPnl}`, color: parseFloat(stats.avgPnl) >= 0 ? T.green : T.red },
+                { label: "AVG W", value: `$${stats.avgWin}`, color: T.green },
+                { label: "AVG L", value: `-$${stats.avgLoss}`, color: T.red },
+              ].map((s, i) => (
+                <div key={i} style={{ flex: 1, padding: "6px 10px", background: T.bgCard, textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 1, marginBottom: 2 }}>{s.label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: s.color }}>{s.value}</div>
+                </div>
+              ))}
+              <div onClick={() => setShowPerfPanel(v => !v)} style={{ padding: "6px 10px", background: showPerfPanel ? T.bgActive : T.bgCard, textAlign: "center", cursor: "pointer", minWidth: 50 }}>
+                <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 1, marginBottom: 2 }}>PERF</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: showPerfPanel ? T.cyan : T.textMuted }}>{showPerfPanel ? "▼" : "▶"}</div>
+              </div>
+            </div>
+          )}
+          {/* ── PERFORMANCE PANEL */}
+          {showPerfPanel && extStats && (
+            <div style={{ borderTop: `1px solid ${T.border}`, background: T.bgPanel, maxHeight: 340, overflow: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                {/* Left: Equity Curve + Streaks */}
+                <div style={{ borderRight: `1px solid ${T.border}` }}>
+                  <div style={{ padding: "6px 10px 2px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>EQUITY CURVE</div>
+                  <div style={{ padding: "0 6px 6px" }}>
+                    <canvas ref={equityRef} style={{ display: "block", width: "100%", borderRadius: 4 }} />
+                  </div>
+                  {/* Streak visualization */}
+                  <div style={{ padding: "4px 10px 8px" }}>
+                    <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2, marginBottom: 4 }}>WIN/LOSS STREAKS</div>
+                    <div style={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      {extStats.streaks.map((s, i) => (
+                        <div key={i} style={{
+                          width: Math.max(4, Math.min(20, s.len * 5)),
+                          height: Math.max(6, s.len * 6),
+                          background: s.win ? T.green : T.red,
+                          borderRadius: 2, opacity: 0.7,
+                          position: "relative",
+                        }} title={`${s.win ? "Win" : "Loss"} x${s.len}`}>
+                          {s.len >= 3 && <span style={{ position: "absolute", top: -10, left: 0, fontSize: 7, color: s.win ? T.green : T.red }}>{s.len}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* Right: Extended Stats + Heatmap */}
+                <div>
+                  <div style={{ padding: "6px 10px", fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>EXTENDED STATS</div>
+                  <div style={{ padding: "0 10px 6px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 12px", fontSize: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max DD</span><span style={{ color: T.red, fontWeight: 600 }}>${extStats.maxDD.toFixed(0)}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Sharpe</span><span style={{ color: T.textBright, fontWeight: 600 }}>{extStats.sharpe}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max Win Run</span><span style={{ color: T.green }}>{extStats.maxConsecWin}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Max Loss Run</span><span style={{ color: T.red }}>{extStats.maxConsecLoss}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Best</span><span style={{ color: T.green }}>+${extStats.bestTrade.pnl.toFixed(0)} #{extStats.bestTrade.id}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Worst</span><span style={{ color: T.red }}>${extStats.worstTrade.pnl.toFixed(0)} #{extStats.worstTrade.id}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Avg Hold</span><span style={{ color: T.textBright }}>{extStats.avgHold.toFixed(0)} bars</span></div>
+                  </div>
+                  {/* Hour/Day Heatmap */}
+                  <div style={{ padding: "4px 10px 8px" }}>
+                    <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2, marginBottom: 4 }}>PNL HEATMAP (DAY × HOUR)</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "28px repeat(11, 1fr)", gap: 1, fontSize: 7 }}>
+                      <span></span>
+                      {[8,9,10,11,12,13,14,15,16,17,18].map(h => (
+                        <span key={h} style={{ color: T.textMuted, textAlign: "center" }}>{h}</span>
+                      ))}
+                      {["Mon","Tue","Wed","Thu","Fri"].map(day => (
+                        <React.Fragment key={day}>
+                          <span style={{ color: T.textMuted, fontSize: 7 }}>{day}</span>
+                          {[8,9,10,11,12,13,14,15,16,17,18].map(hour => {
+                            const cell = extStats.heatmap[`${day}-${hour}`];
+                            if (!cell) return <span key={hour} style={{ background: T.bgCard, borderRadius: 2, height: 14 }}></span>;
+                            const intensity = Math.min(1, Math.abs(cell.pnl) / 200);
+                            const bg = cell.pnl >= 0 ? `rgba(0, 192, 135, ${0.1 + intensity * 0.5})` : `rgba(229, 51, 75, ${0.1 + intensity * 0.5})`;
+                            return (
+                              <span key={hour} style={{ background: bg, borderRadius: 2, height: 14, display: "flex", alignItems: "center", justifyContent: "center", color: T.textWhite, fontSize: 6 }}
+                                title={`${day} ${hour}:00 — ${cell.count} trades, $${cell.pnl.toFixed(0)}`}>
+                                {cell.count}
+                              </span>
+                            );
+                          })}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        {/* ── SIDEBAR: FILTERS + TRADE TABLE */}
+        <div style={{ width: 340, borderLeft: `1px solid ${T.border}`, display: "flex", flexDirection: "column", background: T.bgPanel }}>
+          {/* Filters */}
+          <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2, marginBottom: 8 }}>FILTERS</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <select value={filterRegime} onChange={e => setFilterRegime(e.target.value)}
+                style={{ background: T.bgCard, color: T.textBright, border: `1px solid ${T.border}`, borderRadius: 3, padding: "3px 6px", fontSize: 10, flex: 1, minWidth: 80 }}>
+                <option value="all">All Regimes</option>
+                <option value="trending_up">Trend Up</option>
+                <option value="trending_down">Trend Down</option>
+                <option value="ranging">Ranging</option>
+                <option value="unknown">Unknown</option>
+              </select>
+              <select value={filterSide} onChange={e => setFilterSide(e.target.value)}
+                style={{ background: T.bgCard, color: T.textBright, border: `1px solid ${T.border}`, borderRadius: 3, padding: "3px 6px", fontSize: 10, flex: 1, minWidth: 60 }}>
+                <option value="all">Both</option>
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+              </select>
+              <select value={filterExit} onChange={e => setFilterExit(e.target.value)}
+                style={{ background: T.bgCard, color: T.textBright, border: `1px solid ${T.border}`, borderRadius: 3, padding: "3px 6px", fontSize: 10, flex: 1, minWidth: 80 }}>
+                <option value="all">All Exits</option>
+                <option value="pt1_partial">PT1 Partial</option>
+                <option value="pt2_target">PT2 Target</option>
+                <option value="trailing_stop">Trailing</option>
+                <option value="stop_loss">Stop Loss</option>
+                <option value="be_plus">BE+</option>
+              </select>
+            </div>
+            <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 10, color: T.textMuted }}>Score ≥</span>
+              <input type="range" min="0.70" max="0.98" step="0.01" value={filterMinScore}
+                onChange={e => setFilterMinScore(parseFloat(e.target.value))}
+                style={{ flex: 1, accentColor: T.blue }} />
+              <span style={{ fontSize: 11, color: T.textBright, fontWeight: 600, minWidth: 36 }}>{filterMinScore.toFixed(2)}</span>
+            </div>
+            {htfBiasData.length > 0 && (
+              <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 10, color: T.textMuted }}>HTF ≥</span>
+                <input type="range" min="0" max="0.80" step="0.05" value={filterHtfMinStrength}
+                  onChange={e => setFilterHtfMinStrength(parseFloat(e.target.value))}
+                  style={{ flex: 1, accentColor: T.cyan }} />
+                <span style={{ fontSize: 11, color: T.textBright, fontWeight: 600, minWidth: 36 }}>{filterHtfMinStrength.toFixed(2)}</span>
+              </div>
+            )}
+            {hasActiveFilters && (
+              <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 9, color: T.amber, fontWeight: 600, letterSpacing: 1 }}>FILTERED</span>
+                <button onClick={resetFilters} style={{
+                  background: "transparent", color: T.textMuted, border: `1px solid ${T.border}`,
+                  padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+                }}>RESET</button>
+              </div>
+            )}
+          </div>
+          {/* Selected trade detail */}
+          {selectedTrade && (
+            <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, background: T.bgCard }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button onClick={() => navigateTrade(-1)} style={{ background: T.bgHover, border: `1px solid ${T.border}`, color: T.textMuted, cursor: "pointer", fontSize: 10, padding: "1px 5px", borderRadius: 3 }}>&#9664;</button>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: T.textWhite, letterSpacing: 1 }}>TRADE #{selectedTrade.id}</span>
+                  <button onClick={() => navigateTrade(1)} style={{ background: T.bgHover, border: `1px solid ${T.border}`, color: T.textMuted, cursor: "pointer", fontSize: 10, padding: "1px 5px", borderRadius: 3 }}>&#9654;</button>
+                </div>
+                <button onClick={() => setSelectedTrade(null)} style={{ background: "transparent", border: "none", color: T.textMuted, cursor: "pointer", fontSize: 12 }}>✕</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 10 }}>
+                <div><span style={{ color: T.textMuted }}>Side</span> <span style={{ color: selectedTrade.side === "long" ? T.green : T.red, fontWeight: 600 }}>{selectedTrade.side.toUpperCase()}</span></div>
+                <div><span style={{ color: T.textMuted }}>Score</span> <span style={{ color: T.blue, fontWeight: 600 }}>{selectedTrade.signalScore.toFixed(3)}</span></div>
+                <div><span style={{ color: T.textMuted }}>Entry</span> <span style={{ color: T.textBright }}>{formatPrice(selectedTrade.entryPrice)}</span></div>
+                <div><span style={{ color: T.textMuted }}>Exit</span> <span style={{ color: T.textBright }}>{formatPrice(selectedTrade.exitPrice)}</span></div>
+                <div><span style={{ color: T.textMuted }}>Stop</span> <span style={{ color: T.red }}>{formatPrice(selectedTrade.stopPrice)} ({selectedTrade.stopDist.toFixed(1)}pt)</span></div>
+                <div><span style={{ color: T.textMuted }}>R:R</span> <span style={{ color: selectedTrade.rMultiple > 0 ? T.green : T.red, fontWeight: 600 }}>{selectedTrade.rMultiple > 0 ? "+" : ""}{selectedTrade.rMultiple}R</span></div>
+                <div><span style={{ color: T.textMuted }}>PnL</span> <span style={{ color: selectedTrade.pnl >= 0 ? T.green : T.red, fontWeight: 700 }}>${selectedTrade.pnl >= 0 ? "+" : ""}{selectedTrade.pnl.toFixed(2)}</span></div>
+                <div><span style={{ color: T.textMuted }}>Slip</span> <span style={{ color: T.amber }}>${selectedTrade.slippage.toFixed(2)}</span></div>
+                <div><span style={{ color: T.textMuted }}>C1</span> <span style={{ color: selectedTrade.c1Pnl >= 0 ? T.green : T.red }}>${selectedTrade.c1Pnl.toFixed(2)}</span></div>
+                <div><span style={{ color: T.textMuted }}>C2</span> <span style={{ color: selectedTrade.c2Pnl >= 0 ? T.green : T.red }}>${selectedTrade.c2Pnl.toFixed(2)}</span></div>
+                <div><span style={{ color: T.textMuted }}>MFE</span> <span style={{ color: T.green }}>{selectedTrade.mfe.toFixed(1)}pt</span></div>
+                <div><span style={{ color: T.textMuted }}>MAE</span> <span style={{ color: T.red }}>{selectedTrade.mae.toFixed(1)}pt</span></div>
+                <div><span style={{ color: T.textMuted }}>Regime</span> <span style={{ color: regimeColor(selectedTrade.regime) }}>{selectedTrade.regime}</span></div>
+                <div><span style={{ color: T.textMuted }}>HTF</span> <span style={{ color: T.textBright }}>{selectedTrade.htfBias}</span></div>
+                <div style={{ gridColumn: "1 / -1" }}><span style={{ color: T.textMuted }}>Exit</span> <span style={{ color: exitColor(selectedTrade.exitType), fontWeight: 600 }}>{selectedTrade.exitType.replace(/_/g, " ").toUpperCase()}</span></div>
+                <div style={{ gridColumn: "1 / -1" }}><span style={{ color: T.textMuted }}>Hold</span> <span style={{ color: T.textBright }}>{selectedTrade.holdBars} bars</span> <span style={{ color: T.textMuted, marginLeft: 8 }}>{formatFull(selectedTrade.entryTime)}</span></div>
+                <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                  <span style={{ color: T.textMuted }}>Compliance</span>
+                  <span style={{ background: selectedTrade.isCompliant ? "#0a2a1a" : "#2a0a0e", color: selectedTrade.isCompliant ? T.green : T.red, padding: "1px 6px", borderRadius: 3, fontSize: 9, fontWeight: 700 }}>
+                    {selectedTrade.isCompliant ? "✓ PASS" : "✗ VIOLATION"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* A/B Comparison Panel */}
+          {abMode && abStats && (
+            <div style={{ padding: "8px 12px", borderBottom: `1px solid ${T.border}`, background: T.bgCard }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>A/B SPLIT</span>
+                <span style={{ fontSize: 9, color: T.textMuted }}>Trade #{abStats.split}</span>
+              </div>
+              <input type="range" min="1" max={Math.max(2, filteredTrades.length - 1)} step="1" value={abSplitIndex || Math.floor(filteredTrades.length / 2)}
+                onChange={e => setAbSplitIndex(parseInt(e.target.value))}
+                style={{ width: "100%", accentColor: T.purple, marginBottom: 6 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {[{ label: "A", data: abStats.a, color: T.blue }, { label: "B", data: abStats.b, color: T.purple }].map(g => g.data && (
+                  <div key={g.label} style={{ background: T.bg, borderRadius: 4, padding: "6px 8px", border: `1px solid ${g.color}30` }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: g.color, marginBottom: 4 }}>GROUP {g.label} ({g.data.count})</div>
+                    <div style={{ fontSize: 9, display: "grid", gap: 2 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Win%</span><span style={{ color: parseFloat(g.data.winRate) > 55 ? T.green : T.amber }}>{g.data.winRate}%</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>PF</span><span style={{ color: parseFloat(g.data.pf) > 1.5 ? T.green : parseFloat(g.data.pf) > 1 ? T.amber : T.red }}>{g.data.pf}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Total</span><span style={{ color: parseFloat(g.data.totalPnl) >= 0 ? T.green : T.red }}>${g.data.totalPnl}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.textMuted }}>Avg</span><span style={{ color: parseFloat(g.data.avgPnl) >= 0 ? T.green : T.red }}>${g.data.avgPnl}</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Trade table */}
+          <div style={{ flex: 1, overflow: "auto" }}>
+            <div style={{ padding: "8px 12px 4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 9, color: T.textMuted, letterSpacing: 2 }}>TRADE LOG — {filteredTrades.length} TRADES</span>
+              <button onClick={exportCSV} style={{
+                background: T.bgCard, color: T.textMuted, border: `1px solid ${T.border}`,
+                padding: "2px 8px", borderRadius: 3, cursor: "pointer", fontSize: 8, letterSpacing: 1,
+              }}>CSV</button>
+            </div>
+            <div style={{ fontSize: 10 }}>
+              {/* Sortable header */}
+              <div style={{ display: "grid", gridTemplateColumns: "26px 34px 50px 44px 48px 50px 44px", gap: 2, padding: "4px 12px", borderBottom: `1px solid ${T.border}`, color: T.textMuted, fontSize: 8, letterSpacing: 0.5, position: "sticky", top: 0, background: T.bgPanel, zIndex: 1 }}>
+                {[
+                  { col: "id", label: "#" }, { col: "side", label: "SIDE" }, { col: "entry", label: "ENTRY" },
+                  { col: "stop", label: "STOP" }, { col: "pnl", label: "PNL" }, { col: "exit", label: "EXIT" }, { col: "regime", label: "REGIME" },
+                ].map(h => (
+                  <span key={h.col} onClick={() => handleSort(h.col)} style={{ cursor: "pointer", color: sortCol === h.col ? T.textBright : T.textMuted, userSelect: "none" }}>
+                    {h.label}{sortCol === h.col ? (sortDir > 0 ? " ▲" : " ▼") : ""}
+                  </span>
+                ))}
+              </div>
+              {sortedTrades.map((t, ti) => (
+                <div key={t.id} onClick={() => focusTrade(t)}
+                  style={{
+                    display: "grid", gridTemplateColumns: "26px 34px 50px 44px 48px 50px 44px", gap: 2,
+                    padding: "5px 12px", cursor: "pointer", borderBottom: `1px solid ${T.border}08`,
+                    background: selectedTrade?.id === t.id ? T.bgActive : (abMode && abStats ? (ti < abStats.split ? `${T.blue}08` : `${T.purple}08`) : "transparent"),
+                    transition: "background 0.15s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = selectedTrade?.id === t.id ? T.bgActive : T.bgHover}
+                  onMouseLeave={e => e.currentTarget.style.background = selectedTrade?.id === t.id ? T.bgActive : (abMode && abStats ? (ti < abStats.split ? `${T.blue}08` : `${T.purple}08`) : "transparent")}
+                >
+                  <span style={{ color: T.textMuted }}>{t.id}</span>
+                  <span style={{ color: t.side === "long" ? T.green : T.red, fontWeight: 600 }}>{t.side === "long" ? "LNG" : "SHT"}</span>
+                  <span style={{ color: T.textBright }}>{formatPrice(t.entryPrice)}</span>
+                  <span style={{ color: T.textMuted }}>{t.stopDist.toFixed(0)}pt</span>
+                  <span style={{ color: t.pnl >= 0 ? T.green : T.red, fontWeight: 600 }}>{t.pnl >= 0 ? "+" : ""}{t.pnl.toFixed(0)}</span>
+                  <span style={{ color: exitColor(t.exitType), fontSize: 8 }}>{t.exitType.replace(/_/g, " ").split(" ").map(w => w[0].toUpperCase()).join("")}</span>
+                  <span style={{ fontSize: 8 }}>
+                    <span style={{ display: "inline-block", width: 5, height: 5, borderRadius: "50%", background: regimeColor(t.regime), marginRight: 3 }}></span>
+                    {t.regime.replace("trending_", "T").replace("unknown", "UNK").replace("ranging", "RNG").substring(0, 3).toUpperCase()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Legend */}
+          <div style={{ padding: "8px 12px", borderTop: `1px solid ${T.border}`, fontSize: 9, color: T.textMuted }}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <span><span style={{ color: T.blue }}>●</span> PT1</span>
+              <span><span style={{ color: T.purple }}>●</span> PT2</span>
+              <span><span style={{ color: T.green }}>●</span> Trail</span>
+              <span><span style={{ color: T.red }}>●</span> Stop</span>
+              <span><span style={{ color: T.amber }}>●</span> BE+</span>
+            </div>
+            <div style={{ marginTop: 4, color: T.textMuted, fontSize: 8 }}>Scroll zoom · Drag pan · Click trade · Dbl-click reset · ←→ nav · Esc deselect · Drop JSON</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(React.createElement(NQForensicVisualizer));
+  </script>
+</body>
+</html>

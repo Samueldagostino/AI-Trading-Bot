@@ -1,0 +1,23 @@
+# ── NQ Trading Bot — Dependencies ────────────────────────────
+# Install: pip install -r requirements.txt
+
+# Core
+numpy>=1.24.0
+pandas>=2.0.0
+asyncio-mqtt>=0.16.0
+
+# Database
+asyncpg>=0.28.0
+
+# Web / Dashboard
+uvicorn>=0.23.0
+fastapi>=0.100.0
+jinja2>=3.1.0
+
+# Data
+aiohttp>=3.8.0
+websockets>=11.0
+
+# Utilities
+python-dotenv>=1.0.0
+python-dateutil>=2.8.0
