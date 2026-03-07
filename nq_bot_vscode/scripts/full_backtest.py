@@ -210,6 +210,61 @@ def aggregate_to_2m(bars_1m: List[Dict]) -> List[Dict]:
     return result
 
 
+def _floor_to_tf(ts: datetime, tf_minutes: int) -> datetime:
+    """Floor a timestamp to the nearest timeframe boundary.
+
+    For intraday (5m–4H): floors within each day.
+    For daily (1440): floors to midnight of the same day.
+    """
+    if tf_minutes >= 1440:
+        return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    total_minutes = ts.hour * 60 + ts.minute
+    floored_minutes = (total_minutes // tf_minutes) * tf_minutes
+    return ts.replace(
+        hour=floored_minutes // 60,
+        minute=floored_minutes % 60,
+        second=0,
+        microsecond=0,
+    )
+
+
+def aggregate_1m_to_htf(bars_1m: List[Dict]) -> Dict[str, List[Dict]]:
+    """Build all HTF bars (5m, 15m, 30m, 1H, 4H, 1D) causally from 1-min data.
+
+    Uses the same bucketing logic as aggregate_to_2m but for each HTF period.
+    Returns Dict[str, List[Dict]] suitable for HTFScheduler.
+    """
+    tf_minutes = {"5m": 5, "15m": 15, "30m": 30, "1H": 60, "4H": 240, "1D": 1440}
+    htf_data: Dict[str, List[Dict]] = {}
+
+    for tf_label, tf_min in tf_minutes.items():
+        buckets: Dict[datetime, List[Dict]] = {}
+
+        for bar in bars_1m:
+            bucket_ts = _floor_to_tf(bar["timestamp"], tf_min)
+            if bucket_ts not in buckets:
+                buckets[bucket_ts] = []
+            buckets[bucket_ts].append(bar)
+
+        result = []
+        for bucket_ts in sorted(buckets.keys()):
+            group = buckets[bucket_ts]
+            group.sort(key=lambda b: b["timestamp"])
+            result.append({
+                "timestamp": bucket_ts,
+                "open": group[0]["open"],
+                "high": max(b["high"] for b in group),
+                "low": min(b["low"] for b in group),
+                "close": group[-1]["close"],
+                "volume": sum(b["volume"] for b in group),
+            })
+
+        htf_data[tf_label] = result
+        print(f"    {tf_label}: {len(result):>8,} bars (built from 1m)")
+
+    return htf_data
+
+
 # =====================================================================
 #  SESSION UTILITIES
 # =====================================================================
@@ -700,6 +755,9 @@ class CausalReplayEngine:
         self._daily_pnl: float = 0.0
         self._cumulative_pnl: float = 0.0
         self._kill_switch_active: bool = False
+        self._htf_bars_completed: Dict[str, int] = {
+            "5m": 0, "15m": 0, "30m": 0, "1H": 0, "4H": 0, "1D": 0,
+        }
 
         # ── Pending signal (signal at bar N, execute at bar N+1) ──
         self._pending_entry: Optional[Dict] = None
@@ -1358,6 +1416,7 @@ class CausalReplayEngine:
             )
             self.htf_engine.update_bar(tf, htf_bar)
             self._htf_bias = self.htf_engine.get_bias(ts)
+            self._htf_bars_completed[tf] = self._htf_bars_completed.get(tf, 0) + 1
 
         # ── Step 1: Execute pending entry from previous bar ──
         await self._execute_pending_entry(bar)
@@ -1387,12 +1446,16 @@ class CausalReplayEngine:
                     f"{self._htf_bias.consensus_direction}"
                     f"({self._htf_bias.consensus_strength:.2f})"
                 )
+            htf_1h = self._htf_bars_completed.get("1H", 0)
+            htf_4h = self._htf_bars_completed.get("4H", 0)
+            htf_1d = self._htf_bars_completed.get("1D", 0)
             print(
                 f"  [{self._bars_processed:>10,}] "
                 f"{ts.strftime('%Y-%m-%d %H:%M')} | "
                 f"Trades: {self._entry_count} | "
                 f"PnL: ${self._cumulative_pnl:+,.2f} | "
                 f"HTF: {bias_str} | "
+                f"HTF bars [1H:{htf_1h} 4H:{htf_4h} 1D:{htf_1d}] | "
                 f"Regime: {self._current_regime}"
             )
 
@@ -2092,13 +2155,13 @@ async def run_backtest(
         )
     print()
 
+    # ── Build HTF data causally from 1-min bars ──
+    print("Building HTF bars from 1-min data...")
+    htf_data = aggregate_1m_to_htf(bars_1m)
+    print()
+
     # Free 1m data to save memory
     del bars_1m
-
-    # ── Load HTF data ──
-    print("Loading HTF data...")
-    htf_data = load_all_htf(htf_dir)
-    print()
 
     # ── Initialize engine ──
     config = BotConfig()
