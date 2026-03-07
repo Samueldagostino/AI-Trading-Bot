@@ -1,6 +1,6 @@
 {
   "diagnostic": "fast_shadow_ucl_v2",
-  "generated": "2026-03-06T17:04:32.311909+00:00",
+  "generated": "2026-03-07T19:26:39.693368+00:00",
   "dataset": {
     "period": "period_4",
     "label": "Sep 2023 \u2013 Feb 2024 (chop regime)",
@@ -30,19 +30,19 @@
       "max_drawdown_pct": 1.0
     },
     "ucl_v2": {
-      "total_trades": 247,
-      "win_rate": 40.9,
+      "total_trades": 250,
+      "win_rate": 40.8,
       "profit_factor": 1.41,
-      "total_pnl": 2971.88,
-      "c1_pnl": 334.87,
-      "c2_pnl": 2637.01,
-      "max_drawdown_pct": 1.4
+      "total_pnl": 3046.62,
+      "c1_pnl": 344.5,
+      "c2_pnl": 2702.12,
+      "max_drawdown_pct": 1.3
     }
   },
   "ucl_v2_metrics": {
     "fvg_boosts_applied": 0,
     "signals_boosted_past_075": 0,
-    "wide_stop_watches_created": 39,
+    "wide_stop_watches_created": 41,
     "wide_stop_watches_confirmed": 17,
     "wide_stop_converted_trades": 0,
     "avg_original_stop": 0.0,
@@ -52,28 +52,28 @@
     "fvg_active": 9
   },
   "trade_summary": {
-    "total_trades": 247,
-    "win_rate": 40.9,
+    "total_trades": 250,
+    "win_rate": 40.8,
     "profit_factor": 1.41,
-    "total_pnl": 2971.88,
-    "c1_pnl": 334.87,
-    "c2_pnl": 2637.01,
-    "max_drawdown_pct": 1.4,
-    "expectancy": 12.03
+    "total_pnl": 3046.62,
+    "c1_pnl": 344.5,
+    "c2_pnl": 2702.12,
+    "max_drawdown_pct": 1.3,
+    "expectancy": 12.19
   },
   "shadow_analysis": {
-    "total_shadow_signals": 8730,
+    "total_shadow_signals": 8680,
     "by_gate": {
       "HC score below 0.75": {
-        "count": 514,
-        "shadow_wins": 228,
-        "shadow_losses": 274,
+        "count": 512,
+        "shadow_wins": 227,
+        "shadow_losses": 273,
         "shadow_timeouts": 12,
-        "shadow_total_pnl": 9235.4,
-        "shadow_win_rate": 44.4,
+        "shadow_total_pnl": 9175.96,
+        "shadow_win_rate": 44.3,
         "shadow_profit_factor": 1.43,
-        "avg_mfe_points": 29.05,
-        "avg_mae_points": 21.29,
+        "avg_mfe_points": 28.92,
+        "avg_mae_points": 21.28,
         "avg_score": 0.7
       },
       "Min R:R failed": {
@@ -89,16 +89,16 @@
         "avg_score": 0.8007
       },
       "Max stop exceeded \u2014 routed to UCL watch": {
-        "count": 39,
+        "count": 41,
         "shadow_wins": 19,
-        "shadow_losses": 18,
+        "shadow_losses": 20,
         "shadow_timeouts": 2,
-        "shadow_total_pnl": 1638.52,
-        "shadow_win_rate": 48.7,
-        "shadow_profit_factor": 1.67,
-        "avg_mfe_points": 42.94,
-        "avg_mae_points": 29.71,
-        "avg_score": 0.7897
+        "shadow_total_pnl": 1231.2,
+        "shadow_win_rate": 46.3,
+        "shadow_profit_factor": 1.46,
+        "avg_mfe_points": 40.88,
+        "avg_mae_points": 30.8,
+        "avg_score": 0.789
       },
       "Max stop exceeded": {
         "count": 5,
@@ -113,16 +113,16 @@
         "avg_score": 1.0
       },
       "HTF gate block": {
-        "count": 7343,
-        "shadow_wins": 2623,
-        "shadow_losses": 4620,
+        "count": 7301,
+        "shadow_wins": 2600,
+        "shadow_losses": 4601,
         "shadow_timeouts": 100,
-        "shadow_total_pnl": -57450.6,
-        "shadow_win_rate": 35.7,
+        "shadow_total_pnl": -56869.8,
+        "shadow_win_rate": 35.6,
         "shadow_profit_factor": 0.91,
-        "avg_mfe_points": 11.23,
-        "avg_mae_points": 11.33,
-        "avg_score": 0.742
+        "avg_mfe_points": 11.2,
+        "avg_mae_points": 11.29,
+        "avg_score": 0.7419
       },
       "HTF bearish blocks long": {
         "count": 106,
@@ -147,25 +147,13 @@
         "avg_mfe_points": 14.93,
         "avg_mae_points": 19.79,
         "avg_score": 0.7505
-      },
-      "Risk decision rejected": {
-        "count": 8,
-        "shadow_wins": 1,
-        "shadow_losses": 5,
-        "shadow_timeouts": 2,
-        "shadow_total_pnl": -853.56,
-        "shadow_win_rate": 12.5,
-        "shadow_profit_factor": 0.2,
-        "avg_mfe_points": 21.12,
-        "avg_mae_points": 43.91,
-        "avg_score": 0.775
       }
     },
     "gate_value_ranking": [
       {
         "gate": "HTF gate block",
-        "shadow_pnl": -57450.6,
-        "count": 7343,
+        "shadow_pnl": -56869.8,
+        "count": 7301,
         "verdict": "PROTECTING"
       },
       {
@@ -187,12 +175,6 @@
         "verdict": "PROTECTING"
       },
       {
-        "gate": "Risk decision rejected",
-        "shadow_pnl": -853.56,
-        "count": 8,
-        "verdict": "PROTECTING"
-      },
-      {
         "gate": "Max stop exceeded",
         "shadow_pnl": 53.7,
         "count": 5,
@@ -200,21 +182,21 @@
       },
       {
         "gate": "Max stop exceeded \u2014 routed to UCL watch",
-        "shadow_pnl": 1638.52,
-        "count": 39,
+        "shadow_pnl": 1231.2,
+        "count": 41,
         "verdict": "COSTING"
       },
       {
         "gate": "HC score below 0.75",
-        "shadow_pnl": 9235.4,
-        "count": 514,
+        "shadow_pnl": 9175.96,
+        "count": 512,
         "verdict": "COSTING"
       }
     ]
   },
   "timing": {
-    "replay_seconds": 212.4,
+    "replay_seconds": 212.6,
     "shadow_sim_seconds": 0.1,
-    "total_seconds": 212.5
+    "total_seconds": 212.7
   }
 }
