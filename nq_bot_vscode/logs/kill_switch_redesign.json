@@ -1,0 +1,474 @@
+{
+  "investigation": "Kill Switch Redesign",
+  "generated_at": "2026-03-07T19:09:13.838776Z",
+  "data_source": "backtest_checkpoint.json + backtest_trades_partial.json",
+  "trades_in_sequence": 496,
+  "win_rate": 49.4,
+  "losing_streak_stats": {
+    "total_streaks_gte_5": 11,
+    "total_streaks_gte_7": 3,
+    "longest_streak": 8,
+    "all_streaks_gte_5": [
+      5,
+      8,
+      6,
+      5,
+      5,
+      6,
+      7,
+      5,
+      6,
+      5,
+      7
+    ]
+  },
+  "current_kill_switch": {
+    "type": "consecutive_losses",
+    "threshold": 5,
+    "analysis": {
+      "total_activations": 10,
+      "total_trades_missed": 100,
+      "total_missed_pnl": 407.7,
+      "avg_shadow_pnl_per_activation": 40.77,
+      "pct_activations_where_recovery_missed": 50.0,
+      "activations": [
+        {
+          "activation_number": 1,
+          "triggered_at_trade": 13,
+          "bar_index": 7646,
+          "timestamp": "2021-09-16T05:50:00-04:00",
+          "consecutive_losses_pnl": -220.79999999999998,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 6,
+          "shadow_window_pnl": 25.42,
+          "shadow_window_would_have_recovered": true
+        },
+        {
+          "activation_number": 2,
+          "triggered_at_trade": 40,
+          "bar_index": 18767,
+          "timestamp": "2021-10-08T08:32:00-04:00",
+          "consecutive_losses_pnl": -297.8,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 2,
+          "shadow_window_pnl": -125.32,
+          "shadow_window_would_have_recovered": false
+        },
+        {
+          "activation_number": 3,
+          "triggered_at_trade": 122,
+          "bar_index": 64799,
+          "timestamp": "2022-01-12T09:40:00-05:00",
+          "consecutive_losses_pnl": -554.8,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 6,
+          "shadow_window_pnl": -80.6,
+          "shadow_window_would_have_recovered": false
+        },
+        {
+          "activation_number": 4,
+          "triggered_at_trade": 194,
+          "bar_index": 90776,
+          "timestamp": "2022-03-07T09:34:00-05:00",
+          "consecutive_losses_pnl": -342.79999999999995,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 6,
+          "shadow_window_pnl": 649.02,
+          "shadow_window_would_have_recovered": true
+        },
+        {
+          "activation_number": 5,
+          "triggered_at_trade": 219,
+          "bar_index": 100446,
+          "timestamp": "2022-03-25T09:54:00-04:00",
+          "consecutive_losses_pnl": -503.79999999999995,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 3,
+          "shadow_window_pnl": -599.6,
+          "shadow_window_would_have_recovered": false
+        },
+        {
+          "activation_number": 6,
+          "triggered_at_trade": 255,
+          "bar_index": 112631,
+          "timestamp": "2022-04-21T02:04:00-04:00",
+          "consecutive_losses_pnl": -283.8,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 5,
+          "shadow_window_pnl": -313.46,
+          "shadow_window_would_have_recovered": false
+        },
+        {
+          "activation_number": 7,
+          "triggered_at_trade": 303,
+          "bar_index": 134817,
+          "timestamp": "2022-06-06T09:36:00-04:00",
+          "consecutive_losses_pnl": -450.79999999999995,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 6,
+          "shadow_window_pnl": 313.0,
+          "shadow_window_would_have_recovered": true
+        },
+        {
+          "activation_number": 8,
+          "triggered_at_trade": 327,
+          "bar_index": 146378,
+          "timestamp": "2022-06-29T07:58:00-04:00",
+          "consecutive_losses_pnl": -463.8,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 8,
+          "shadow_window_pnl": 573.38,
+          "shadow_window_would_have_recovered": true
+        },
+        {
+          "activation_number": 9,
+          "triggered_at_trade": 392,
+          "bar_index": 182757,
+          "timestamp": "2022-09-12T09:36:00-04:00",
+          "consecutive_losses_pnl": -159.79999999999998,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 5,
+          "shadow_window_pnl": -191.1,
+          "shadow_window_would_have_recovered": false
+        },
+        {
+          "activation_number": 10,
+          "triggered_at_trade": 470,
+          "bar_index": 227381,
+          "timestamp": "2022-12-12T09:48:00-05:00",
+          "consecutive_losses_pnl": -285.29999999999995,
+          "shadow_window_trades": 10,
+          "shadow_window_wins": 5,
+          "shadow_window_pnl": 156.96,
+          "shadow_window_would_have_recovered": true
+        }
+      ]
+    }
+  },
+  "current_kill_switch_simulation": {
+    "params": {
+      "type": "consecutive_losses",
+      "max_consecutive": 5,
+      "pause_trades": 10
+    },
+    "total_pnl": 4467.4,
+    "trades_taken": 396,
+    "trades_skipped": 100,
+    "profit_factor": 1.269,
+    "max_drawdown_pct": 1.93,
+    "activations": 10
+  },
+  "no_kill_switch_baseline": {
+    "total_pnl": 4875.1,
+    "profit_factor": 1.239,
+    "trades": 496
+  },
+  "drawdown_velocity_variants": {
+    "Conservative": {
+      "params": {
+        "pct_threshold": 1.0,
+        "lookback_trades": 10,
+        "pause_trades": 15,
+        "label": "Conservative"
+      },
+      "results": {
+        "params": {
+          "pct_threshold": 1.0,
+          "lookback_trades": 10,
+          "pause_trades": 15,
+          "label": "Conservative"
+        },
+        "total_pnl": 2824.44,
+        "trades_taken": 421,
+        "trades_skipped": 75,
+        "profit_factor": 1.164,
+        "max_drawdown_pct": 2.568,
+        "activations": 5,
+        "total_shadow_pnl": 2050.66,
+        "activation_details": [
+          {
+            "activation_number": 1,
+            "triggered_at_trade": 128,
+            "bar_index": 66177,
+            "equity_at_trip": 520.6,
+            "lookback_equity": 1081.2,
+            "drop_pct": 1.097,
+            "shadow_pnl": 1379.18
+          },
+          {
+            "activation_number": 2,
+            "triggered_at_trade": 159,
+            "bar_index": 78257,
+            "equity_at_trip": 691.36,
+            "lookback_equity": 1422.96,
+            "drop_pct": 1.423,
+            "shadow_pnl": 642.6
+          },
+          {
+            "activation_number": 3,
+            "triggered_at_trade": 218,
+            "bar_index": 100442,
+            "equity_at_trip": 1440.12,
+            "lookback_equity": 2055.72,
+            "drop_pct": 1.183,
+            "shadow_pnl": -690.38
+          },
+          {
+            "activation_number": 4,
+            "triggered_at_trade": 268,
+            "bar_index": 117003,
+            "equity_at_trip": 923.12,
+            "lookback_equity": 1449.22,
+            "drop_pct": 1.023,
+            "shadow_pnl": 470.58
+          },
+          {
+            "activation_number": 5,
+            "triggered_at_trade": 445,
+            "bar_index": 215192,
+            "equity_at_trip": 3005.26,
+            "lookback_equity": 3593.36,
+            "drop_pct": 1.097,
+            "shadow_pnl": 248.68
+          }
+        ]
+      }
+    },
+    "Moderate": {
+      "params": {
+        "pct_threshold": 0.75,
+        "lookback_trades": 8,
+        "pause_trades": 10,
+        "label": "Moderate"
+      },
+      "results": {
+        "params": {
+          "pct_threshold": 0.75,
+          "lookback_trades": 8,
+          "pause_trades": 10,
+          "label": "Moderate"
+        },
+        "total_pnl": 3182.4,
+        "trades_taken": 396,
+        "trades_skipped": 100,
+        "profit_factor": 1.188,
+        "max_drawdown_pct": 2.783,
+        "activations": 10,
+        "total_shadow_pnl": 1692.7,
+        "activation_details": [
+          {
+            "activation_number": 1,
+            "triggered_at_trade": 43,
+            "bar_index": 20461,
+            "equity_at_trip": -460.1,
+            "lookback_equity": -26.82,
+            "drop_pct": 0.867,
+            "shadow_pnl": 114.18
+          },
+          {
+            "activation_number": 2,
+            "triggered_at_trade": 124,
+            "bar_index": 65497,
+            "equity_at_trip": 528.56,
+            "lookback_equity": 986.34,
+            "drop_pct": 0.898,
+            "shadow_pnl": 26.98
+          },
+          {
+            "activation_number": 3,
+            "triggered_at_trade": 157,
+            "bar_index": 77724,
+            "equity_at_trip": 2006.7,
+            "lookback_equity": 2660.98,
+            "drop_pct": 1.242,
+            "shadow_pnl": 74.52
+          },
+          {
+            "activation_number": 4,
+            "triggered_at_trade": 198,
+            "bar_index": 92164,
+            "equity_at_trip": 2861.58,
+            "lookback_equity": 3304.86,
+            "drop_pct": 0.832,
+            "shadow_pnl": 1000.24
+          },
+          {
+            "activation_number": 5,
+            "triggered_at_trade": 216,
+            "bar_index": 99749,
+            "equity_at_trip": 2397.3,
+            "lookback_equity": 2861.58,
+            "drop_pct": 0.878,
+            "shadow_pnl": -555.6
+          },
+          {
+            "activation_number": 6,
+            "triggered_at_trade": 257,
+            "bar_index": 113547,
+            "equity_at_trip": 2022.82,
+            "lookback_equity": 2417.1,
+            "drop_pct": 0.752,
+            "shadow_pnl": -261.46
+          },
+          {
+            "activation_number": 7,
+            "triggered_at_trade": 283,
+            "bar_index": 123896,
+            "equity_at_trip": 2326.24,
+            "lookback_equity": 2731.08,
+            "drop_pct": 0.768,
+            "shadow_pnl": 482.32
+          },
+          {
+            "activation_number": 8,
+            "triggered_at_trade": 306,
+            "bar_index": 135506,
+            "equity_at_trip": 2147.28,
+            "lookback_equity": 2655.06,
+            "drop_pct": 0.964,
+            "shadow_pnl": 435.42
+          },
+          {
+            "activation_number": 9,
+            "triggered_at_trade": 443,
+            "bar_index": 213806,
+            "equity_at_trip": 3619.96,
+            "lookback_equity": 4078.74,
+            "drop_pct": 0.848,
+            "shadow_pnl": -35.16
+          },
+          {
+            "activation_number": 10,
+            "triggered_at_trade": 472,
+            "bar_index": 228950,
+            "equity_at_trip": 3427.36,
+            "lookback_equity": 3848.14,
+            "drop_pct": 0.781,
+            "shadow_pnl": 411.26
+          }
+        ]
+      }
+    },
+    "Aggressive": {
+      "params": {
+        "pct_threshold": 0.5,
+        "lookback_trades": 6,
+        "pause_trades": 8,
+        "label": "Aggressive"
+      },
+      "results": {
+        "params": {
+          "pct_threshold": 0.5,
+          "lookback_trades": 6,
+          "pause_trades": 8,
+          "label": "Aggressive"
+        },
+        "total_pnl": 871.88,
+        "trades_taken": 328,
+        "trades_skipped": 168,
+        "profit_factor": 1.059,
+        "max_drawdown_pct": 4.884,
+        "activations": 21,
+        "total_shadow_pnl": 4003.22,
+        "activation_details": [
+          {
+            "activation_number": 1,
+            "triggered_at_trade": 12,
+            "bar_index": 7082,
+            "equity_at_trip": -226.72,
+            "lookback_equity": 25.74,
+            "drop_pct": 0.505,
+            "shadow_pnl": 67.74
+          },
+          {
+            "activation_number": 2,
+            "triggered_at_trade": 41,
+            "bar_index": 19414,
+            "equity_at_trip": -407.52,
+            "lookback_equity": -94.56,
+            "drop_pct": 0.626,
+            "shadow_pnl": -40.0
+          },
+          {
+            "activation_number": 3,
+            "triggered_at_trade": 122,
+            "bar_index": 64799,
+            "equity_at_trip": 559.82,
+            "lookback_equity": 1072.78,
+            "drop_pct": 1.004,
+            "shadow_pnl": -72.78
+          },
+          {
+            "activation_number": 4,
+            "triggered_at_trade": 155,
+            "bar_index": 77097,
+            "equity_at_trip": 2257.22,
+            "lookback_equity": 2847.18,
+            "drop_pct": 1.116,
+            "shadow_pnl": 145.34
+          },
+          {
+            "activation_number": 5,
+            "triggered_at_trade": 182,
+            "bar_index": 85947,
+            "equity_at_trip": 2429.1,
+            "lookback_equity": 2728.08,
+            "drop_pct": 0.567,
+            "shadow_pnl": 991.14
+          },
+          {
+            "activation_number": 6,
+            "triggered_at_trade": 194,
+            "bar_index": 90776,
+            "equity_at_trip": 2121.46,
+            "lookback_equity": 2429.1,
+            "drop_pct": 0.587,
+            "shadow_pnl": 579.92
+          },
+          {
+            "activation_number": 7,
+            "triggered_at_trade": 213,
+            "bar_index": 99060,
+            "equity_at_trip": 2121.84,
+            "lookback_equity": 2423.3,
+            "drop_pct": 0.575,
+            "shadow_pnl": -404.28
+          },
+          {
+            "activation_number": 8,
+            "triggered_at_trade": 223,
+            "bar_index": 101171,
+            "equity_at_trip": 1853.52,
+            "lookback_equity": 2121.84,
+            "drop_pct": 0.515,
+            "shadow_pnl": -434.78
+          },
+          {
+            "activation_number": 9,
+            "triggered_at_trade": 242,
+            "bar_index": 108717,
+            "equity_at_trip": 2158.3,
+            "lookback_equity": 2455.26,
+            "drop_pct": 0.566,
+            "shadow_pnl": 98.66
+          },
+          {
+            "activation_number": 10,
+            "triggered_at_trade": 254,
+            "bar_index": 112169,
+            "equity_at_trip": 1893.66,
+            "lookback_equity": 2158.3,
+            "drop_pct": 0.507,
+            "shadow_pnl": -70.14
+          }
+        ]
+      }
+    }
+  },
+  "comparison_summary": {
+    "current_ks_pnl": 4467.4,
+    "best_variant": "Moderate",
+    "best_variant_pnl": 3182.4,
+    "no_ks_pnl": 4875.1
+  }
+}
