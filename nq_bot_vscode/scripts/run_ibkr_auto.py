@@ -26,6 +26,7 @@ and NEVER logged or printed.
 import argparse
 import asyncio
 import logging
+import logging.handlers
 import os
 import signal
 import sys
