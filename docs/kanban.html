@@ -141,13 +141,17 @@
         },
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10 }}>
             <div style={{ fontSize:13, fontWeight:600, color:THEME.text, lineHeight:1.5, flex:1 }}>{task.title}</div>
-            <span style={{
-              fontSize:9, color:P_COLORS[task.priority].text,
-              background:P_COLORS[task.priority].bg,
-              border:`1px solid ${P_COLORS[task.priority].border}`,
-              borderRadius:4, padding:"2px 7px", whiteSpace:"nowrap",
-              letterSpacing:1, fontWeight:600,
-            }}>{task.priority.toUpperCase()}</span>
+            {task.col === "Done" ? (
+              <span style={{ fontSize:11, color:"#2D7A4F", background:"#EDF6F0", border:"1px solid #A8D5B8", borderRadius:4, padding:"2px 8px", whiteSpace:"nowrap", fontWeight:600 }}>✓</span>
+            ) : (
+              <span style={{
+                fontSize:9, color:P_COLORS[task.priority].text,
+                background:P_COLORS[task.priority].bg,
+                border:`1px solid ${P_COLORS[task.priority].border}`,
+                borderRadius:4, padding:"2px 7px", whiteSpace:"nowrap",
+                letterSpacing:1, fontWeight:600,
+              }}>{task.priority.toUpperCase()}</span>
+            )}
           </div>,
           task.desc && <div style={{
             fontSize:11.5, color:THEME.textSecondary, marginTop:8, lineHeight:1.6,
