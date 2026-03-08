@@ -4,23 +4,35 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NQ Trading Bot — Weekly Breakdown Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" integrity="sha384-tMH8h3BGESGckSAVGZ82T9n90ztNXxvdwvdM6UoR56cYcf+0iGXBliJ29D+wZ/x8"></script>
 <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" integrity="sha384-bm7MnzvK++ykSwVJ2tynSE5TRdN+xL418osEVF2DE/L/gfWHj91J2Sphe582B1Bh"></script>
 <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js" integrity="sha384-ku9eM40vVDsFUiERorrdlHlF0LIhdfn716M7TntM72Uo98T7LWiogD3hNenPx8Q0"></script>
 <style>
   :root {
-    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
-    --border: #30363d; --text: #e6edf3; --text2: #8b949e;
-    --green: #3fb950; --red: #f85149; --blue: #58a6ff;
-    --yellow: #d29922; --purple: #bc8cff; --cyan: #39d2c0;
-    --orange: #f0883e;
+    --bg: #FDFBF9; --surface: #FFFFFF; --surface2: #FAF7F4;
+    --border: #E8DDD3; --text: #3D2E22; --text2: #8B7355;
+    --green: #2D8C4E; --red: #C53D1B; --blue: #5B7BA8;
+    --yellow: #B08515; --purple: #8B6DB0; --cyan: #4A9A8E;
+    --orange: #C07020;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background: var(--bg); color: var(--text); line-height: 1.5;
-    padding: 24px; min-height: 100vh;
+    padding: 76px 24px 24px; min-height: 100vh;
   }
+
+  /* NAV BAR */
+  .nav{position:fixed;top:0;left:0;right:0;height:52px;background:var(--surface);border-bottom:1px solid #F0EAE3;display:flex;align-items:center;justify-content:space-between;padding:0 28px;z-index:100;box-shadow:0 1px 3px rgba(61,46,34,0.04)}
+  .nav-logo{font-size:11px;font-weight:700;color:#8B6914;letter-spacing:3px;text-transform:uppercase}
+  .nav-links{display:flex;gap:0}
+  .nav-link{font-size:12px;font-weight:600;color:#B8A48E;padding:16px 18px;text-decoration:none;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+  .nav-link:hover{color:var(--text);text-decoration:none}
+  .nav-link.active{color:#8B6914;border-bottom-color:#8B6914}
+
   .header { text-align: center; margin-bottom: 32px; }
   .header h1 { font-size: 28px; font-weight: 600; margin-bottom: 4px; }
   .header p { color: var(--text2); font-size: 14px; }
@@ -50,8 +62,8 @@
     border: 1px solid var(--border); background: var(--surface); color: var(--text2);
     transition: all 0.15s;
   }
-  .pill:hover { border-color: var(--blue); color: var(--text); }
-  .pill.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .pill:hover { border-color: #8B6914; color: var(--text); }
+  .pill.active { background: #8B6914; color: #fff; border-color: #8B6914; }
 
   .chart-section {
     background: var(--surface); border: 1px solid var(--border);
@@ -90,7 +102,7 @@
     user-select: none;
   }
   th:first-child { text-align: left; }
-  th:hover { color: var(--blue); }
+  th:hover { color: #8B6914; }
   th .sort-arrow { margin-left: 3px; font-size: 9px; }
   td {
     text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--border);
@@ -100,9 +112,9 @@
   tr:hover td { background: var(--surface2); }
 
   .tooltip {
-    position: fixed; background: var(--surface2); border: 1px solid var(--border);
+    position: fixed; background: #FFFFFF; border: 1px solid var(--border);
     border-radius: 6px; padding: 10px 14px; font-size: 12px; pointer-events: none;
-    z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    z-index: 100; box-shadow: 0 4px 12px rgba(61,46,34,0.12);
     max-width: 280px; line-height: 1.6;
   }
   .tooltip-row { display: flex; justify-content: space-between; gap: 16px; }
@@ -119,22 +131,23 @@
   .footer { text-align: center; color: var(--text2); font-size: 11px; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); }
 
   /* ── NAV BAR ─────────────────────────────────────── */
-  .site-nav{position:fixed;top:0;left:0;right:0;height:48px;background:#111317;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:200;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
-  .site-nav .nav-logo{font-family:'SF Mono','Cascadia Code','JetBrains Mono','Fira Code','Consolas',monospace;font-size:13px;font-weight:700;color:#e2e8f0;letter-spacing:1.5px}
+  .site-nav{position:fixed;top:0;left:0;right:0;height:52px;background:var(--surface);border-bottom:1px solid #F0EAE3;display:flex;align-items:center;justify-content:space-between;padding:0 28px;z-index:200;font-family:'Inter',system-ui,-apple-system,sans-serif;box-shadow:0 1px 3px rgba(61,46,34,0.04)}
+  .site-nav .nav-logo{font-size:11px;font-weight:700;color:#8B6914;letter-spacing:3px;text-transform:uppercase}
   .site-nav .nav-links{display:flex;gap:0}
-  .site-nav .nav-link{font-family:'SF Mono','Cascadia Code','JetBrains Mono','Fira Code','Consolas',monospace;font-size:12px;color:#64748b;padding:14px 16px;text-decoration:none;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
-  .site-nav .nav-link:hover{color:#e2e8f0}
-  .site-nav .nav-link.active{color:#e2e8f0;border-bottom-color:#1A7A4C}
+  .site-nav .nav-link{font-size:12px;font-weight:600;color:#B8A48E;padding:16px 18px;text-decoration:none;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+  .site-nav .nav-link:hover{color:#3D2E22;text-decoration:none}
+  .site-nav .nav-link.active{color:#8B6914;border-bottom-color:#8B6914}
 </style>
 </head>
 <body>
 <nav class="site-nav">
-  <span class="nav-logo">NQ TRADING SYSTEM</span>
+  <span class="nav-logo">NQ Trading System</span>
   <div class="nav-links">
     <a href="index.html" class="nav-link">Overview</a>
     <a href="live.html" class="nav-link">Live</a>
     <a href="weekly-dashboard.html" class="nav-link active">Weekly</a>
     <a href="analyzer.html" class="nav-link">Analyzer</a>
+    <a href="kanban.html" class="nav-link">To-Do</a>
   </div>
 </nav>
 <div id="root" style="padding-top:48px"></div>
