@@ -178,19 +178,17 @@ export default function App() {
   const DONE_PREVIEW = 5;
 
   useEffect(() => {
-    (async () => {
-      try {
-        const r = await window.storage.get(STORAGE_KEY);
-        if (r && r.value) setTasks(JSON.parse(r.value));
-      } catch (_) {}
-      setLoaded(true);
-    })();
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) setTasks(JSON.parse(stored));
+    } catch (_) {}
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
     if (!loaded) return;
-    const t = setTimeout(async () => {
-      try { await window.storage.set(STORAGE_KEY, JSON.stringify(tasks)); } catch (_) {}
+    const t = setTimeout(() => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); } catch (_) {}
     }, 600);
     return () => clearTimeout(t);
   }, [tasks, loaded]);
