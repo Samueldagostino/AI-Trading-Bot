@@ -26,10 +26,12 @@ const THEME = {
 };
 
 const P_COLORS = {
-  High:   { bg: "#FDF0EC", text: "#C53D1B", border: "#F4C4B3", dot: "#E25822", cardBg: "#FEF7F5", cardBorder: "#F5D5CA" },
-  Medium: { bg: "#FEF6E7", text: "#92670A", border: "#F0D68A", dot: "#C49A2A", cardBg: "#FFFBF2", cardBorder: "#F2E4C3" },
-  Low:    { bg: "#EDF6F0", text: "#2D7A4F", border: "#A8D5B8", dot: "#3DA66A", cardBg: "#F5FAF7", cardBorder: "#C8E4D2" },
+  High:   { bg: "#FCDDD5", text: "#B5301A", border: "#E8A090", dot: "#D94415", cardBg: "#FDE8E2", cardBorder: "#EAADA0" },
+  Medium: { bg: "#FCEDC5", text: "#7A5508", border: "#E2C06A", dot: "#B08515", cardBg: "#FDF2D0", cardBorder: "#E4C878" },
+  Low:    { bg: "#D5EDDC", text: "#1E6B3A", border: "#88CCA0", dot: "#2D8C4E", cardBg: "#DEEEE3", cardBorder: "#96D1A8" },
 };
+
+const DONE_CARD = { cardBg: "#ECFAEF", cardBorder: "#B8E4C4", dot: "#5CB578" };
 
 const COL_STYLES = {
   "To Do":       { accent: THEME.brown[500], label: "#8B7355", icon: "○" },
@@ -216,9 +218,9 @@ export default function App() {
       onDragEnd={() => { setDragging(null); setDragOver(null); }}
       onClick={() => setModal({ mode: "edit", task: { ...task } })}
       style={{
-        background: P_COLORS[task.priority].cardBg,
-        border: `1px solid ${P_COLORS[task.priority].cardBorder}`,
-        borderLeft: `4px solid ${P_COLORS[task.priority].dot}`,
+        background: task.col === "Done" ? DONE_CARD.cardBg : P_COLORS[task.priority].cardBg,
+        border: `1px solid ${task.col === "Done" ? DONE_CARD.cardBorder : P_COLORS[task.priority].cardBorder}`,
+        borderLeft: `4px solid ${task.col === "Done" ? DONE_CARD.dot : P_COLORS[task.priority].dot}`,
         borderRadius: 10,
         padding: "14px 16px",
         marginBottom: 10,
@@ -226,8 +228,8 @@ export default function App() {
         transition: "all 0.2s ease",
         boxShadow: "0 1px 3px rgba(61,46,34,0.04)",
       }}
-      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(61,46,34,0.08)"; e.currentTarget.style.borderColor = P_COLORS[task.priority].dot + "60"; }}
-      onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 1px 3px rgba(61,46,34,0.04)"; e.currentTarget.style.borderColor = P_COLORS[task.priority].cardBorder; }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(61,46,34,0.08)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 1px 3px rgba(61,46,34,0.04)"; e.currentTarget.style.transform = "translateY(0)"; }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: THEME.text, lineHeight: 1.5, flex: 1 }}>{task.title}</div>
