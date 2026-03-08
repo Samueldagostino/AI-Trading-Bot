@@ -22,6 +22,8 @@ It DOES expose:
   - Modifier values
   - Last price (market data, publicly available)
   - Recent decisions (direction + decision + reason, NO prices)
+  - Heartbeat: last_seen timestamp, data age, connection quality, uptime %
+  - Bot state: mode (TRADING/MONITORING/OFFLINE), last trade time, active positions count
 
 Usage:
     python scripts/publish_stats.py
@@ -49,9 +51,13 @@ ROOT_DIR = PROJECT_DIR.parent  # AI-Trading-Bot root
 LOGS_DIR = PROJECT_DIR / "logs"
 DOCS_DATA_DIR = ROOT_DIR / "docs" / "data"
 OUTPUT_FILE = DOCS_DATA_DIR / "live_stats.json"
+HEARTBEAT_FILE = LOGS_DIR / "heartbeat_state.json"
 
 # Account size for percentage calculation (not exposed)
 _ACCOUNT_SIZE = 50_000.0
+
+# Track publisher uptime for heartbeat
+_PUBLISHER_START = datetime.now(timezone.utc)
 
 
 def _read_json_safe(filepath: Path, default=None):
@@ -90,6 +96,94 @@ def _read_jsonl_safe(filepath: Path, limit: int = 50) -> list:
     except OSError as e:
         logger.warning("Error reading %s: %s", filepath, e)
         return []
+
+
+def _build_heartbeat(status: dict, candles) -> dict:
+    """
+    Build heartbeat object from health monitor data and publish state.
+    Reads heartbeat_state.json if the health monitor is writing it,
+    otherwise computes from available data.
+    """
+    now = datetime.now(timezone.utc)
+
+    # Try reading heartbeat from health monitor (written by tws_health_monitor.py)
+    hb_data = _read_json_safe(HEARTBEAT_FILE)
+
+    if hb_data and hb_data.get("last_seen"):
+        # Health monitor is running — use its data
+        try:
+            last_seen = datetime.fromisoformat(hb_data["last_seen"])
+            age_sec = (now - last_seen).total_seconds()
+        except (ValueError, TypeError):
+            last_seen = now
+            age_sec = 0.0
+
+        uptime_pct = round(hb_data.get("uptime_pct", 0.0), 1)
+        quality = hb_data.get("connection_quality", "unknown")
+    else:
+        # No health monitor — derive from publisher activity
+        last_seen = now  # We're publishing right now, so we're alive
+        age_sec = 0.0
+        uptime_start = _PUBLISHER_START
+        uptime_total = (now - uptime_start).total_seconds()
+        uptime_pct = 100.0 if uptime_total > 0 else 0.0
+
+        # Derive connection quality from data freshness
+        if status and candles:
+            quality = "good"
+        elif status:
+            quality = "fair"
+        else:
+            quality = "poor"
+
+    return {
+        "last_seen": last_seen.isoformat(),
+        "seconds_since_last": round(age_sec, 1),
+        "connection_quality": quality,
+        "uptime_pct": uptime_pct,
+    }
+
+
+def _build_bot_state(status: dict, decisions: list) -> dict:
+    """
+    Build bot state object: TRADING / MONITORING / OFFLINE.
+    - TRADING: has active positions or made trades recently
+    - MONITORING: bot is live but not actively trading
+    - OFFLINE: no data or stale
+    """
+    trade_count = status.get("trade_count", 0) if status else 0
+    active_positions = status.get("active_positions", 0) if status else 0
+
+    # Determine last trade time from decisions
+    last_trade_time = ""
+    for d in reversed(decisions):
+        if d.get("decision") == "APPROVED":
+            ts = d.get("timestamp", "")
+            if ts:
+                try:
+                    from zoneinfo import ZoneInfo
+                    dt = datetime.fromisoformat(ts)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    et = dt.astimezone(ZoneInfo("America/New_York"))
+                    last_trade_time = et.strftime("%H:%M:%S ET")
+                except (ValueError, TypeError):
+                    last_trade_time = ""
+            break
+
+    # Determine mode
+    if not status:
+        mode = "OFFLINE"
+    elif active_positions > 0 or trade_count > 0:
+        mode = "TRADING"
+    else:
+        mode = "MONITORING"
+
+    return {
+        "mode": mode,
+        "last_trade_time": last_trade_time,
+        "active_positions": active_positions,
+    }
 
 
 def build_sanitized_stats() -> dict:
@@ -190,6 +284,10 @@ def build_sanitized_stats() -> dict:
         }
         recent_decisions.append(sanitized)
 
+    # Build heartbeat and state (backward compatible — new fields)
+    heartbeat = _build_heartbeat(status, candles)
+    bot_state = _build_bot_state(status, decisions)
+
     return {
         "updated": datetime.now(timezone.utc).isoformat(),
         "status": "LIVE" if is_live else "OFFLINE",
@@ -206,6 +304,9 @@ def build_sanitized_stats() -> dict:
         "modifiers": mod_values,
         "last_price": round(last_price, 2),
         "recent_decisions": recent_decisions,
+        # New fields for live website heartbeat & state indicators
+        "heartbeat": heartbeat,
+        "state": bot_state,
     }
 
 

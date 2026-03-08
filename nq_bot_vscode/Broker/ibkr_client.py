@@ -381,6 +381,29 @@ class IBKRClient:
         return summary
 
     # ──────────────────────────────────────────────────────
+    # HEALTH STATE (for health monitor / publish_stats)
+    # ──────────────────────────────────────────────────────
+
+    def get_health_state(self) -> dict:
+        """
+        Return connection health metrics for the health monitor.
+        SECURITY: No sensitive data (no account numbers, no credentials).
+        """
+        now = time.monotonic()
+        last_bar_age = (now - self._last_heartbeat) if self._last_heartbeat > 0 else -1
+
+        return {
+            "connected": self.is_connected(),
+            "last_bar_age_sec": round(last_bar_age, 1),
+            "bars_flowing": 0 < last_bar_age < 60,
+            "reconnect_attempts": self._reconnect_attempts,
+            "host": self._host,
+            "port": self._port,
+            "client_id": self._client_id,
+            "contract_resolved": self._contract is not None,
+        }
+
+    # ──────────────────────────────────────────────────────
     # CALLBACKS
     # ──────────────────────────────────────────────────────
 

@@ -3,111 +3,153 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NQ.BOT — Live Status</title>
+<title>NQ Bot — Live Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#0a0e17;--surface:#111827;--surface2:#1a2332;
-  --border:#1e293b;--text:#94a3b8;--text2:#64748b;
-  --white:#e2e8f0;--green:#22c55e;--green-dim:rgba(34,197,94,.12);
-  --red:#ef4444;--red-dim:rgba(239,68,68,.12);
-  --blue:#3b82f6;--amber:#f59e0b;--amber-dim:rgba(245,158,11,.12);
+  --bg:#FDFBF9;--surface:#FFFFFF;--surface-alt:#FAF7F4;
+  --border:#E8DDD3;--border-light:#F0EAE3;
+  --text:#3D2E22;--text2:#8B7355;--text-muted:#B8A48E;
+  --accent:#8B6914;--accent-soft:#F5ECD7;
+  --green:#2D8C4E;--green-bg:#ECFAEF;--green-border:#B8E4C4;
+  --red:#C53D1B;--red-bg:#FDE8E2;--red-border:#EAADA0;
+  --amber:#B08515;--amber-bg:#FDF2D0;--amber-border:#E4C878;
+  --brown-900:#3D2E22;--brown-700:#5C4333;--brown-500:#8B7355;
+  --brown-400:#A89070;--brown-200:#DDD0C0;--brown-100:#EDE5DA;
   --mono:'JetBrains Mono','Fira Code','Consolas',monospace;
-  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  --sans:'Inter',system-ui,-apple-system,sans-serif;
 }
 body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5;min-height:100vh}
-a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* NAV */
-.nav{position:fixed;top:0;left:0;right:0;height:48px;background:#111317;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:100}
-.nav-logo{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--white);letter-spacing:1.5px}
+.nav{position:fixed;top:0;left:0;right:0;height:52px;background:var(--surface);border-bottom:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between;padding:0 28px;z-index:100;box-shadow:0 1px 3px rgba(61,46,34,0.04)}
+.nav-logo{font-size:11px;font-weight:700;color:var(--accent);letter-spacing:3px;text-transform:uppercase}
 .nav-links{display:flex;gap:0}
-.nav-link{font-family:var(--mono);font-size:12px;color:var(--text2);padding:14px 16px;text-decoration:none;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
-.nav-link:hover{color:var(--white);text-decoration:none}
-.nav-link.active{color:var(--white);border-bottom-color:var(--green)}
+.nav-link{font-size:12px;font-weight:600;color:var(--text-muted);padding:16px 18px;text-decoration:none;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+.nav-link:hover{color:var(--text);text-decoration:none}
+.nav-link.active{color:var(--accent);border-bottom-color:var(--accent)}
 
 /* LAYOUT */
-.container{max-width:1100px;margin:0 auto;padding:72px 24px 48px}
+.container{max-width:1100px;margin:0 auto;padding:76px 24px 48px}
 
 /* HEADER */
-.live-header{display:flex;align-items:center;gap:16px;margin-bottom:32px;flex-wrap:wrap}
-.live-header h1{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--white);letter-spacing:1px}
-.status-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 14px;border-radius:20px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:1px}
-.status-pill.live{background:var(--green-dim);color:var(--green);border:1px solid rgba(34,197,94,.3)}
-.status-pill.offline{background:rgba(100,116,139,.1);color:var(--text2);border:1px solid var(--border)}
-.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-.offline-dot{width:8px;height:8px;border-radius:50%;background:var(--text2)}
-@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{opacity:.6;box-shadow:0 0 0 8px rgba(34,197,94,0)}}
-.updated-label{color:var(--text2);font-family:var(--mono);font-size:11px;margin-left:auto}
+.live-header{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+.live-header h1{font-size:24px;font-weight:700;color:var(--brown-900);letter-spacing:-0.3px}
+
+/* STATUS PILL */
+.status-pill{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:24px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:1px}
+.status-pill.trading{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+.status-pill.monitoring{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)}
+.status-pill.offline{background:var(--surface-alt);color:var(--text-muted);border:1px solid var(--border)}
+.status-dot{width:8px;height:8px;border-radius:50%}
+.status-dot.trading{background:var(--green);animation:pulse 2s infinite}
+.status-dot.monitoring{background:var(--amber);animation:pulse 2s infinite}
+.status-dot.offline{background:var(--text-muted)}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(45,140,78,.4)}50%{opacity:.5;box-shadow:0 0 0 8px rgba(45,140,78,0)}}
+
+.heartbeat-label{font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-left:auto}
+
+/* MODE BANNER */
+.mode-banner{border-radius:10px;padding:14px 24px;margin-bottom:20px;text-align:center;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:1.5px;border:1px solid}
+.mode-banner.paper{background:var(--amber-bg);color:var(--amber);border-color:var(--amber-border)}
+.mode-banner.live{background:var(--green-bg);color:var(--green);border-color:var(--green-border)}
+.mode-banner.off{background:var(--red-bg);color:var(--red);border-color:var(--red-border)}
+
+/* CONNECTION HEALTH */
+.health-bar{display:flex;align-items:center;gap:20px;background:var(--surface);border:1px solid var(--border-light);border-radius:10px;padding:14px 20px;margin-bottom:20px;flex-wrap:wrap}
+.health-item{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--text2)}
+.health-item .label{color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+.health-item .value{font-weight:600;color:var(--text)}
+.health-item .value.good{color:var(--green)}.health-item .value.fair{color:var(--amber)}.health-item .value.poor{color:var(--red)}
+.quality-bar{width:60px;height:4px;background:var(--border-light);border-radius:2px;overflow:hidden}
+.quality-fill{height:100%;border-radius:2px;transition:width .5s,background .5s}
+.quality-fill.good{background:var(--green);width:100%}.quality-fill.fair{background:var(--amber);width:66%}.quality-fill.poor{background:var(--red);width:33%}
+
+/* SPARKLINE */
+.sparkline{display:inline-flex;gap:2px;align-items:end;margin-left:auto}
+.spark-dot{width:4px;border-radius:1px;min-height:3px;transition:background .3s}
+.spark-dot.active{background:var(--green);height:14px}
+.spark-dot.idle{background:var(--amber);height:8px}
+.spark-dot.off{background:var(--border);height:4px}
 
 /* PRICE BANNER */
-.price-banner{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px 32px;margin-bottom:24px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
-.price-banner .symbol{font-family:var(--mono);font-size:12px;color:var(--text2);letter-spacing:1px}
-.price-banner .price{font-family:var(--mono);font-size:36px;font-weight:700;color:var(--white);font-variant-numeric:tabular-nums}
-.price-banner .pnl{font-family:var(--mono);font-size:16px;font-weight:600}
-.price-banner .pnl.pos{color:var(--green)}.price-banner .pnl.neg{color:var(--red)}.price-banner .pnl.flat{color:var(--text2)}
+.price-banner{background:var(--surface);border:1px solid var(--border-light);border-radius:12px;padding:24px 32px;margin-bottom:20px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.price-banner .symbol{font-family:var(--mono);font-size:11px;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase}
+.price-banner .price{font-family:var(--mono);font-size:34px;font-weight:700;color:var(--brown-900);font-variant-numeric:tabular-nums}
+.price-banner .pnl{font-family:var(--mono);font-size:15px;font-weight:600}
+.price-banner .pnl.pos{color:var(--green)}.price-banner .pnl.neg{color:var(--red)}.price-banner .pnl.flat{color:var(--text-muted)}
 
 /* KPI GRID */
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px}
-.kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;text-align:center}
-.kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);font-family:var(--mono);margin-bottom:4px}
-.kpi-value{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--white);font-variant-numeric:tabular-nums}
-.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.amber{color:var(--amber)}.kpi-value.blue{color:var(--blue)}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:var(--surface);border:1px solid var(--border-light);border-radius:10px;padding:16px;text-align:center;transition:box-shadow .2s}
+.kpi:hover{box-shadow:0 4px 12px rgba(61,46,34,0.06)}
+.kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;font-weight:600}
+.kpi-value{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--brown-900);font-variant-numeric:tabular-nums}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.amber{color:var(--amber)}
 
 /* PANELS */
-.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
-.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}
-.panel h3{font-family:var(--mono);font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.panel{background:var(--surface);border:1px solid var(--border-light);border-radius:12px;padding:20px;transition:box-shadow .2s}
+.panel:hover{box-shadow:0 4px 12px rgba(61,46,34,0.06)}
+.panel h3{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px;font-weight:700}
 
-/* MODIFIERS */
-.mod-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(30,41,59,.5)}
+/* MOD ROWS */
+.mod-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-light)}
 .mod-row:last-child{border-bottom:none}
-.mod-name{color:var(--text);font-family:var(--mono);font-size:12px}
-.mod-val{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--white)}
+.mod-name{color:var(--text2);font-size:12px;font-weight:500}
+.mod-val{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)}
 
 /* DECISIONS */
-.decision-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(30,41,59,.3);font-family:var(--mono);font-size:11px}
+.decision-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border-light);font-size:11px}
 .decision-row:last-child{border-bottom:none}
-.dir-badge{padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.5px}
-.dir-badge.long{background:var(--green-dim);color:var(--green)}
-.dir-badge.short{background:var(--red-dim);color:var(--red)}
-.dec-badge{padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600}
-.dec-badge.approved{background:var(--green-dim);color:var(--green)}
-.dec-badge.rejected{background:var(--red-dim);color:var(--red)}
-.dec-reason{color:var(--text2);font-size:10px}
+.dir-badge{padding:2px 8px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.5px}
+.dir-badge.long{background:var(--green-bg);color:var(--green)}
+.dir-badge.short{background:var(--red-bg);color:var(--red)}
+.dec-badge{padding:2px 8px;border-radius:4px;font-size:9px;font-weight:600}
+.dec-badge.approved{background:var(--green-bg);color:var(--green)}
+.dec-badge.rejected{background:var(--red-bg);color:var(--red)}
+.dec-reason{color:var(--text-muted);font-size:10px}
+.dec-time{color:var(--text-muted);font-family:var(--mono);font-size:10px;min-width:70px}
 
-/* SAFETY */
+/* SAFETY + BIAS */
 .safety-ok{color:var(--green);font-weight:700}.safety-alert{color:var(--red);font-weight:700}
-
-/* HTF BIAS */
-.bias-badge{display:inline-block;padding:2px 10px;border-radius:4px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px}
-.bias-badge.bullish{background:var(--green-dim);color:var(--green)}
-.bias-badge.bearish{background:var(--red-dim);color:var(--red)}
-.bias-badge.neutral{background:var(--amber-dim);color:var(--amber)}
+.bias-badge{display:inline-block;padding:3px 10px;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px}
+.bias-badge.bullish{background:var(--green-bg);color:var(--green)}
+.bias-badge.bearish{background:var(--red-bg);color:var(--red)}
+.bias-badge.neutral{background:var(--amber-bg);color:var(--amber)}
 
 /* REFRESH BAR */
-.refresh-bar{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-.refresh-bar .info{font-family:var(--mono);font-size:11px;color:var(--text2)}
-.refresh-bar .countdown{font-family:var(--mono);font-size:11px;color:var(--text)}
-.progress-track{width:100px;height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-left:12px;display:inline-block;vertical-align:middle}
+.refresh-bar{background:var(--surface);border:1px solid var(--border-light);border-radius:10px;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.refresh-bar .info{font-size:11px;color:var(--text-muted)}
+.refresh-bar .countdown{font-family:var(--mono);font-size:11px;color:var(--text2)}
+.progress-track{width:80px;height:3px;background:var(--border-light);border-radius:2px;overflow:hidden;margin-left:10px;display:inline-block;vertical-align:middle}
 .progress-fill{height:100%;background:var(--green);transition:width 1s linear;border-radius:2px}
 
 /* FOOTER */
-.footer{padding:24px 0;margin-top:32px;border-top:1px solid var(--border);color:var(--text2);font-size:11px;text-align:center;font-family:var(--mono)}
+.footer{padding:20px 0;margin-top:24px;border-top:1px solid var(--border-light);color:var(--text-muted);font-size:10px;text-align:center;letter-spacing:0.3px}
 
 /* LOADING */
-.loading{text-align:center;padding:80px 0;color:var(--text2);font-family:var(--mono);font-size:14px}
-.spinner{display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
+.loading{text-align:center;padding:80px 0;color:var(--text-muted);font-size:14px}
+.spinner{display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* FADE TRANSITION */
+.fade-in{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:.85}to{opacity:1}}
 
 /* RESPONSIVE */
 @media(max-width:768px){
   .panels{grid-template-columns:1fr}
   .kpi-grid{grid-template-columns:repeat(3,1fr)}
-  .price-banner .price{font-size:28px}
+  .price-banner .price{font-size:26px}
   .live-header{flex-direction:column;align-items:flex-start;gap:8px}
-  .updated-label{margin-left:0}
+  .heartbeat-label{margin-left:0}
+  .health-bar{gap:12px}
+  .sparkline{display:none}
 }
 @media(max-width:480px){
   .kpi-grid{grid-template-columns:repeat(2,1fr)}
@@ -118,11 +160,12 @@ a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
 <body>
 
 <nav class="nav">
-  <span class="nav-logo">NQ TRADING SYSTEM</span>
+  <span class="nav-logo">NQ Trading System</span>
   <div class="nav-links">
     <a href="index.html" class="nav-link">Overview</a>
     <a href="live.html" class="nav-link active">Live</a>
     <a href="weekly-dashboard.html" class="nav-link">Weekly</a>
+    <a href="kanban.html" class="nav-link">To-Do</a>
     <a href="analyzer.html" class="nav-link">Analyzer</a>
   </div>
 </nav>
@@ -132,197 +175,271 @@ a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
     <div class="loading"><div class="spinner"></div><br>Connecting to live data...</div>
   </div>
   <footer class="footer">
-    Data refreshes every 30s from publish_stats.py &middot; Sanitized: no account numbers, no dollar amounts, no order IDs
+    Data refreshes every 30s from publish_stats.py · Sanitized: no account numbers, no dollar amounts, no order IDs
+    <br><br>
+    <span style="font-size:9px;line-height:1.6;color:var(--text-muted)">
+      RISK DISCLOSURE: Past backtested performance does not guarantee future results.
+      Futures trading carries substantial risk of loss and is not suitable for all investors.
+      Only risk capital should be used.
+    </span>
   </footer>
-
-  <div style="padding:24px 0 16px;text-align:center;font-family:'IBM Plex Mono','SF Mono','Consolas',monospace;font-size:10px;color:#566988;line-height:1.7;max-width:700px;margin:0 auto">
-    RISK DISCLOSURE: Past backtested performance does not guarantee future results.
-    Futures trading carries substantial risk of loss and is not suitable for all investors.
-    Only risk capital should be used. All metrics shown are from historical simulation
-    with calibrated slippage &mdash; not live trading results unless explicitly labeled.
-  </div>
 </div>
 
 <script>
 (function(){
   const DATA_URL = 'data/live_stats.json';
-  const POLL_INTERVAL = 30; // seconds
+  const POLL_INTERVAL = 30;
   let countdown = POLL_INTERVAL;
   let data = null;
+  let fetchTime = null; // timestamp of last successful fetch
+  let sparkHistory = []; // last 30 statuses for sparkline
 
-  // ── CONFIG-DRIVEN TRADING MODE ──
-  // Change to "LIVE" only after Phase 4 validation gate
   const TRADING_MODE = "PAPER";
-  const STATUS_COLORS = {
-      "PAPER": "#f0b429",   // Amber
-      "LIVE": "#00d4aa",    // Teal (system green)
-      "OFFLINE": "#ff5f6d"  // Red
-  };
   const MODE_LABELS = {
-      "PAPER": "PAPER TRADING — NOT LIVE CAPITAL",
-      "LIVE": "LIVE TRADING — REAL CAPITAL",
-      "OFFLINE": "SYSTEM OFFLINE"
+    "PAPER": "PAPER TRADING — NOT LIVE CAPITAL",
+    "LIVE": "LIVE TRADING — REAL CAPITAL",
+    "OFFLINE": "SYSTEM OFFLINE"
   };
 
   function $(id){ return document.getElementById(id); }
 
   function formatTime(iso){
-    if(!iso) return '—';
+    if(!iso) return '\u2014';
     const d = new Date(iso);
     return d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZoneName:'short'});
+  }
+
+  function relativeTime(iso){
+    if(!iso) return '\u2014';
+    const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+    if(sec < 60) return sec + 's ago';
+    if(sec < 3600) return Math.floor(sec/60) + 'm ago';
+    return Math.floor(sec/3600) + 'h ago';
+  }
+
+  function dataAgeSec(){
+    if(!fetchTime) return 999;
+    return Math.floor((Date.now() - fetchTime) / 1000);
+  }
+
+  function qualityFromAge(sec){
+    if(sec < 10) return 'good';
+    if(sec < 25) return 'fair';
+    return 'poor';
+  }
+
+  function botState(d){
+    if(!d || d.status !== 'LIVE') return 'offline';
+    if(d.trades_today > 0 || (d.state && d.state.mode === 'TRADING')) return 'trading';
+    return 'monitoring';
+  }
+
+  function stateLabel(s){
+    if(s === 'trading') return 'TRADING';
+    if(s === 'monitoring') return 'MONITORING';
+    return 'OFFLINE';
   }
 
   function pnlClass(v){ return v > 0 ? 'pos' : v < 0 ? 'neg' : 'flat'; }
   function pnlSign(v){ return v > 0 ? '+' : ''; }
 
+  function renderSparkline(){
+    return sparkHistory.slice(-30).map(function(s){
+      var cls = s === 'trading' ? 'active' : s === 'monitoring' ? 'idle' : 'off';
+      return '<div class="spark-dot '+cls+'"></div>';
+    }).join('');
+  }
+
   function render(d){
-    const isLive = d.status === 'LIVE';
-    const modeColor = STATUS_COLORS[TRADING_MODE] || STATUS_COLORS["OFFLINE"];
-    const modeLabel = MODE_LABELS[TRADING_MODE] || "UNKNOWN";
-    const dataSource = TRADING_MODE === "PAPER" ? "Paper Trading via IBKR" : "Live Trading via IBKR";
-    const app = $('app');
-    app.innerHTML = `
-      <div style="background:${modeColor};color:#000;padding:12px 24px;border-radius:8px;margin-bottom:20px;text-align:center;font-family:var(--mono);font-size:14px;font-weight:700;letter-spacing:1.5px">
-        SYSTEM STATUS: ${modeLabel}
-      </div>
+    var state = botState(d);
+    var age = dataAgeSec();
+    var quality = qualityFromAge(age);
+    var modeClass = TRADING_MODE === 'PAPER' ? 'paper' : TRADING_MODE === 'LIVE' ? 'live' : 'off';
 
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-family:var(--mono);font-size:11px;color:var(--text2)">
-        <span>Last Updated: ${formatTime(d.updated)}</span>
-        <span>Data Source: ${dataSource}</span>
-      </div>
+    // Heartbeat data (from extended schema or computed)
+    var hb = d.heartbeat || {};
+    var lastSeen = hb.last_seen || d.updated;
+    var uptime = hb.uptime_pct != null ? hb.uptime_pct.toFixed(1) + '%' : '\u2014';
+    var connQuality = hb.connection_quality || quality.toUpperCase();
 
-      <div class="live-header">
-        <h1>LIVE STATUS</h1>
-        <span class="status-pill ${isLive?'live':'offline'}">
-          <span class="${isLive?'live-dot':'offline-dot'}"></span>
-          ${d.status}
-        </span>
-        <span class="updated-label">Updated: ${formatTime(d.updated)}</span>
-      </div>
+    var app = $('app');
+    app.className = 'fade-in';
+    app.innerHTML =
+      '<div class="mode-banner '+modeClass+'">'+
+        MODE_LABELS[TRADING_MODE]+
+      '</div>'+
 
-      <div class="refresh-bar">
-        <span class="info">Auto-refresh every ${POLL_INTERVAL}s &middot; publish_stats.py pushes every 60s</span>
-        <span class="countdown">Next refresh: <span id="cd">${countdown}</span>s
-          <span class="progress-track"><span class="progress-fill" id="pbar" style="width:100%"></span></span>
-        </span>
-      </div>
+      '<div class="live-header">'+
+        '<h1>Live Status</h1>'+
+        '<span class="status-pill '+state+'">'+
+          '<span class="status-dot '+state+'"></span>'+
+          stateLabel(state)+
+        '</span>'+
+        '<span class="heartbeat-label" id="hb-label">Last seen: '+relativeTime(lastSeen)+'</span>'+
+      '</div>'+
 
-      <div class="price-banner">
-        <span class="symbol">MNQ LAST</span>
-        <span class="price">${d.last_price ? d.last_price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</span>
-        <span class="pnl ${pnlClass(d.session_pnl_pct)}">Session: ${pnlSign(d.session_pnl_pct)}${d.session_pnl_pct.toFixed(3)}%</span>
-      </div>
+      '<div class="health-bar">'+
+        '<div class="health-item">'+
+          '<span class="label">Data Age</span>'+
+          '<span class="value '+quality+'" id="data-age">'+age+'s</span>'+
+        '</div>'+
+        '<div class="health-item">'+
+          '<span class="label">Quality</span>'+
+          '<div class="quality-bar"><div class="quality-fill '+quality+'" id="q-fill"></div></div>'+
+        '</div>'+
+        '<div class="health-item">'+
+          '<span class="label">Connection</span>'+
+          '<span class="value '+quality+'">'+connQuality+'</span>'+
+        '</div>'+
+        '<div class="health-item">'+
+          '<span class="label">Uptime</span>'+
+          '<span class="value">'+uptime+'</span>'+
+        '</div>'+
+        '<div class="sparkline" id="sparkline">'+renderSparkline()+'</div>'+
+      '</div>'+
 
-      <div class="kpi-grid">
-        <div class="kpi">
-          <div class="kpi-label">Mode</div>
-          <div class="kpi-value" style="color:${modeColor};font-size:16px">${TRADING_MODE}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Trades Today (${TRADING_MODE})</div>
-          <div class="kpi-value">${d.trades_today}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Win Rate (${TRADING_MODE})</div>
-          <div class="kpi-value ${d.win_rate>=55?'green':d.win_rate>=45?'amber':'red'}">${d.win_rate.toFixed(1)}%</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Profit Factor (${TRADING_MODE})</div>
-          <div class="kpi-value ${d.profit_factor>=1.5?'green':d.profit_factor>=1.0?'amber':'red'}">${d.profit_factor.toFixed(2)}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Bars Processed</div>
-          <div class="kpi-value blue">${d.bars_processed}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Signals Approved</div>
-          <div class="kpi-value green">${d.signals_approved}</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Signals Rejected</div>
-          <div class="kpi-value red">${d.signals_rejected}</div>
-        </div>
-      </div>
+      '<div class="refresh-bar">'+
+        '<span class="info">Auto-refresh every '+POLL_INTERVAL+'s</span>'+
+        '<span class="countdown">Next: <span id="cd">'+countdown+'</span>s'+
+          '<span class="progress-track"><span class="progress-fill" id="pbar" style="width:100%"></span></span>'+
+        '</span>'+
+      '</div>'+
 
-      <div class="panels">
-        <div class="panel">
-          <h3>System Status</h3>
-          <div class="mod-row">
-            <span class="mod-name">HTF Bias</span>
-            <span class="bias-badge ${d.htf_bias.toLowerCase()}">${d.htf_bias}</span>
-          </div>
-          <div class="mod-row">
-            <span class="mod-name">Safety Rails</span>
-            <span class="${d.safety_rails==='OK'?'safety-ok':'safety-alert'}">${d.safety_rails}</span>
-          </div>
-          <div class="mod-row">
-            <span class="mod-name">Approval Rate</span>
-            <span class="mod-val">${d.signals_approved+d.signals_rejected>0?((d.signals_approved/(d.signals_approved+d.signals_rejected))*100).toFixed(1):'0.0'}%</span>
-          </div>
-          <div style="margin-top:16px">
-            <h3>Modifiers</h3>
-            ${Object.entries(d.modifiers||{}).map(([k,v])=>`
-              <div class="mod-row">
-                <span class="mod-name">${k}</span>
-                <span class="mod-val" style="color:${v!==1.0?'var(--amber)':'var(--white)'}">${v.toFixed(2)}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
+      '<div class="price-banner">'+
+        '<span class="symbol">MNQ Last</span>'+
+        '<span class="price">'+(d.last_price ? d.last_price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '\u2014')+'</span>'+
+        '<span class="pnl '+pnlClass(d.session_pnl_pct)+'">Session: '+pnlSign(d.session_pnl_pct)+d.session_pnl_pct.toFixed(3)+'%</span>'+
+      '</div>'+
 
-        <div class="panel">
-          <h3>Recent Decisions (last ${(d.recent_decisions||[]).length})</h3>
-          ${(d.recent_decisions||[]).length===0?'<div style="color:var(--text2);font-size:12px;padding:12px 0">No decisions yet</div>':''}
-          ${(d.recent_decisions||[]).map(r=>`
-            <div class="decision-row">
-              <span style="color:var(--text2);min-width:75px">${r.time||''}</span>
-              <span class="dir-badge ${r.direction.toLowerCase()}">${r.direction}</span>
-              <span class="dec-badge ${r.decision.toLowerCase()}">${r.decision}</span>
-              <span class="dec-reason">${r.reason}</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
+      '<div class="kpi-grid">'+
+        '<div class="kpi">'+
+          '<div class="kpi-label">Mode</div>'+
+          '<div class="kpi-value" style="color:var(--accent);font-size:15px">'+TRADING_MODE+'</div>'+
+        '</div>'+
+        '<div class="kpi">'+
+          '<div class="kpi-label">Trades Today</div>'+
+          '<div class="kpi-value">'+d.trades_today+'</div>'+
+        '</div>'+
+        '<div class="kpi">'+
+          '<div class="kpi-label">Win Rate</div>'+
+          '<div class="kpi-value '+(d.win_rate>=55?'green':d.win_rate>=45?'amber':'red')+'">'+d.win_rate.toFixed(1)+'%</div>'+
+        '</div>'+
+        '<div class="kpi">'+
+          '<div class="kpi-label">Profit Factor</div>'+
+          '<div class="kpi-value '+(d.profit_factor>=1.5?'green':d.profit_factor>=1.0?'amber':'red')+'">'+d.profit_factor.toFixed(2)+'</div>'+
+        '</div>'+
+        '<div class="kpi">'+
+          '<div class="kpi-label">Bars Processed</div>'+
+          '<div class="kpi-value">'+d.bars_processed.toLocaleString()+'</div>'+
+        '</div>'+
+        '<div class="kpi">'+
+          '<div class="kpi-label">Signals</div>'+
+          '<div class="kpi-value"><span style="color:var(--green)">'+d.signals_approved+'</span> / <span style="color:var(--red)">'+d.signals_rejected+'</span></div>'+
+        '</div>'+
+      '</div>'+
+
+      '<div class="panels">'+
+        '<div class="panel">'+
+          '<h3>System Status</h3>'+
+          '<div class="mod-row">'+
+            '<span class="mod-name">HTF Bias</span>'+
+            '<span class="bias-badge '+d.htf_bias.toLowerCase()+'">'+d.htf_bias+'</span>'+
+          '</div>'+
+          '<div class="mod-row">'+
+            '<span class="mod-name">Safety Rails</span>'+
+            '<span class="'+(d.safety_rails==='OK'?'safety-ok':'safety-alert')+'">'+d.safety_rails+'</span>'+
+          '</div>'+
+          '<div class="mod-row">'+
+            '<span class="mod-name">Approval Rate</span>'+
+            '<span class="mod-val">'+(d.signals_approved+d.signals_rejected>0?((d.signals_approved/(d.signals_approved+d.signals_rejected))*100).toFixed(1):'0.0')+'%</span>'+
+          '</div>'+
+          '<div style="margin-top:16px">'+
+            '<h3>Modifiers</h3>'+
+            Object.entries(d.modifiers||{}).map(function(kv){
+              var k=kv[0], v=kv[1];
+              var val = typeof v === 'object' ? (v.multiplier || v.value || 0) : v;
+              return '<div class="mod-row">'+
+                '<span class="mod-name">'+k+'</span>'+
+                '<span class="mod-val" style="color:'+(val!==1.0?'var(--amber)':'var(--text)')+'">'+Number(val).toFixed(2)+'</span>'+
+              '</div>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
+
+        '<div class="panel">'+
+          '<h3>Recent Decisions (last '+(d.recent_decisions||[]).length+')</h3>'+
+          ((d.recent_decisions||[]).length===0?'<div style="color:var(--text-muted);font-size:12px;padding:12px 0">No decisions yet</div>':'')+
+          (d.recent_decisions||[]).map(function(r){
+            return '<div class="decision-row">'+
+              '<span class="dec-time">'+(r.time||'')+'</span>'+
+              '<span class="dir-badge '+r.direction.toLowerCase()+'">'+r.direction+'</span>'+
+              '<span class="dec-badge '+r.decision.toLowerCase()+'">'+r.decision+'</span>'+
+              '<span class="dec-reason">'+r.reason+'</span>'+
+            '</div>';
+          }).join('')+
+        '</div>'+
+      '</div>';
+  }
+
+  // Live-updating timestamps (every 1 second, without full re-render)
+  function tickTimestamps(){
+    var hbEl = $('hb-label');
+    if(hbEl && data){
+      var hb = data.heartbeat || {};
+      hbEl.textContent = 'Last seen: ' + relativeTime(hb.last_seen || data.updated);
+    }
+    var ageEl = $('data-age');
+    var qEl = $('q-fill');
+    if(ageEl){
+      var age = dataAgeSec();
+      var q = qualityFromAge(age);
+      ageEl.textContent = age + 's';
+      ageEl.className = 'value ' + q;
+      if(qEl) qEl.className = 'quality-fill ' + q;
+    }
   }
 
   function fetchData(){
     fetch(DATA_URL + '?t=' + Date.now())
-      .then(r=>{
+      .then(function(r){
         if(!r.ok) throw new Error('HTTP '+r.status);
         return r.json();
       })
-      .then(d=>{
+      .then(function(d){
         data = d;
+        fetchTime = Date.now();
         countdown = POLL_INTERVAL;
+        // Track spark history
+        sparkHistory.push(botState(d));
+        if(sparkHistory.length > 30) sparkHistory.shift();
         render(d);
       })
-      .catch(e=>{
+      .catch(function(e){
         console.error('Fetch error:',e);
         if(!data){
-          $('app').innerHTML = `
-            <div class="loading" style="color:var(--red)">
-              Unable to load live data.<br>
-              <span style="font-size:12px;color:var(--text2)">Make sure publish_stats.py is running and has pushed data to docs/data/live_stats.json</span>
-            </div>`;
+          $('app').innerHTML =
+            '<div class="loading" style="color:var(--red)">'+
+              'Unable to load live data.<br>'+
+              '<span style="font-size:12px;color:var(--text-muted)">Make sure publish_stats.py is running and has pushed data to docs/data/live_stats.json</span>'+
+            '</div>';
         }
       });
   }
 
-  // Countdown timer
+  // Countdown + timestamp tick (1s interval)
   setInterval(function(){
     countdown--;
-    var el = document.getElementById('cd');
-    var bar = document.getElementById('pbar');
+    var el = $('cd');
+    var bar = $('pbar');
     if(el) el.textContent = Math.max(countdown,0);
     if(bar) bar.style.width = Math.max((countdown/POLL_INTERVAL)*100,0)+'%';
     if(countdown <= 0){
       countdown = POLL_INTERVAL;
       fetchData();
     }
+    tickTimestamps();
   }, 1000);
 
-  // Initial fetch
   fetchData();
 })();
 </script>
