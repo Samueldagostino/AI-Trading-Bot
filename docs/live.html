@@ -165,7 +165,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <a href="index.html" class="nav-link">Overview</a>
     <a href="live.html" class="nav-link active">Live</a>
     <a href="weekly-dashboard.html" class="nav-link">Weekly</a>
-    <a href="kanban.html" class="nav-link">To-Do</a>
     <a href="analyzer.html" class="nav-link">Analyzer</a>
   </div>
 </nav>
@@ -194,11 +193,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   let fetchTime = null; // timestamp of last successful fetch
   let sparkHistory = []; // last 30 statuses for sparkline
 
-  const TRADING_MODE = "PAPER";
+  var TRADING_MODE = "OFFLINE";
   const MODE_LABELS = {
     "PAPER": "PAPER TRADING — NOT LIVE CAPITAL",
     "LIVE": "LIVE TRADING — REAL CAPITAL",
-    "OFFLINE": "SYSTEM OFFLINE"
+    "OFFLINE": "AWAITING IBKR CONNECTION — v1.3.1 VALIDATED"
   };
 
   function $(id){ return document.getElementById(id); }
@@ -254,6 +253,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     var state = botState(d);
     var age = dataAgeSec();
     var quality = qualityFromAge(age);
+
+    // Dynamically set trading mode from data
+    if(d.trading_mode === 'LIVE') TRADING_MODE = 'LIVE';
+    else if(d.trading_mode === 'PAPER') TRADING_MODE = 'PAPER';
+    else if(d.status === 'LIVE') TRADING_MODE = 'PAPER';
+    else TRADING_MODE = 'OFFLINE';
+
     var modeClass = TRADING_MODE === 'PAPER' ? 'paper' : TRADING_MODE === 'LIVE' ? 'live' : 'off';
 
     // Heartbeat data (from extended schema or computed)
@@ -337,6 +343,21 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
           '<div class="kpi-value"><span style="color:var(--green)">'+d.signals_approved+'</span> / <span style="color:var(--red)">'+d.signals_rejected+'</span></div>'+
         '</div>'+
       '</div>'+
+
+      // Validated backtest banner when offline
+      (state === 'offline' && d.backtest_validated ? (
+        '<div style="background:var(--green-bg);border:1px solid var(--green-border);border-radius:12px;padding:20px 24px;margin-bottom:20px;text-align:center">'+
+          '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--green);font-weight:700;margin-bottom:8px">VALIDATED BACKTEST — v'+d.backtest_validated.version+'</div>'+
+          '<div style="font-family:var(--mono);font-size:28px;font-weight:800;color:var(--green);margin-bottom:4px">+$'+d.backtest_validated.total_pnl.toLocaleString()+'</div>'+
+          '<div style="font-size:12px;color:var(--text2)">'+
+            d.backtest_validated.total_trades+' trades · PF '+d.backtest_validated.profit_factor+' · '+d.backtest_validated.win_rate+'% WR · '+d.backtest_validated.max_drawdown_pct+'% max DD'+
+          '</div>'+
+          '<div style="font-family:var(--mono);font-size:12px;color:var(--text2);margin-top:8px">'+
+            '$'+d.backtest_validated.account_start.toLocaleString()+' → $'+d.backtest_validated.account_end.toLocaleString()+' · '+d.backtest_validated.date_range+
+          '</div>'+
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:12px">C3 Delayed Runner: '+d.backtest_validated.c3_blocked+' trades blocked · $'+d.backtest_validated.c3_savings.toLocaleString()+' saved</div>'+
+        '</div>'
+      ) : '')+
 
       '<div class="panels">'+
         '<div class="panel">'+
