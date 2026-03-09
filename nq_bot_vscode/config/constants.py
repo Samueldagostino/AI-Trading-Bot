@@ -12,15 +12,21 @@ Do not loosen these gates without new backtested evidence across the full
 """
 
 # ── HIGH-CONVICTION FILTER ────────────────────────────────────────
-#   Rule 1 – Min signal score >= 0.75  (eliminates low-conviction noise)
+#   Rule 1 – Min signal score >= 0.60  (allows 2+ bonus signals through)
 #   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
-HIGH_CONVICTION_MIN_SCORE: float = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS: float = 30.0
+HIGH_CONVICTION_MIN_SCORE: float = 0.60
+HIGH_CONVICTION_MAX_STOP_PTS: float = 50.0
+HIGH_CONVICTION_MIN_STOP_PTS: float = 30.0  # Wider stops = room for 5-bar exit (30-50pt sweet spot)
+
+# ── MIN R:R GATE (DISABLED for C1 time-exit strategy) ──────────────
+# R:R is irrelevant when using time-based exits instead of profit targets.
+# Set to 0.0 to effectively disable the gate.
+MIN_RR_OVERRIDE: float = 0.0
 
 # ── LIQUIDITY SWEEP DETECTOR ─────────────────────────────────────
-#   Sweep score >= 0.70: eligible for HC filter independently
+#   Sweep score >= 0.50: base sweep passes (HC gate is the real filter at 0.60)
 #   Sweep + existing signal fire together: HC score boosted by +0.05
-SWEEP_MIN_SCORE: float = 0.70
+SWEEP_MIN_SCORE: float = 0.50
 SWEEP_CONFLUENCE_BONUS: float = 0.05
 
 # ── HTF BIAS ENGINE ────────────────────────────────────────────────
@@ -61,5 +67,7 @@ CONTEXT_OB_BOOST: float = 0.05           # order block near sweep price
 CONTEXT_FVG_BOOST: float = 0.05          # FVG near sweep price
 
 # ── TIMEFRAMES ────────────────────────────────────────────────────
-HTF_TIMEFRAMES: frozenset = frozenset({"1D", "4H", "1H", "30m", "15m", "5m"})
+# Intraday-only HTF bias: 5m + 15m (relevant to 10-min C1 scalp window)
+# Higher TFs (30m, 1H, 4H, 1D) removed — irrelevant for scalp timing.
+HTF_TIMEFRAMES: frozenset = frozenset({"15m", "5m"})
 EXECUTION_TIMEFRAMES: frozenset = frozenset({"2m", "3m", "1m"})

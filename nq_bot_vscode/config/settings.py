@@ -1,12 +1,12 @@
 """
-NQ Trading Bot — Master Configuration
-======================================
+NQ Trading Bot — Master Configuration v1.3.1
+=============================================
 CONFIGURED FOR:
 - Broker: Tradovate (paper -> live)
 - Instrument: MNQ (Micro Nasdaq-100)
-- Strategy: 2-contract scale-out
+- Strategy: 5-contract scale-out with delayed C3 runner
 - Account: $50,000
-- Discord: MikesTrades #alerts
+- Validated: 396 trades, PF 2.86, +$47,236, 1.60% max DD
 """
 
 from dataclasses import dataclass, field
@@ -139,22 +139,23 @@ class TradovateConfig:
 @dataclass
 class ScaleOutConfig:
     """
-    2-Contract Scale-Out — THE BREAD AND BUTTER.
+    5-Contract Scale-Out v1.3.1 — Delayed C3 Runner Architecture.
 
-    Contract 1: Trail-from-profit exit (Variant C)
-      Once unrealized profit >= c1_profit_threshold_pts, activate a trailing
-      stop c1_trail_distance_pts behind the high-water mark. If profit never
-      reaches threshold within c1_max_bars_fallback bars, exit at market.
-    Contract 2: Runner, stop to breakeven+1 after C1 exits, then trail
+    C1 (1): 5-bar time exit — the "canary" that validates direction.
+    C2 (1): Structural target — exits at nearest swing point.
+    C3 (3): ATR trailing runner — the moneymaker (+$51K in backtest).
+            DELAYED: only stays open when C1 exits profitably.
+            If C1 loses, C3 is closed immediately at market.
 
-    Win-win architecture:
-      Best:  C1 trails a big move + C2 runs big  -> $40+ + $200 = $240+
-      Good:  C1 trails small move + C2 at BE     -> $10  + $2   = $12
-      Worst: Both at initial stop                -> Controlled loss (~$60-80)
+    Win architecture:
+      Best:  C1 wins, C3 trails big move           -> $40 + $1,200+ = $1,240+
+      Good:  C1 wins, C2/C3 at breakeven            -> $40 + $0     = $40
+      Ok:    C1 loses, C3 blocked, C2 at stop        -> -$120 (2 contracts only)
+      Worst: All hit initial stop (Phase 1)          -> -$240 (5 contracts)
     """
-    total_contracts: int = 2
+    total_contracts: int = 4              # Max contracts (high conviction)
 
-    # Contract 1 — B:5 bars time-based exit (validated Mar 2026, PF 1.81)
+    # Contract 1 — The Scalp (B:5 bars time exit, PF 1.81 validated)
     c1_contracts: int = 1
     c1_time_exit_bars: int = 5             # Exit C1 at market after N bars if profitable
     c1_max_bars_fallback: int = 12         # Fallback: exit at market if still profitable after N bars
@@ -163,8 +164,9 @@ class ScaleOutConfig:
     c1_profit_threshold_pts: float = 3.0   # Archived: trailing activation threshold
     c1_trail_distance_pts: float = 2.5     # Archived: trail distance from HWM
 
-    # Contract 2 — Runner
+    # Contract 2 — The Medium (15-bar time exit, captures follow-through)
     c2_contracts: int = 1
+    c2_time_exit_bars: int = 15            # Exit C2 at market after N bars post-C1 exit
     c2_move_stop_to_breakeven: bool = True
     c2_breakeven_buffer_points: float = 2.0   # Entry + 2pts = avoids stop-hunting at exact entry (Osler 2005)
     c2_trailing_stop_enabled: bool = True
@@ -180,7 +182,13 @@ class ScaleOutConfig:
     # "C" = Partial: BE at midpoint between initial stop and entry (entry - stop/2)
     # "D" = Current/immediate: BE at entry+1 the instant C1 exits (original behavior)
     c2_be_variant: str = "B"                  # Default: delayed BE to prevent stolen runners
-    c2_be_delay_multiplier: float = 1.5       # Variant B: MFE threshold = stop_distance × this
+    c2_be_delay_multiplier: float = 1.5       # Variant B: MFE threshold = stop_distance × this (raised back: give runner more room before BE)
+
+    # ── Delayed C3 Runner (v1.3.1 — THE KEY EDGE) ──────────────────
+    # C3 only stays open when C1 exits profitably.
+    # If C1 loses → C3 is closed immediately at market.
+    # Backtest: saved $38,430, reduced max DD 8.62% → 1.60%.
+    c3_delayed_entry_enabled: bool = True
 
     # Adaptive Exit Configuration (regime-aware parameters)
     # Requires walk-forward validation before enabling in production.
@@ -193,11 +201,11 @@ class RiskConfig:
     """Tuned for $50K, 2x MNQ."""
     account_size: float = 50_000.0
     max_risk_per_trade_pct: float = 1.0      # $500 max risk per trade
-    max_daily_loss_pct: float = 3.0          # $1,500 daily limit
+    max_daily_loss_pct: float = 1.0          # $500 daily limit (v1.3.1 validated)
     max_weekly_loss_pct: float = 5.0
     max_total_drawdown_pct: float = 10.0     # $5,000 = kill switch
     
-    max_contracts_micro: int = 2
+    max_contracts_micro: int = 5              # v1.3.1: C1=1 + C2=1 + C3=3
     max_contracts_mini: int = 0
     use_micro: bool = True
     

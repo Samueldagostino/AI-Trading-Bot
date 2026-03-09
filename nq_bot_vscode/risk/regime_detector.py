@@ -203,11 +203,11 @@ class RegimeDetector:
             },
             "unknown": {
                 "favor_direction": "none",
-                "size_multiplier": 0.5,
+                "size_multiplier": 0.5,    # Reduced size: allow trades at half position when regime unclear
                 "use_trailing_stop": False,
                 "widen_targets": False,
                 "tighten_stops": True,
-                "description": "Unknown regime — reduced size, conservative approach",
+                "description": "Unknown regime — half size, conservative approach",
             },
         }
 

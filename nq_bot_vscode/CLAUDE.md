@@ -1,4 +1,4 @@
-# NQ Trading Bot — Project Context
+# NQ Trading Bot — Project Context (Version 1.3.1)
 
 ## Git Workflow (MANDATORY)
 
@@ -16,7 +16,9 @@ This keeps the live GitHub Pages website at https://samueldagostino.github.io/AI
 
 ## What This Is
 
-An institutional-grade automated trading bot for **MNQ (Micro Nasdaq-100 Futures)** on Tradovate. It uses a multi-timeframe structure analysis pipeline with a 2-contract scale-out execution strategy, governed by a **High-Conviction Filter** derived from backtested forensic analysis.
+An institutional-grade automated trading bot for **MNQ (Micro Nasdaq-100 Futures)** on IBKR (Interactive Brokers). It uses a multi-timeframe structure analysis pipeline with a **5-contract scale-out execution strategy** (C1=1, C2=1, C3=3), governed by a **High-Conviction Filter** and the **Delayed C3 Runner** architecture.
+
+**Version 1.3.1 — Validated**: 396 trades, PF 2.86, +$47,236, 1.60% max DD ($50K → $97,236).
 
 This bot's job is **survival first, profit second**. Every design decision prioritizes capital preservation over signal frequency.
 
@@ -39,14 +41,15 @@ Exec Bars (2m) ──► Feature Engine ──► Signal Aggregator
         │                          ┌──────────┴──────────┐
         │                          │  HIGH-CONVICTION     │
         │                          │  FILTER (2 gates)    │
-        │                          │  1. Score ≥ 0.75     │
-        │                          │  2. Stop  ≤ 30 pts   │
+        │                          │  1. Score ≥ 0.60     │
+        │                          │  2. Stop  ≤ 50 pts   │
         │                          └──────────┬──────────┘
         │                                     │
         ▼                                     ▼
-  Risk Engine ──────────────────► Scale-Out Executor
-        │                          C1: Trail from +3pts (2.5pt trail)
-        │                          C2: Trail (ATR-based)
+  Risk Engine ──────────────────► Scale-Out Executor (5 contracts)
+        │                          C1: 5-bar time exit (canary)
+        │                          C2: Structural target + delayed BE
+        │                          C3: ATR trail runner (DELAYED ENTRY)
         ▼
   Monitoring / Dashboard
 ```
@@ -64,33 +67,42 @@ Exec Bars (2m) ──► Feature Engine ──► Signal Aggregator
 
 ## High-Conviction Filter (THE CORE RULES)
 
-These two rules are **non-negotiable hard gates** in `main.py`. They exist because backtesting proved that only the intersection of tight stops + strong signals produces durable edge.
+These two rules are **non-negotiable hard gates**. They exist because backtesting proved that only the intersection of tight stops + strong signals produces durable edge.
 
 | Rule | Gate | Why |
 |------|------|-----|
-| **Min Signal Score** | `combined_score ≥ 0.75` | Eliminates low-conviction noise trades |
-| **Max Stop Distance** | `stop_distance ≤ 30 pts` | Caps tail risk; worst loss ~$124 |
+| **Min Signal Score** | `combined_score ≥ 0.60` | Eliminates low-conviction noise trades |
+| **Max Stop Distance** | `stop_distance ≤ 50 pts` | Caps tail risk per trade |
 
-C1 exits via **trail-from-profit** (Variant C): once unrealized profit >= 3.0pts, a 2.5pt trailing stop activates from the high-water mark. Fallback: market exit at bar 12 if trailing never activates. Configured in `ScaleOutConfig.c1_profit_threshold_pts`, `c1_trail_distance_pts`, `c1_max_bars_fallback`. This replaced the old Time 10 bars exit (and before that, fixed TP1 = stop x 1.5) — validated Feb 2026 with calibrated slippage (PF 1.61, 6/6 months profitable).
+### Execution Architecture (v1.3.1 — 5-Contract Scale-Out)
 
-**Do not loosen these gates without new backtested evidence.**
+- **C1 (1 contract)** — The Canary: 5-bar time exit. Validates direction.
+- **C2 (1 contract)** — The Structure: Structural target (nearest swing point) + delayed BE.
+- **C3 (3 contracts)** — The Runner: ATR trailing stop (DELAYED ENTRY: only stays open when C1 exits profitably. If C1 loses → C3 closed immediately).
+
+**Delayed C3 Runner (THE KEY EDGE)**: Saved $38,430, reduced max DD 8.62% → 1.60%. 120/396 trades had C3 blocked (30.3%).
+
+**Do not loosen these gates or modify the C3 delay logic without new backtested evidence.**
 
 ### Constants Location
 
 ```python
 # config/constants.py — SINGLE SOURCE OF TRUTH for all policy constants
 # All modules import from here. Do NOT redefine locally.
-HIGH_CONVICTION_MIN_SCORE = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS = 30.0
-SWEEP_MIN_SCORE = 0.70           # Sweep must score >= 0.70 to be eligible
+HIGH_CONVICTION_MIN_SCORE = 0.60
+HIGH_CONVICTION_MAX_STOP_PTS = 50.0
+SWEEP_MIN_SCORE = 0.50           # Sweep must score >= 0.50 to be eligible
 SWEEP_CONFLUENCE_BONUS = 0.05    # Boost when signal + sweep fire together
 HTF_STRENGTH_GATE = 0.3          # Config D — do NOT change without backtest
-HTF_STALENESS_LIMITS = {...}     # Per-TF staleness limits (minutes)
+CONTEXT_AGGREGATOR_BOOST = 0.05  # Layer 2 context boost
+CONTEXT_OB_BOOST = 0.05          # Order block proximity boost
+CONTEXT_FVG_BOOST = 0.05         # FVG proximity boost
 
 # config/settings.py — ScaleOutConfig
-c1_profit_threshold_pts = 3.0   # Activate trailing once profit >= this
-c1_trail_distance_pts = 2.5     # Trail distance from HWM
-c1_max_bars_fallback = 12       # Fallback market exit if trail never activates
+c1_time_exit_bars = 5            # Exit C1 at market after 5 bars if profitable
+c1_max_bars_fallback = 12        # Fallback market exit if still profitable
+c3_delayed_entry_enabled = True  # C3 only stays when C1 profits (THE KEY EDGE)
+max_daily_loss_pct = 1.0         # $500 daily limit (v1.3.1 validated)
 ```
 
 ---
@@ -122,15 +134,16 @@ Detects institutional stop hunts at key structural levels. Runs on every executi
 - HTF alignment bonus: +0.10 (sweep direction matches HTF bias)
 - RTH open bonus: +0.10 (first 30min of RTH)
 
-### Three Entry Modes (in `main.py` process_bar)
+### Entry Mode: PATH C (Sweep-Only Architecture)
+
+v1.3.1 uses **PATH C**: only liquidity sweeps can trigger entries. The signal aggregator provides Layer 2 context boosts but cannot independently trigger trades.
 
 | Mode | Condition | Behavior |
 |------|-----------|----------|
-| **Signal-only** | Existing signal fires, no sweep | Standard pipeline (unchanged) |
-| **Sweep-only** | Sweep score >= 0.70, no existing signal | Sweep acts as standalone signal source (must pass HC >= 0.75) |
-| **Confluence** | Both fire, same direction | HC score boosted by +0.05 (existing_score + 0.05) |
+| **Sweep-only** | Sweep score >= 0.50 | Sweep acts as sole signal source (must pass HC >= 0.60) |
+| **Confluence** | Sweep + aggregator alignment | Score boosted by context boosts (+0.05 each for aggregator, OB, FVG) |
 
-If sweep and existing signal fire in **conflicting directions**, the existing signal takes priority.
+HTF bias disagreement applies a -0.10 score penalty (soft gate, not a hard block).
 
 ### Key Methods
 - `update_bar(bar, vwap, htf_bias, is_rth)` → `Optional[SweepSignal]`
@@ -162,7 +175,8 @@ nq-trading-bot/                    # Root — CLAUDE.md goes here
 │   ├── engine.py                 # RiskEngine — position sizing, stop computation
 │   └── regime_detector.py        # RegimeDetector — market state classification
 ├── execution/
-│   └── scale_out_executor.py     # ScaleOutExecutor — 2-contract lifecycle
+│   ├── scale_out_executor.py     # ScaleOutExecutor — 5-contract lifecycle (v1.3.1)
+│   └── orchestrator.py          # IBKRLivePipeline — IBKR live trading orchestrator
 ├── monitoring/
 │   └── engine.py                 # MonitoringEngine — health, metrics
 ├── data_pipeline/

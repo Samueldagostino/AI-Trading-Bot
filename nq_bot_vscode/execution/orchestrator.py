@@ -1,6 +1,6 @@
 """
-IBKR Live Pipeline Orchestrator
-==================================
+IBKR Live Pipeline Orchestrator v1.3.1
+=========================================
 Wires the complete vertical slice from market data to kill switch:
 
   IBKRClient -> CandleAggregator -> candle_to_bar() -> Bar
@@ -54,6 +54,18 @@ from data_feeds.market_context import MarketContext
 from data_feeds.quantdata_client import QuantDataClient
 
 logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 3 Additive: Post-Sweep FVG Tracking (data collection only)
+# ICT model: Sweep → Displacement → FVG → Retracement
+# Entries are IMMEDIATE (Phase 1 behavior). FVG detection runs in
+# background for data collection — no entry delay, no score changes.
+# ═══════════════════════════════════════════════════════════════
+SWEEP_FVG_TRACKING = True
+SWEEP_FVG_DISPLACEMENT_WINDOW = 5       # Bars after sweep to find displacement candle
+SWEEP_FVG_DISPLACEMENT_MIN_ATR = 0.8    # Displacement candle body >= 0.8× ATR
+SWEEP_FVG_RETRACEMENT_WINDOW = 8        # Bars after FVG to wait for retracement
+SWEEP_FVG_MIN_GAP_ATR = 0.3            # Minimum FVG size (gap_size >= 0.3 × ATR)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -137,6 +149,16 @@ class IBKRLivePipeline:
         self._market_context: Optional[MarketContext] = None
         self._last_context_refresh: Optional[datetime] = None
         self._context_refresh_minutes = 30
+
+        # ── Phase 3 Additive: FVG Tracking (background data collection) ──
+        self._sweep_event: Optional[Dict] = None   # Last sweep for FVG tracking
+        self._sweep_fvg: Optional[Dict] = None      # FVG formed after sweep
+        self._sweep_fvg_stats = {
+            "sweeps_tracked": 0,
+            "displacement_found": 0,
+            "fvg_formed": 0,
+            "fvg_retrace_confirmed": 0,
+        }
 
     # ──────────────────────────────────────────────────────────
     # LIFECYCLE
@@ -328,6 +350,9 @@ class IBKRLivePipeline:
             is_rth=is_rth,
         )
 
+        # === 3c. PHASE 3 ADDITIVE: FVG STATE MACHINE (data collection) ===
+        self._update_sweep_fvg_state(bar)
+
         # === 4. SKIP IF POSITION ACTIVE ===
         if self._active_group_id is not None:
             return None
@@ -382,25 +407,22 @@ class IBKRLivePipeline:
         if entry_direction is None:
             return None
 
-        # === HTF DIRECTIONAL GATE (choke-point — ALL signal sources) ===
-        # Catches sweep entries that bypass the aggregator's HTF check.
+        # === HTF DIRECTIONAL GATE (softened: score penalty instead of block) ===
+        # A sweep IS a reversal — HTF disagreement is expected. Penalize -0.10.
         if htf_bias is not None:
+            htf_disagrees = False
             if entry_direction == "long" and not htf_bias.htf_allows_long:
-                logger.info(
-                    "HTF GATE BLOCK: long entry blocked — HTF %s (%.2f) "
-                    "[source=%s]",
-                    htf_bias.consensus_direction,
-                    htf_bias.consensus_strength, entry_source,
-                )
-                return None
+                htf_disagrees = True
             if entry_direction == "short" and not htf_bias.htf_allows_short:
+                htf_disagrees = True
+            if htf_disagrees:
+                entry_score -= 0.10
                 logger.info(
-                    "HTF GATE BLOCK: short entry blocked — HTF %s (%.2f) "
-                    "[source=%s]",
-                    htf_bias.consensus_direction,
-                    htf_bias.consensus_strength, entry_source,
+                    "HTF BIAS PENALTY: %s penalized -0.10 — HTF %s (%.2f) "
+                    "[source=%s, new_score=%.2f]",
+                    entry_direction, htf_bias.consensus_direction,
+                    htf_bias.consensus_strength, entry_source, entry_score,
                 )
-                return None
         else:
             # Fail-safe: no HTF data → block all trades
             logger.warning(
@@ -570,7 +592,114 @@ class IBKRLivePipeline:
             group_id,
         )
 
+        # Phase 3 additive: start FVG tracking in background
+        self._start_fvg_tracking(entry_direction, features.atr_14)
+
         return action_result
+
+    # ──────────────────────────────────────────────────────────
+    # PHASE 3 ADDITIVE: FVG BACKGROUND TRACKING (data only)
+    # ──────────────────────────────────────────────────────────
+
+    def _start_fvg_tracking(self, direction: str, atr: float) -> None:
+        """Start FVG tracking after a sweep triggers an entry."""
+        if not SWEEP_FVG_TRACKING:
+            return
+        self._sweep_event = {
+            "direction": direction,
+            "atr": atr,
+            "sweep_bar_index": self._bars_processed,
+            "displacement_found": False,
+            "recent_bars": [],
+        }
+        self._sweep_fvg = None
+        self._sweep_fvg_stats["sweeps_tracked"] += 1
+
+    def _update_sweep_fvg_state(self, bar: Bar) -> None:
+        """Phase 3 additive: background FVG tracking (data collection only).
+
+        Tracks displacement → FVG → retracement after each sweep.
+        Does NOT affect entries — all entries happen immediately (Phase 1).
+        Data is collected for future analysis and potential strategy refinement.
+        """
+        if self._sweep_event is None:
+            return
+
+        event = self._sweep_event
+        bars_since_sweep = self._bars_processed - event["sweep_bar_index"]
+
+        # Timeout: stop tracking after displacement + retracement windows
+        max_window = SWEEP_FVG_DISPLACEMENT_WINDOW + SWEEP_FVG_RETRACEMENT_WINDOW
+        if bars_since_sweep > max_window:
+            self._sweep_event = None
+            self._sweep_fvg = None
+            return
+
+        bar_data = {
+            "high": bar.high, "low": bar.low,
+            "open": bar.open, "close": bar.close,
+        }
+
+        # Stage 1: Watch for displacement candle
+        if not event["displacement_found"] and bars_since_sweep <= SWEEP_FVG_DISPLACEMENT_WINDOW:
+            event["recent_bars"].append(bar_data)
+
+            atr = event["atr"] or 20.0
+            body_size = abs(bar.close - bar.open)
+            if body_size >= atr * SWEEP_FVG_DISPLACEMENT_MIN_ATR:
+                if event["direction"] == "long" and bar.close > bar.open:
+                    event["displacement_found"] = True
+                    self._sweep_fvg_stats["displacement_found"] += 1
+                elif event["direction"] == "short" and bar.close < bar.open:
+                    event["displacement_found"] = True
+                    self._sweep_fvg_stats["displacement_found"] += 1
+        elif not event["displacement_found"]:
+            event["recent_bars"].append(bar_data)
+
+        # Stage 2: Check for FVG formation
+        if event["displacement_found"] and self._sweep_fvg is None:
+            if bars_since_sweep > 0 and (
+                not event["recent_bars"] or event["recent_bars"][-1]["high"] != bar.high
+            ):
+                event["recent_bars"].append(bar_data)
+
+            recent = event["recent_bars"]
+            if len(recent) >= 3:
+                bar_a = recent[-3]
+                bar_c = recent[-1]
+                atr = event["atr"] or 20.0
+
+                if event["direction"] == "long" and bar_c["low"] > bar_a["high"]:
+                    gap_size = bar_c["low"] - bar_a["high"]
+                    if gap_size >= atr * SWEEP_FVG_MIN_GAP_ATR:
+                        self._sweep_fvg = {
+                            "high": bar_c["low"], "low": bar_a["high"],
+                            "type": "bullish", "size": gap_size,
+                            "formed_bar": self._bars_processed,
+                        }
+                        self._sweep_fvg_stats["fvg_formed"] += 1
+
+                elif event["direction"] == "short" and bar_c["high"] < bar_a["low"]:
+                    gap_size = bar_a["low"] - bar_c["high"]
+                    if gap_size >= atr * SWEEP_FVG_MIN_GAP_ATR:
+                        self._sweep_fvg = {
+                            "high": bar_a["low"], "low": bar_c["high"],
+                            "type": "bearish", "size": gap_size,
+                            "formed_bar": self._bars_processed,
+                        }
+                        self._sweep_fvg_stats["fvg_formed"] += 1
+
+        # Stage 3: Check for retracement into FVG
+        if self._sweep_fvg is not None:
+            fvg = self._sweep_fvg
+            if event["direction"] == "long" and bar.low <= fvg["high"]:
+                self._sweep_fvg_stats["fvg_retrace_confirmed"] += 1
+                self._sweep_event = None
+                self._sweep_fvg = None
+            elif event["direction"] == "short" and bar.high >= fvg["low"]:
+                self._sweep_fvg_stats["fvg_retrace_confirmed"] += 1
+                self._sweep_event = None
+                self._sweep_fvg = None
 
     # ──────────────────────────────────────────────────────────
     # POSITION CLOSE — called externally on exit signals
@@ -647,6 +776,8 @@ class IBKRLivePipeline:
         )
         self._htf_engine.update_bar(timeframe, htf_bar)
         self._htf_bias = self._htf_engine.get_bias(bar.timestamp)
+        # Feed HTF bars to sweep detector for HTF-first sweep detection
+        self._sweep_detector.update_htf_bar(timeframe, htf_bar)
 
     # ──────────────────────────────────────────────────────────
     # STATUS

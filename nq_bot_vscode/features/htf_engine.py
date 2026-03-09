@@ -65,6 +65,9 @@ class HTFBiasEngine:
 
     def update_bar(self, timeframe: str, bar: HTFBar) -> None:
         """Ingest a new HTF bar and recompute bias for that TF."""
+        # Skip timeframes not in our configured list
+        if timeframe not in self.timeframes:
+            return
         if timeframe not in self._bars:
             self._bars[timeframe] = []
         self._bars[timeframe].append(bar)

@@ -248,6 +248,8 @@ class TradingOrchestrator:
         self._htf_bars_processed += 1
         # Update the cached bias
         self._htf_bias = self.htf_engine.get_bias(bar.timestamp)
+        # Feed HTF bars to sweep detector for HTF-first sweep detection
+        self.sweep_detector.update_htf_bar(timeframe, htf_bar)
 
     # ================================================================
     # MAIN EXECUTION-TF BAR PROCESSING
@@ -579,33 +581,23 @@ class TradingOrchestrator:
                 f"boosted={cs.boosted_score:.3f} | bars={cs.bars_to_confirm}"
             )
 
-        # -- HTF DIRECTIONAL GATE (choke-point — ALL signal sources pass through) --
-        # This gate catches sweep-only and UCL-confirmed entries that bypass
-        # the aggregator's HTF check. When HTF is bearish, ZERO longs pass.
-        # When HTF is bullish, ZERO shorts pass. Period.
+        # -- HTF DIRECTIONAL GATE (softened: score penalty instead of hard block) --
+        # A sweep IS a reversal signal — HTF bias disagreement is expected
+        # at the moment of reversal. Penalize score by 0.10 instead of blocking.
         if entry_direction is not None and htf_bias is not None:
+            htf_disagrees = False
             if entry_direction == "long" and not htf_bias.htf_allows_long:
-                logger.info(
-                    "HTF GATE BLOCK: %s entry blocked — HTF %s (strength %.2f) "
-                    "disallows longs [source=%s]",
-                    entry_direction, htf_bias.consensus_direction,
-                    htf_bias.consensus_strength, entry_source,
-                )
-                _set_rejection(entry_direction, entry_score, None,
-                               features.atr_14,
-                               f"HTF {htf_bias.consensus_direction} blocks long", 1)
-                return None
+                htf_disagrees = True
             if entry_direction == "short" and not htf_bias.htf_allows_short:
+                htf_disagrees = True
+            if htf_disagrees:
+                entry_score -= 0.10
                 logger.info(
-                    "HTF GATE BLOCK: %s entry blocked — HTF %s (strength %.2f) "
-                    "disallows shorts [source=%s]",
+                    "HTF BIAS PENALTY: %s entry penalized -0.10 — HTF %s (strength %.2f) "
+                    "disagrees [source=%s, new_score=%.2f]",
                     entry_direction, htf_bias.consensus_direction,
-                    htf_bias.consensus_strength, entry_source,
+                    htf_bias.consensus_strength, entry_source, entry_score,
                 )
-                _set_rejection(entry_direction, entry_score, None,
-                               features.atr_14,
-                               f"HTF {htf_bias.consensus_direction} blocks short", 1)
-                return None
         elif entry_direction is not None and htf_bias is None:
             # Fail-safe: no HTF data → block all trades
             logger.warning(

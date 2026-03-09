@@ -49,6 +49,7 @@ class TWSLauncher:
         self._pid: Optional[int] = None
         self._launch_time: Optional[float] = None
         self._ibc_ini_path: Optional[Path] = None
+        self._launched_via_ibc: bool = False
 
     # ──────────────────────────────────────────────────────
     # LAUNCH
@@ -85,14 +86,26 @@ class TWSLauncher:
         logger.info("Launching TWS via IBC at %s", self._config.ibc_path)
 
         # Generate IBC config with credentials
+        # IBC reads config.ini from ~/Documents/IBC/ by default on Windows,
+        # OR from the IBC install dir. Write to BOTH to be safe.
         ibc_dir = Path(self._config.ibc_path)
-        self._ibc_ini_path = ibc_dir / "config.ini"
+        home_ibc_dir = Path.home() / "Documents" / "IBC"
 
+        # Primary: write to ~/Documents/IBC/config.ini (IBC default)
+        self._ibc_ini_path = home_ibc_dir / "config.ini"
         try:
             self._config.generate_ibc_ini(self._ibc_ini_path)
+            logger.info("IBC config written to %s", self._ibc_ini_path)
         except Exception as e:
-            logger.error("Failed to generate IBC config: %s", e)
-            return False
+            logger.warning("Could not write IBC config to %s: %s", self._ibc_ini_path, e)
+
+        # Secondary: also write to IBC install dir
+        try:
+            alt_path = ibc_dir / "config.ini"
+            self._config.generate_ibc_ini(alt_path)
+            logger.info("IBC config also written to %s", alt_path)
+        except Exception as e:
+            logger.warning("Could not write IBC config to %s: %s", alt_path, e)
 
         # Build IBC launch command
         start_script = ibc_dir / "StartTWS.bat"
@@ -106,7 +119,6 @@ class TWSLauncher:
 
         cmd = [
             str(start_script),
-            str(self._ibc_ini_path),
         ]
 
         try:
@@ -121,6 +133,7 @@ class TWSLauncher:
             )
             self._pid = self._process.pid
             self._launch_time = time.monotonic()
+            self._launched_via_ibc = True
             logger.info("IBC started (PID %d), waiting for TWS to initialize...", self._pid)
             return True
         except Exception as e:
@@ -194,10 +207,13 @@ class TWSLauncher:
 
                 return True
 
-            # Check if process died
-            if self._process and self._process.poll() is not None:
+            # Check if process died — but only for direct launch.
+            # IBC's StartTWS.bat exits normally after spawning TWS as a
+            # separate process, so its exit does NOT mean TWS failed.
+            if (self._process and self._process.poll() is not None
+                    and not self._launched_via_ibc):
                 logger.error(
-                    "TWS/IBC process exited prematurely (exit code %d)",
+                    "TWS process exited prematurely (exit code %d)",
                     self._process.returncode,
                 )
                 self._read_process_output()
