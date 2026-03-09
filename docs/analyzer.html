@@ -54,13 +54,13 @@ const T = {
   grid: "#F0EAE3", gridMajor: "#E8DDD3",
   text: "#8B7355", textMuted: "#B8A48E", textBright: "#5C4333",
   textWhite: "#3D2E22",
-  green: "#2D8C4E", greenDim: "#2D8C4E30", greenBg: "#ECFAEF",
-  red: "#C53D1B", redDim: "#C53D1B30", redBg: "#FDE8E2",
+  green: "#2D8C4E", greenDim: "#2D8C4E80", greenBg: "#ECFAEF",
+  red: "#C53D1B", redDim: "#C53D1B80", redBg: "#FDE8E2",
   blue: "#5B7BA8", blueDim: "#5B7BA820",
   amber: "#B08515", amberDim: "#B0851520",
   purple: "#8B6DB0", purpleDim: "#8B6DB020",
   cyan: "#4A9A8E",
-  maintenanceShade: "#B0851508", maintenanceBorder: "#B0851515",
+  maintenanceShade: "#B085151F", maintenanceBorder: "#B0851540",
   crosshair: "#8B691450",
   selection: "#8B691420",
 };
@@ -282,6 +282,7 @@ function NQForensicVisualizer() {
       if (isMaintenance(c.time)) {
         const x = (i / count) * chartW;
         ctx.fillStyle = T.maintenanceShade; ctx.fillRect(x, 0, candleW + 1, CHART_H);
+        ctx.strokeStyle = T.maintenanceBorder; ctx.lineWidth = 0.5; ctx.strokeRect(x, 0, candleW + 1, CHART_H);
       }
     });
     // Day separators
@@ -327,19 +328,21 @@ function NQForensicVisualizer() {
         ctx.strokeStyle = T.textBright; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
         ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, entryY); ctx.stroke(); ctx.setLineDash([]);
         const exitY = priceToY(st.exitPrice);
-        ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6;
+        ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.85;
         ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, exitY); ctx.stroke(); ctx.globalAlpha = 1;
         const topY = Math.min(entryY, exitY), botY = Math.max(entryY, exitY);
-        ctx.fillStyle = st.pnl >= 0 ? T.greenBg : T.redBg;
+        ctx.fillStyle = st.pnl >= 0 ? "rgba(45,140,78,0.25)" : "rgba(197,61,27,0.25)";
         ctx.fillRect(eX, topY, xX - eX, botY - topY);
         ctx.fillStyle = st.side === "long" ? T.green : T.red;
         ctx.beginPath();
-        if (st.side === "long") { ctx.moveTo(eX, entryY + 8); ctx.lineTo(eX - 6, entryY + 16); ctx.lineTo(eX + 6, entryY + 16); }
-        else { ctx.moveTo(eX, entryY - 8); ctx.lineTo(eX - 6, entryY - 16); ctx.lineTo(eX + 6, entryY - 16); }
+        if (st.side === "long") { ctx.moveTo(eX, entryY + 8); ctx.lineTo(eX - 8, entryY + 20); ctx.lineTo(eX + 8, entryY + 20); }
+        else { ctx.moveTo(eX, entryY - 8); ctx.lineTo(eX - 8, entryY - 20); ctx.lineTo(eX + 8, entryY - 20); }
         ctx.fill();
+        ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1.5; ctx.stroke();
         ctx.fillStyle = st.pnl >= 0 ? T.green : T.red;
-        ctx.beginPath(); ctx.arc(xX, exitY, 5, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = T.bg; ctx.beginPath(); ctx.arc(xX, exitY, 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(xX, exitY, 7, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = T.bg; ctx.beginPath(); ctx.arc(xX, exitY, 3, 0, Math.PI * 2); ctx.fill();
         const labelX = eX + (xX - eX) / 2;
         const labelY = st.side === "long" ? Math.min(tp1Y, entryY) - 20 : Math.max(stopY, entryY) + 30;
         const labelText = `${st.rMultiple > 0 ? "+" : ""}${st.rMultiple}R  $${st.pnl > 0 ? "+" : ""}${st.pnl.toFixed(0)}  ${st.exitType.replace(/_/g, " ").toUpperCase()}`;
@@ -365,8 +368,7 @@ function NQForensicVisualizer() {
       ctx.beginPath(); ctx.moveTo(xCenter, hY); ctx.lineTo(xCenter, lY); ctx.stroke();
       const bodyTop = Math.min(oY, cY), bodyHeight = Math.max(1, Math.abs(oY - cY));
       if (isGreen) {
-        ctx.fillStyle = T.bg; ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
-        ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(x, bodyTop, bodyW, bodyHeight);
+        ctx.fillStyle = color; ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
       } else {
         ctx.fillStyle = color; ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
       }
@@ -381,11 +383,13 @@ function NQForensicVisualizer() {
       if (entryIdx < viewStart || entryIdx >= viewEnd) return;
       const x = ((entryIdx - viewStart) / count) * chartW + (chartW / count) / 2;
       const y = priceToY(t.entryPrice);
-      ctx.fillStyle = t.pnl >= 0 ? T.green : T.red; ctx.globalAlpha = 0.7;
+      ctx.fillStyle = t.pnl >= 0 ? T.green : T.red; ctx.globalAlpha = 0.9;
       if (t.side === "long") {
-        ctx.beginPath(); ctx.moveTo(x, y + 4); ctx.lineTo(x - 4, y + 10); ctx.lineTo(x + 4, y + 10); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x, y + 5); ctx.lineTo(x - 5, y + 13); ctx.lineTo(x + 5, y + 13); ctx.fill();
+        ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1; ctx.stroke();
       } else {
-        ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x - 4, y - 10); ctx.lineTo(x + 4, y - 10); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x, y - 5); ctx.lineTo(x - 5, y - 13); ctx.lineTo(x + 5, y - 13); ctx.fill();
+        ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1; ctx.stroke();
       }
       ctx.globalAlpha = 1;
     });

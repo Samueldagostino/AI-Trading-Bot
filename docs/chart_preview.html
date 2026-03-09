@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chart Style Preview — Before vs After</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#FDFBF9; font-family:'Segoe UI',system-ui,sans-serif; padding:24px; }
+  h1 { font-size:20px; color:#3D2E22; margin-bottom:4px; }
+  p { font-size:13px; color:#8B7355; margin-bottom:24px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  .panel { background:#fff; border:1px solid #E8DDD3; border-radius:12px; overflow:hidden; }
+  .panel-label { padding:12px 16px; font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; border-bottom:1px solid #E8DDD3; }
+  .panel-label.before { color:#C53D1B; background:#FDE8E2; }
+  .panel-label.after { color:#2D8C4E; background:#ECFAEF; }
+  canvas { display:block; width:100%; }
+  .legend { padding:16px; font-size:11px; color:#8B7355; line-height:1.8; }
+  .legend b { color:#3D2E22; }
+  @media(max-width:900px) { .grid{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<h1>Chart Style Preview: Before vs After</h1>
+<p>Side-by-side comparison of the proposed color/visibility changes for the Analyzer chart.</p>
+<div class="grid">
+  <div class="panel">
+    <div class="panel-label before">BEFORE (Current)</div>
+    <canvas id="before" width="560" height="340"></canvas>
+    <div class="legend">
+      <b>Issues:</b> Green candles are hollow outlines, hard to distinguish from background. Entry/exit arrows are tiny (4px) at 70% opacity. Session shading is 3% opacity — invisible. Volume bars at ~19% opacity. Trade PnL zone uses very light pastel fills.
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-label after">AFTER (Proposed)</div>
+    <canvas id="after" width="560" height="340"></canvas>
+    <div class="legend">
+      <b>Changes:</b> Green candles are <b>solid filled</b>. Entry arrows are <b>larger (8px)</b> at <b>full opacity</b> with a white border. Exit dots are <b>larger (7px)</b> with a glow ring. Session shading at <b>12% opacity</b> with visible border. Volume bars at <b>50% opacity</b>. PnL zone fill at <b>25% opacity</b> with thicker connecting lines (2.5px).
+    </div>
+  </div>
+</div>
+
+<script>
+// Simulated candlestick data
+const candles = [
+  {o:100,h:108,l:97,c:106}, {o:106,h:112,l:104,c:104}, {o:104,h:110,l:102,c:109},
+  {o:109,h:115,l:107,c:113}, {o:113,h:116,l:109,c:110}, {o:110,h:114,l:106,c:107},
+  {o:107,h:113,l:105,c:112}, {o:112,h:118,l:110,c:117}, {o:117,h:122,l:115,c:120},
+  {o:120,h:124,l:118,c:119}, {o:119,h:123,l:115,c:116}, {o:116,h:120,l:113,c:118},
+  {o:118,h:125,l:116,c:124}, {o:124,h:128,l:121,c:122}, {o:122,h:126,l:118,c:119},
+  {o:119,h:122,l:114,c:115}, {o:115,h:118,l:112,c:117}, {o:117,h:123,l:115,c:121},
+  {o:121,h:127,l:119,c:126}, {o:126,h:130,l:124,c:128},
+];
+const volumes = [300,450,200,500,350,280,420,600,550,400,320,380,700,480,360,250,310,450,520,580];
+
+// Trade: entry at candle 3 (long @ 109), exit at candle 12 (@ 124)
+const trade = { entryIdx:3, exitIdx:12, entryPrice:109, exitPrice:124, stopPrice:103, side:"long", pnl:300 };
+// Session maintenance zone: candles 5-7
+const maintStart = 5, maintEnd = 7;
+
+function priceToY(p, h, pMin, pMax) {
+  return h * 0.08 + (1 - (p - pMin) / (pMax - pMin)) * (h * 0.68);
+}
+
+function drawChart(canvasId, style) {
+  const cvs = document.getElementById(canvasId);
+  const dpr = window.devicePixelRatio || 1;
+  const w = 560, h = 340;
+  cvs.width = w * dpr; cvs.height = h * dpr;
+  cvs.style.width = w + 'px'; cvs.style.height = h + 'px';
+  const ctx = cvs.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const pMin = 95, pMax = 135;
+  const chartH = h * 0.75;
+  const volH = h * 0.2;
+  const volTop = chartH + 8;
+  const candleW = w / candles.length;
+  const bodyW = candleW * 0.6;
+  const maxVol = Math.max(...volumes);
+
+  // Background
+  ctx.fillStyle = "#FDFBF9";
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid lines
+  ctx.strokeStyle = "#F0EAE3"; ctx.lineWidth = 0.5;
+  for (let p = 100; p <= 130; p += 10) {
+    const y = priceToY(p, h, pMin, pMax);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    ctx.fillStyle = "#B8A48E"; ctx.font = "10px monospace"; ctx.textAlign = "right";
+    ctx.fillText(p.toFixed(0), w - 4, y - 3);
+  }
+
+  // Session/maintenance shading
+  for (let i = maintStart; i <= maintEnd; i++) {
+    const x = i * candleW;
+    ctx.fillStyle = style.maintShade;
+    ctx.fillRect(x, 0, candleW, chartH);
+    if (style.maintBorder) {
+      ctx.strokeStyle = style.maintBorderColor;
+      ctx.lineWidth = style.maintBorderWidth || 1;
+      if (i === maintStart) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, chartH); ctx.stroke(); }
+      if (i === maintEnd) { ctx.beginPath(); ctx.moveTo(x + candleW, 0); ctx.lineTo(x + candleW, chartH); ctx.stroke(); }
+    }
+  }
+  // Label
+  ctx.fillStyle = style.maintLabelColor || "#B8A48E"; ctx.font = style.maintLabelFont || "9px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("ETH / MAINTENANCE", (maintStart + (maintEnd - maintStart + 1) / 2) * candleW, 14);
+
+  // Trade overlay (PnL shading between entry and exit)
+  if (trade) {
+    const eX = trade.entryIdx * candleW + candleW / 2;
+    const xX = trade.exitIdx * candleW + candleW / 2;
+    const entryY = priceToY(trade.entryPrice, h, pMin, pMax);
+    const exitY = priceToY(trade.exitPrice, h, pMin, pMax);
+    const stopY = priceToY(trade.stopPrice, h, pMin, pMax);
+    const topY = Math.min(entryY, exitY), botY = Math.max(entryY, exitY);
+
+    // Stop line
+    ctx.strokeStyle = style.stopLineColor; ctx.lineWidth = style.stopLineWidth; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(eX, stopY); ctx.lineTo(xX, stopY); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = style.stopLabelBg; ctx.fillRect(eX - 1, stopY - 9, 68, 16);
+    ctx.fillStyle = style.stopLabelColor; ctx.font = "bold 9px monospace"; ctx.textAlign = "left";
+    ctx.fillText("STOP 103.00", eX + 3, stopY + 3);
+
+    // Entry line
+    ctx.strokeStyle = style.entryLineColor; ctx.lineWidth = style.entryLineWidth; ctx.setLineDash([2, 2]);
+    ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, entryY); ctx.stroke(); ctx.setLineDash([]);
+
+    // PnL connection line
+    ctx.strokeStyle = style.pnlLineColor; ctx.lineWidth = style.pnlLineWidth; ctx.globalAlpha = style.pnlLineAlpha;
+    ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, exitY); ctx.stroke(); ctx.globalAlpha = 1;
+
+    // PnL zone fill
+    ctx.fillStyle = style.pnlZoneFill;
+    ctx.fillRect(eX, topY, xX - eX, botY - topY);
+
+    // Entry arrow
+    ctx.fillStyle = style.entryArrowColor;
+    ctx.beginPath();
+    ctx.moveTo(eX, entryY + style.arrowOffset);
+    ctx.lineTo(eX - style.arrowSize, entryY + style.arrowOffset + style.arrowSize * 1.5);
+    ctx.lineTo(eX + style.arrowSize, entryY + style.arrowOffset + style.arrowSize * 1.5);
+    ctx.fill();
+    if (style.arrowBorder) {
+      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(eX, entryY + style.arrowOffset);
+      ctx.lineTo(eX - style.arrowSize, entryY + style.arrowOffset + style.arrowSize * 1.5);
+      ctx.lineTo(eX + style.arrowSize, entryY + style.arrowOffset + style.arrowSize * 1.5);
+      ctx.closePath(); ctx.stroke();
+    }
+
+    // Exit dot
+    ctx.fillStyle = style.exitDotColor;
+    if (style.exitGlow) {
+      ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(xX, exitY, style.exitDotSize + 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    }
+    ctx.beginPath(); ctx.arc(xX, exitY, style.exitDotSize, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#FDFBF9"; ctx.beginPath(); ctx.arc(xX, exitY, style.exitDotSize * 0.4, 0, Math.PI * 2); ctx.fill();
+
+    // Label
+    ctx.font = "bold 10px monospace"; ctx.textAlign = "center";
+    const lbl = "+$300  LONG  +2.8R";
+    const lw = ctx.measureText(lbl).width + 16;
+    const lx = (eX + xX) / 2 - lw / 2, ly = topY - 22;
+    ctx.fillStyle = style.labelBg;
+    ctx.strokeStyle = style.labelBorder; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(lx, ly, lw, 20, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = style.labelText; ctx.fillText(lbl, (eX + xX) / 2, ly + 14);
+  }
+
+  // Candles
+  candles.forEach((c, i) => {
+    const x = i * candleW + (candleW - bodyW) / 2;
+    const xCenter = i * candleW + candleW / 2;
+    const isGreen = c.c >= c.o;
+    const oY = priceToY(c.o, h, pMin, pMax), cY = priceToY(c.c, h, pMin, pMax);
+    const hY = priceToY(c.h, h, pMin, pMax), lY = priceToY(c.l, h, pMin, pMax);
+    const color = isGreen ? style.greenCandle : style.redCandle;
+
+    // Wick
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(xCenter, hY); ctx.lineTo(xCenter, lY); ctx.stroke();
+
+    // Body
+    const bodyTop = Math.min(oY, cY), bodyHeight = Math.max(1, Math.abs(oY - cY));
+    if (isGreen) {
+      if (style.greenFilled) {
+        ctx.fillStyle = color; ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
+      } else {
+        ctx.fillStyle = "#FDFBF9"; ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
+        ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(x, bodyTop, bodyW, bodyHeight);
+      }
+    } else {
+      ctx.fillStyle = color; ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
+    }
+  });
+
+  // Volume bars
+  volumes.forEach((v, i) => {
+    const x = i * candleW + (candleW - bodyW) / 2;
+    const vH = (v / maxVol) * (volH - 4);
+    const isGreen = candles[i].c >= candles[i].o;
+    ctx.fillStyle = isGreen ? style.greenVol : style.redVol;
+    ctx.fillRect(x, volTop + volH - vH, bodyW, vH);
+  });
+}
+
+// ── BEFORE STYLE (current) ──
+const beforeStyle = {
+  greenCandle: "#2D8C4E", redCandle: "#C53D1B",
+  greenFilled: false, // hollow green candles
+  greenVol: "#2D8C4E30", redVol: "#C53D1B30", // 19% opacity
+  maintShade: "#B0851508", // 3% opacity — invisible
+  maintBorder: false,
+  maintLabelColor: "#B8A48E", maintLabelFont: "9px sans-serif",
+  entryArrowColor: "#2D8C4E", arrowSize: 4, arrowOffset: 4, arrowBorder: false,
+  exitDotColor: "#2D8C4E", exitDotSize: 5, exitGlow: false,
+  entryLineColor: "#5C4333", entryLineWidth: 1.5,
+  pnlLineColor: "#2D8C4E", pnlLineWidth: 1.5, pnlLineAlpha: 0.6,
+  pnlZoneFill: "#ECFAEF", // very light
+  stopLineColor: "#C53D1B", stopLineWidth: 1,
+  stopLabelBg: "#FDE8E2", stopLabelColor: "#C53D1B",
+  labelBg: "#0a2a1a", labelBorder: "#2D8C4E", labelText: "#2D8C4E",
+};
+
+// ── AFTER STYLE (proposed) ──
+const afterStyle = {
+  greenCandle: "#2D8C4E", redCandle: "#C53D1B",
+  greenFilled: true, // SOLID green candles
+  greenVol: "#2D8C4E80", redVol: "#C53D1B80", // 50% opacity
+  maintShade: "#B085151F", // 12% opacity
+  maintBorder: true, maintBorderColor: "#B0851540", maintBorderWidth: 1,
+  maintLabelColor: "#B08515", maintLabelFont: "bold 10px sans-serif",
+  entryArrowColor: "#2D8C4E", arrowSize: 8, arrowOffset: 4, arrowBorder: true,
+  exitDotColor: "#2D8C4E", exitDotSize: 7, exitGlow: true,
+  entryLineColor: "#5C4333", entryLineWidth: 2,
+  pnlLineColor: "#2D8C4E", pnlLineWidth: 2.5, pnlLineAlpha: 0.85,
+  pnlZoneFill: "#2D8C4E40", // 25% opacity — much more visible
+  stopLineColor: "#C53D1B", stopLineWidth: 1.5,
+  stopLabelBg: "#FDE8E2", stopLabelColor: "#C53D1B",
+  labelBg: "#0a2a1a", labelBorder: "#2D8C4E", labelText: "#2D8C4E",
+};
+
+drawChart("before", beforeStyle);
+drawChart("after", afterStyle);
+</script>
+</body>
+</html>
