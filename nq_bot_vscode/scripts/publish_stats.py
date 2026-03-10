@@ -38,6 +38,7 @@ import logging.handlers
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,6 +59,10 @@ _ACCOUNT_SIZE = 50_000.0
 
 # Track publisher uptime for heartbeat
 _PUBLISHER_START = datetime.now(timezone.utc)
+
+# Track previous status for OFFLINE → LIVE transition detection
+_previous_status = "OFFLINE"
+_notification_sent_this_session = False
 
 
 def _read_json_safe(filepath: Path, default=None):
@@ -288,6 +293,23 @@ def build_sanitized_stats() -> dict:
     heartbeat = _build_heartbeat(status, candles)
     bot_state = _build_bot_state(status, decisions)
 
+    # Active trade for live chart (read from active_trade.json written by run_tws.py)
+    active_trade = _read_json_safe(LOGS_DIR / "active_trade.json")
+    if not active_trade or not active_trade.get("side"):
+        active_trade = None  # No active trade
+
+    # Last 40 candles for the mini trade chart (publicly available price data)
+    chart_candles = []
+    if isinstance(candles, list) and candles:
+        for c in candles[-40:]:
+            chart_candles.append({
+                "t": c.get("t", ""),
+                "o": c.get("o", 0),
+                "h": c.get("h", 0),
+                "l": c.get("l", 0),
+                "c": c.get("c", 0),
+            })
+
     return {
         "updated": datetime.now(timezone.utc).isoformat(),
         "status": "LIVE" if is_live else "OFFLINE",
@@ -304,9 +326,12 @@ def build_sanitized_stats() -> dict:
         "modifiers": mod_values,
         "last_price": round(last_price, 2),
         "recent_decisions": recent_decisions,
-        # New fields for live website heartbeat & state indicators
+        # Heartbeat & state
         "heartbeat": heartbeat,
         "state": bot_state,
+        # Trade chart data (publicly available market prices only)
+        "active_trade": active_trade,
+        "candle_buffer": chart_candles,
     }
 
 
@@ -375,10 +400,13 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
             logger.warning("Git commit failed: %s", result.stderr)
             return False
 
-        # Push with retry
+        # Push with retry (use --set-upstream on first attempt)
         for attempt in range(4):
+            push_cmd = ["git", "push"]
+            if attempt == 0:
+                push_cmd = ["git", "push", "--set-upstream", "origin", "HEAD"]
             result = subprocess.run(
-                ["git", "push"],
+                push_cmd,
                 cwd=str(ROOT_DIR),
                 capture_output=True,
                 text=True,
@@ -406,6 +434,39 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
         return False
 
 
+def _check_status_transition(new_status: str) -> None:
+    """
+    Detect OFFLINE → LIVE transition and send SMS notifications.
+    Runs notification in a background thread to not block publishing.
+    """
+    global _previous_status, _notification_sent_this_session
+
+    if (_previous_status == "OFFLINE" and new_status == "LIVE"
+            and not _notification_sent_this_session):
+        logger.info("STATUS TRANSITION: OFFLINE → LIVE — triggering SMS notifications")
+        _notification_sent_this_session = True
+
+        def _send_in_background():
+            try:
+                from notify_subscribers import notify_all
+                result = notify_all(
+                    "NQ.BOT is now LIVE!\n\n"
+                    "The MNQ futures simulation is running.\n"
+                    "Watch live: www.makemoneymarkets.com\n\n"
+                    "— NQ.BOT"
+                )
+                logger.info("SMS notification result: %s", result)
+            except ImportError:
+                logger.warning("notify_subscribers module not found — SMS notifications disabled")
+            except Exception as e:
+                logger.error("SMS notification failed: %s", e)
+
+        thread = threading.Thread(target=_send_in_background, daemon=True)
+        thread.start()
+
+    _previous_status = new_status
+
+
 def run_loop(interval: int = 60, dry_run: bool = False) -> None:
     """Main publish loop."""
     logger.info("=" * 50)
@@ -429,6 +490,9 @@ def run_loop(interval: int = 60, dry_run: bool = False) -> None:
                 stats["profit_factor"],
                 stats["session_pnl_pct"],
             )
+
+            # Check for status transition and notify subscribers
+            _check_status_transition(stats["status"])
 
             git_commit_and_push(dry_run=dry_run)
 

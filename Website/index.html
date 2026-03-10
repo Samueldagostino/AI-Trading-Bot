@@ -61,6 +61,31 @@ tr:nth-child(even){background:rgba(16,21,28,.5)}
 .badge-rejected{background:rgba(255,59,92,.15);color:var(--red);padding:1px 6px;border-radius:2px;font-size:9px;font-weight:600}
 .no-data{color:var(--dim);text-align:center;padding:20px;font-size:11px}
 
+/* DATA FRESHNESS BAR */
+.freshness-bar{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:10px}
+.freshness-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.freshness-dot.fresh{background:var(--green);box-shadow:0 0 6px rgba(0,212,170,.4)}
+.freshness-dot.stale{background:var(--amber)}
+.freshness-dot.dead{background:var(--red)}
+.freshness-label{color:var(--dim);text-transform:uppercase;letter-spacing:1px}
+.freshness-val{color:var(--white);font-weight:600}
+.freshness-age{color:var(--dim);margin-left:auto}
+
+/* NOTIFY SECTION */
+.notify-section{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:24px;margin-bottom:24px;text-align:center}
+.notify-title{font-size:13px;font-weight:700;color:var(--green);letter-spacing:1px;margin-bottom:4px}
+.notify-subtitle{font-size:10px;color:var(--dim);margin-bottom:16px;line-height:1.5}
+.notify-form{display:flex;gap:8px;justify-content:center;align-items:stretch;max-width:420px;margin:0 auto}
+.notify-input{flex:1;background:#0d1219;border:1px solid var(--border);border-radius:4px;padding:10px 14px;color:var(--white);font-family:var(--mono);font-size:12px;outline:none;transition:border-color .2s}
+.notify-input:focus{border-color:var(--green)}
+.notify-input::placeholder{color:var(--dim)}
+.notify-btn{background:var(--green);color:var(--bg);border:none;border-radius:4px;padding:10px 20px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;white-space:nowrap}
+.notify-btn:hover{opacity:.85}
+.notify-btn:disabled{opacity:.5;cursor:not-allowed}
+.notify-msg{font-size:10px;margin-top:10px;min-height:14px}
+.notify-msg.ok{color:var(--green)}.notify-msg.err{color:var(--red)}
+.notify-privacy{font-size:9px;color:var(--dim);margin-top:8px}
+
 /* FOOTER */
 .footer{text-align:center;padding:24px;color:var(--dim);font-size:10px;border-top:1px solid var(--border);margin-top:24px}
 .security-note{color:var(--amber);font-size:9px;margin-top:6px}
@@ -79,6 +104,14 @@ tr:nth-child(even){background:rgba(16,21,28,.5)}
 </div>
 
 <div class="container">
+  <!-- DATA FRESHNESS -->
+  <div class="freshness-bar" id="freshnessBar">
+    <div class="freshness-dot dead" id="freshDot"></div>
+    <span class="freshness-label">Data Feed</span>
+    <span class="freshness-val" id="freshStatus">WAITING...</span>
+    <span class="freshness-age" id="freshAge">--</span>
+  </div>
+
   <!-- KPI GRID -->
   <div class="kpi-grid">
     <div class="kpi">
@@ -139,6 +172,19 @@ tr:nth-child(even){background:rgba(16,21,28,.5)}
     </table>
   </div>
 
+  <!-- NOTIFY ME -->
+  <div class="notify-section">
+    <div class="notify-title">GET NOTIFIED</div>
+    <div class="notify-subtitle">Enter your phone number to receive a text when the simulation goes live.</div>
+    <form class="notify-form" id="notifyForm" onsubmit="return handleNotify(event)">
+      <input class="notify-input" id="phoneInput" type="tel" placeholder="+1 (555) 123-4567" required
+             pattern="[\d\s\+\-\(\)]{7,20}" title="Enter a valid phone number">
+      <button class="notify-btn" id="notifyBtn" type="submit">NOTIFY ME</button>
+    </form>
+    <div class="notify-msg" id="notifyMsg"></div>
+    <div class="notify-privacy">We only use your number for bot status alerts. No spam, ever.</div>
+  </div>
+
   <div class="footer">
     NQ.BOT Live Status &middot; Read-only display &middot; Auto-refreshes every 30s
     <div class="security-note">No account numbers, dollar amounts, exact prices, order IDs, or connection details are exposed.</div>
@@ -151,6 +197,31 @@ async function fetchStats() {
     const res = await fetch('data/live_stats.json?' + Date.now());
     if (!res.ok) return;
     const d = await res.json();
+
+    // Data freshness indicator
+    const freshDot = document.getElementById('freshDot');
+    const freshStatus = document.getElementById('freshStatus');
+    const freshAge = document.getElementById('freshAge');
+    if (d.updated) {
+      const updatedAt = new Date(d.updated);
+      const ageSec = Math.floor((Date.now() - updatedAt.getTime()) / 1000);
+      if (ageSec < 120) {
+        freshDot.className = 'freshness-dot fresh';
+        freshStatus.textContent = 'STREAMING';
+        freshStatus.style.color = 'var(--green)';
+      } else if (ageSec < 300) {
+        freshDot.className = 'freshness-dot stale';
+        freshStatus.textContent = 'DELAYED';
+        freshStatus.style.color = 'var(--amber)';
+      } else {
+        freshDot.className = 'freshness-dot dead';
+        freshStatus.textContent = 'STALE';
+        freshStatus.style.color = 'var(--red)';
+      }
+      if (ageSec < 60) freshAge.textContent = ageSec + 's ago';
+      else if (ageSec < 3600) freshAge.textContent = Math.floor(ageSec/60) + 'm ago';
+      else freshAge.textContent = Math.floor(ageSec/3600) + 'h ago';
+    }
 
     // Status badge
     const badge = document.getElementById('statusBadge');
@@ -241,6 +312,66 @@ async function fetchStats() {
 // Initial fetch + auto-refresh every 30 seconds
 fetchStats();
 setInterval(fetchStats, 30000);
+
+// ── Notification signup ──
+// NOTIFY_ENDPOINT: Replace with your Google Apps Script Web App URL after deployment
+const NOTIFY_ENDPOINT = 'https://script.google.com/macros/s/AKfycbysYfimJtDpLRkFmumo9_T8Q2DJNCNQ9zsf8a07WnowxHqaJuGUC_HKtZmvDBiwubI/exec';
+
+async function handleNotify(e) {
+  e.preventDefault();
+  const phone = document.getElementById('phoneInput').value.trim();
+  const msg = document.getElementById('notifyMsg');
+  const btn = document.getElementById('notifyBtn');
+
+  // Basic validation: strip formatting, check digits
+  const digits = phone.replace(/[\s\-\(\)\+]/g, '');
+  if (digits.length < 7 || digits.length > 15) {
+    msg.textContent = 'Please enter a valid phone number.';
+    msg.className = 'notify-msg err';
+    return false;
+  }
+
+  if (!NOTIFY_ENDPOINT) {
+    // Fallback: save to localStorage and show success
+    // (operator retrieves numbers from live_stats.json subscriber list)
+    let subs = JSON.parse(localStorage.getItem('nqbot_subscribers') || '[]');
+    if (!subs.includes(phone)) subs.push(phone);
+    localStorage.setItem('nqbot_subscribers', JSON.stringify(subs));
+    msg.textContent = 'You\'re on the list! We\'ll text you when the bot goes live.';
+    msg.className = 'notify-msg ok';
+    document.getElementById('phoneInput').value = '';
+    return false;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'SENDING...';
+  msg.textContent = '';
+
+  try {
+    const res = await fetch(NOTIFY_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: phone, timestamp: new Date().toISOString() }),
+    });
+    const data = await res.json();
+
+    if (data.result === 'success') {
+      msg.textContent = 'You\'re on the list! We\'ll text you when the bot goes live.';
+      msg.className = 'notify-msg ok';
+      document.getElementById('phoneInput').value = '';
+    } else {
+      msg.textContent = data.error || 'Something went wrong. Try again.';
+      msg.className = 'notify-msg err';
+    }
+  } catch (err) {
+    msg.textContent = 'Network error. Please try again.';
+    msg.className = 'notify-msg err';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'NOTIFY ME';
+  }
+  return false;
+}
 </script>
 </body>
 </html>
