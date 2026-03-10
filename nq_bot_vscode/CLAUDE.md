@@ -41,8 +41,8 @@ Exec Bars (2m) ──► Feature Engine ──► Signal Aggregator
         │                          ┌──────────┴──────────┐
         │                          │  HIGH-CONVICTION     │
         │                          │  FILTER (2 gates)    │
-        │                          │  1. Score ≥ 0.60     │
-        │                          │  2. Stop  ≤ 50 pts   │
+        │                          │  1. Score ≥ 0.75     │
+        │                          │  2. Stop  ≤ 30 pts   │
         │                          └──────────┬──────────┘
         │                                     │
         ▼                                     ▼
@@ -71,8 +71,8 @@ These two rules are **non-negotiable hard gates**. They exist because backtestin
 
 | Rule | Gate | Why |
 |------|------|-----|
-| **Min Signal Score** | `combined_score ≥ 0.60` | Eliminates low-conviction noise trades |
-| **Max Stop Distance** | `stop_distance ≤ 50 pts` | Caps tail risk per trade |
+| **Min Signal Score** | `combined_score ≥ 0.75` | Eliminates low-conviction noise trades |
+| **Max Stop Distance** | `stop_distance ≤ 30 pts` | Caps tail risk per trade |
 
 ### Execution Architecture (v1.3.1 — 5-Contract Scale-Out)
 
@@ -89,8 +89,8 @@ These two rules are **non-negotiable hard gates**. They exist because backtestin
 ```python
 # config/constants.py — SINGLE SOURCE OF TRUTH for all policy constants
 # All modules import from here. Do NOT redefine locally.
-HIGH_CONVICTION_MIN_SCORE = 0.60
-HIGH_CONVICTION_MAX_STOP_PTS = 50.0
+HIGH_CONVICTION_MIN_SCORE = 0.75
+HIGH_CONVICTION_MAX_STOP_PTS = 30.0
 SWEEP_MIN_SCORE = 0.50           # Sweep must score >= 0.50 to be eligible
 SWEEP_CONFLUENCE_BONUS = 0.05    # Boost when signal + sweep fire together
 HTF_STRENGTH_GATE = 0.3          # Config D — do NOT change without backtest
