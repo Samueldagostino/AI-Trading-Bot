@@ -884,6 +884,9 @@ class CausalReplayEngine:
         # ── Sim time for executor patch ──
         self._current_bar_ts: Optional[datetime] = None
 
+        # ── Maintenance window entry cutoff ──
+        self._maintenance_entry_blocked: bool = False
+
         # ── Patch executor for backtest mode ──
         self._patch_executor()
 
@@ -1165,6 +1168,13 @@ class CausalReplayEngine:
         if self._is_warmup():
             return
         if self._check_daily_limits():
+            return
+        # Maintenance window entry cutoff — no new entries after 4:30 PM ET
+        if getattr(self, '_maintenance_entry_blocked', False):
+            logger.debug(
+                "BLOCKED: New entry rejected — past 4:30 PM ET cutoff "
+                "(maintenance window protection)"
+            )
             return
 
         # ── Regime detection ──
@@ -1735,6 +1745,85 @@ class CausalReplayEngine:
         """Process a single 2-minute execution bar through the full causal pipeline."""
         self._bars_processed += 1
         ts = bar["timestamp"]
+
+        # ── MAINTENANCE WINDOW CHECKS (must be FIRST — before any signal processing) ──
+        current_et = ts.astimezone(ET)
+        current_time_et = current_et.time()
+
+        # Hard flatten at 4:50 PM ET — close ALL positions unconditionally
+        if current_time_et >= time(16, 50):
+            if self.executor.has_active_trade:
+                result = await self.executor.maintenance_flatten(
+                    bar["close"], ts
+                )
+                if result:
+                    # Process exit PnL through same path as normal exits
+                    closed_trade = self.executor._trade_history[-1]
+                    total_exit_slippage = 0.0
+                    for leg in closed_trade.active_legs:
+                        slip = (get_slippage(leg.exit_time) if leg.exit_time else SLIPPAGE_RTH_PTS)
+                        total_exit_slippage += slip * leg.contracts
+                    exit_slippage_cost = total_exit_slippage * POINT_VALUE
+                    raw_pnl = result.get("total_pnl", 0.0)
+                    adjusted_pnl = raw_pnl - exit_slippage_cost
+
+                    # C3 delayed entry logic
+                    c1_pnl = result.get("c1_pnl", 0)
+                    c3_pnl_original = result.get("c3_pnl", 0)
+                    c3_blocked = False
+                    if C3_DELAYED_ENTRY:
+                        self._c3_stats["trades_total"] += 1
+                        if c1_pnl <= 0:
+                            c3_blocked = True
+                            c3_slip = SLIPPAGE_RTH_PTS
+                            c3_contracts = closed_trade.c3.contracts
+                            c3_slip_cost = c3_slip * c3_contracts * POINT_VALUE
+                            c3_commission = closed_trade.c3.commission
+                            adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_slip_cost + c3_commission
+                            self._c3_stats["c3_blocked"] += 1
+                            self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
+                        else:
+                            self._c3_stats["c3_entered"] += 1
+
+                    if not math.isfinite(adjusted_pnl):
+                        adjusted_pnl = 0.0
+
+                    self._daily_pnl += adjusted_pnl
+                    self._cumulative_pnl += adjusted_pnl
+                    self.risk_engine.record_trade_result(adjusted_pnl, result["direction"])
+
+                    exit_record = {
+                        "action": "exit",
+                        "trade_id": result.get("trade_id", ""),
+                        "bar_index": self._bars_processed,
+                        "timestamp": bar["timestamp"].isoformat(),
+                        "direction": result["direction"],
+                        "entry_price": result.get("entry_price", 0),
+                        "c1_exit_price": result.get("c1_exit_price", 0),
+                        "c2_exit_price": result.get("c2_exit_price", 0),
+                        "c3_exit_price": result.get("c3_exit_price", 0) if not c3_blocked else 0,
+                        "c4_exit_price": result.get("c4_exit_price", 0),
+                        "raw_pnl": raw_pnl,
+                        "exit_slippage_cost": exit_slippage_cost,
+                        "adjusted_pnl": adjusted_pnl,
+                        "daily_pnl": self._daily_pnl,
+                        "cumulative_pnl": self._cumulative_pnl,
+                        "c1_pnl": c1_pnl,
+                        "c2_pnl": result.get("c2_pnl", 0),
+                        "c3_pnl": 0.0 if c3_blocked else c3_pnl_original,
+                        "c3_blocked": c3_blocked,
+                        "c4_pnl": result.get("c4_pnl", 0),
+                        "c1_exit_reason": result.get("c1_exit_reason", "EXIT_MAINTENANCE_FLATTEN"),
+                        "c2_exit_reason": result.get("c2_exit_reason", "EXIT_MAINTENANCE_FLATTEN"),
+                        "c3_exit_reason": "delayed_c3_blocked" if c3_blocked else "EXIT_MAINTENANCE_FLATTEN",
+                        "c4_exit_reason": "n/a",
+                        "commission_total": closed_trade.total_commission,
+                    }
+                    self.trades.append(exit_record)
+            return  # No further processing after 4:50 PM ET
+
+        # Entry cutoff at 4:30 PM ET — block new entries but continue managing positions
+        self._maintenance_entry_blocked = current_time_et >= time(16, 30)
 
         # ── Session boundary check ──
         self._check_session_boundary(ts)

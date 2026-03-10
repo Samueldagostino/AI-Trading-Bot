@@ -156,6 +156,9 @@ class TradingOrchestrator:
         self._executor_fail_count = 0
         self._EXECUTOR_FAIL_LIMIT = 5
 
+        # Maintenance window entry cutoff flag
+        self._maintenance_entry_blocked = False
+
     # ================================================================
     # INITIALIZATION
     # ================================================================
@@ -267,8 +270,41 @@ class TradingOrchestrator:
         self._last_rejection = None  # Clear previous rejection
         action_result = None
 
-        # === SESSION BOUNDARY DETECTION — reset VWAP at new trading day ===
+        # === MAINTENANCE WINDOW CHECKS (must be FIRST — Axiom 2: Survival Precedes Profit) ===
+        from datetime import time as dt_time
         bar_et = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
+        current_time_et = bar_et.time()
+
+        # Hard flatten at 4:50 PM ET — close ALL positions unconditionally
+        if current_time_et >= dt_time(16, 50):
+            if self.executor.has_active_trade:
+                result = await self.executor.maintenance_flatten(
+                    bar.close, bar.timestamp
+                )
+                if result:
+                    total_pnl = result.get("total_pnl", 0.0)
+                    if not math.isfinite(total_pnl):
+                        total_pnl = 0.0
+                    self.risk_engine.record_trade_result(total_pnl, result["direction"])
+                    self.monitoring.record_trade({
+                        "action": "exit",
+                        "pnl": total_pnl,
+                        "direction": result["direction"],
+                    })
+                    self.decision_logger.log_exit(
+                        direction=result.get("direction", "UNKNOWN"),
+                        entry_price=result.get("entry_price", 0.0),
+                        exit_price=bar.close,
+                        total_pnl=total_pnl,
+                        exit_reason="EXIT_MAINTENANCE_FLATTEN",
+                    )
+                    action_result = result
+            return action_result  # No further processing after 4:50 PM ET
+
+        # Entry cutoff at 4:30 PM ET — block new entries, continue position management
+        self._maintenance_entry_blocked = current_time_et >= dt_time(16, 30)
+
+        # === SESSION BOUNDARY DETECTION — reset VWAP at new trading day ===
         bar_date = bar_et.date()
         if self._last_trading_date is not None and bar_date != self._last_trading_date:
             self.feature_engine.reset_session()
@@ -382,6 +418,14 @@ class TradingOrchestrator:
                 elif result.get("action") == "c1_time_exit":
                     action_result = result
 
+            return action_result
+
+        # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
+        if getattr(self, '_maintenance_entry_blocked', False):
+            logger.info(
+                "BLOCKED: New entry rejected — past 4:30 PM ET cutoff "
+                "(maintenance window protection)"
+            )
             return action_result
 
         # === 5. SIGNAL AGGREGATION (only if flat, HTF-gated) ===

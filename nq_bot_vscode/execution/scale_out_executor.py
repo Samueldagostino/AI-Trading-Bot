@@ -1066,6 +1066,37 @@ class ScaleOutExecutor:
         }
 
     # ================================================================
+    # MAINTENANCE WINDOW FLATTEN
+    # ================================================================
+    async def maintenance_flatten(self, price: float, current_time: datetime) -> Optional[dict]:
+        """Force-close ALL open positions for CME maintenance window.
+
+        Called at 4:50 PM ET (or first bar >= 4:50 PM ET).
+        Unconditional — closes C1 AND C2 regardless of unrealized PnL.
+        Exit reason tagged as EXIT_MAINTENANCE_FLATTEN.
+        """
+        if not self.has_active_trade:
+            return None
+
+        trade = self._active_trade
+        open_legs = trade.open_legs
+        n_contracts = sum(leg.contracts for leg in open_legs)
+
+        logger.warning(
+            "MAINTENANCE FLATTEN: Closing %d contracts at %.2f — "
+            "10 minutes to maintenance halt",
+            n_contracts, price,
+        )
+
+        for leg in open_legs:
+            self._close_leg(leg, price, current_time, "EXIT_MAINTENANCE_FLATTEN", trade.direction)
+
+        if not self.config.execution.paper_trading and self.broker:
+            await self.broker.flatten_position()
+
+        return self._finalize_trade(trade, current_time)
+
+    # ================================================================
     # EMERGENCY
     # ================================================================
     async def emergency_flatten(self, price: float) -> Optional[dict]:

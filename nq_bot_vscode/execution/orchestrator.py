@@ -293,6 +293,28 @@ class IBKRLivePipeline:
         if self._executor.is_halted:
             return None
 
+        # === MAINTENANCE WINDOW CHECKS (must be FIRST — Axiom 2) ===
+        from datetime import time as dt_time
+        bar_et = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
+        current_time_et = bar_et.time()
+
+        # Hard flatten at 4:50 PM ET — close ALL positions unconditionally
+        if current_time_et >= dt_time(16, 50):
+            if self._active_group_id is not None:
+                logger.warning(
+                    "MAINTENANCE FLATTEN: Closing all positions — "
+                    "10 minutes to maintenance halt"
+                )
+                try:
+                    await self._executor.flatten_all(reason="MAINTENANCE_FLATTEN")
+                except Exception as e:
+                    logger.error("Maintenance flatten failed: %s", e)
+                self._active_group_id = None
+            return None  # No further processing after 4:50 PM ET
+
+        # Entry cutoff at 4:30 PM ET — block new entries
+        self._maintenance_entry_blocked = current_time_et >= dt_time(16, 30)
+
         # === 0. SESSION VALIDITY — halt if gateway session expired ===
         if hasattr(self, '_client') and self._client and not self._client.is_connected:
             logger.error(
@@ -355,6 +377,14 @@ class IBKRLivePipeline:
 
         # === 4. SKIP IF POSITION ACTIVE ===
         if self._active_group_id is not None:
+            return None
+
+        # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
+        if getattr(self, '_maintenance_entry_blocked', False):
+            logger.info(
+                "BLOCKED: New entry rejected — past 4:30 PM ET cutoff "
+                "(maintenance window protection)"
+            )
             return None
 
         # === 5. SIGNAL AGGREGATION ===
