@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-10T06:58:36.773598+00:00",
+  "updated": "2026-03-10T06:59:38.336512+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 959,
@@ -93,8 +93,8 @@
     }
   ],
   "heartbeat": {
-    "last_seen": "2026-03-10T06:58:35.318042+00:00",
-    "seconds_since_last": 1.4,
+    "last_seen": "2026-03-10T06:59:35.310444+00:00",
+    "seconds_since_last": 3.0,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
