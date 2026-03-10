@@ -236,6 +236,22 @@ class ScaleOutExecutor:
     def active_trade(self) -> Optional[ScaleOutTrade]:
         return self._active_trade
 
+    def get_stats(self) -> dict:
+        """Return executor statistics for replay simulator results."""
+        history = self._trade_history
+        total = len(history)
+        wins = sum(1 for t in history if t.total_net_pnl > 0)
+        losses = sum(1 for t in history if t.total_net_pnl <= 0)
+        total_pnl = sum(t.total_net_pnl for t in history)
+        return {
+            "total_trades": total,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins / total * 100, 1) if total else 0.0,
+            "total_pnl": round(total_pnl, 2),
+            "c3_stats": dict(self._c3_stats),
+        }
+
     # ================================================================
     # SCORING & SIZING
     # ================================================================
@@ -300,6 +316,7 @@ class ScaleOutExecutor:
         regime: str = "unknown",
         regime_multiplier: float = 1.0,
         structural_target: float = 0.0,
+        timestamp: Optional[datetime] = None,
     ) -> Optional[ScaleOutTrade]:
         """
         Enter a 5-contract trade: C1 (1) + C2 (1) + C3 (3).
@@ -380,7 +397,7 @@ class ScaleOutExecutor:
 
         # Execute entry
         if self.config.execution.paper_trading:
-            await self._paper_enter(trade, entry_price)
+            await self._paper_enter(trade, entry_price, timestamp=timestamp)
         else:
             await self._live_enter(trade)
 
@@ -403,13 +420,13 @@ class ScaleOutExecutor:
                 contracts=total,
                 entry_price=trade.entry_price,
                 stop_loss=trade.initial_stop,
-                take_profit=c3_target,
+                take_profit=c2_target,
                 signal_confidence=signal_score,
             ))
 
         return trade
 
-    async def _paper_enter(self, trade: ScaleOutTrade, price: float) -> None:
+    async def _paper_enter(self, trade: ScaleOutTrade, price: float, timestamp: Optional[datetime] = None) -> None:
         """Simulated entry fill."""
         import random
 
@@ -420,7 +437,7 @@ class ScaleOutExecutor:
             fill_price = price - slippage
 
         fill_price = round(fill_price, 2)
-        now = datetime.now(timezone.utc)
+        now = timestamp if timestamp is not None else datetime.now(timezone.utc)
 
         for leg in trade.all_legs:
             if leg.contracts > 0:
@@ -1064,6 +1081,37 @@ class ScaleOutExecutor:
             "c3_blocked": c3_blocked,
             "c3_stats": dict(self._c3_stats),
         }
+
+    # ================================================================
+    # MAINTENANCE WINDOW FLATTEN
+    # ================================================================
+    async def maintenance_flatten(self, price: float, current_time: datetime) -> Optional[dict]:
+        """Force-close ALL open positions for CME maintenance window.
+
+        Called at 4:50 PM ET (or first bar >= 4:50 PM ET).
+        Unconditional — closes C1 AND C2 regardless of unrealized PnL.
+        Exit reason tagged as EXIT_MAINTENANCE_FLATTEN.
+        """
+        if not self.has_active_trade:
+            return None
+
+        trade = self._active_trade
+        open_legs = trade.open_legs
+        n_contracts = sum(leg.contracts for leg in open_legs)
+
+        logger.warning(
+            "MAINTENANCE FLATTEN: Closing %d contracts at %.2f — "
+            "10 minutes to maintenance halt",
+            n_contracts, price,
+        )
+
+        for leg in open_legs:
+            self._close_leg(leg, price, current_time, "EXIT_MAINTENANCE_FLATTEN", trade.direction)
+
+        if not self.config.execution.paper_trading and self.broker:
+            await self.broker.flatten_position()
+
+        return self._finalize_trade(trade, current_time)
 
     # ================================================================
     # EMERGENCY

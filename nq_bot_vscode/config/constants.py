@@ -12,11 +12,11 @@ Do not loosen these gates without new backtested evidence across the full
 """
 
 # ── HIGH-CONVICTION FILTER ────────────────────────────────────────
-#   Rule 1 – Min signal score >= 0.60  (allows 2+ bonus signals through)
+#   Rule 1 – Min signal score >= 0.75  (eliminates low-conviction noise)
 #   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
-HIGH_CONVICTION_MIN_SCORE: float = 0.60
-HIGH_CONVICTION_MAX_STOP_PTS: float = 50.0
-HIGH_CONVICTION_MIN_STOP_PTS: float = 30.0  # Wider stops = room for 5-bar exit (30-50pt sweet spot)
+HIGH_CONVICTION_MIN_SCORE: float = 0.75
+HIGH_CONVICTION_MAX_STOP_PTS: float = 30.0
+HIGH_CONVICTION_MIN_STOP_PTS: float = 0.0   # Legacy — kept for import compat
 
 # ── MIN R:R GATE (DISABLED for C1 time-exit strategy) ──────────────
 # R:R is irrelevant when using time-based exits instead of profit targets.

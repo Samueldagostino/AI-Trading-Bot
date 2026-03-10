@@ -939,9 +939,9 @@ class ReplaySimulator:
 
         # ── Shared patched fills ──────────────────────────────────
 
-        async def patched_paper_enter(trade, price):
+        async def patched_paper_enter(trade, price, timestamp=None):
             """Entry fill with calibrated slippage."""
-            bar_time = sim._current_bar_time or datetime.now(timezone.utc)
+            bar_time = timestamp or sim._current_bar_time or datetime.now(timezone.utc)
             et_time = sim._current_et_time or bar_to_et(bar_time)
             volume = sim._current_bar_volume
 
@@ -955,7 +955,7 @@ class ReplaySimulator:
             sim._current_trade_exit_slippage = 0.0
 
             fill_price = round(adjusted_price, 2)
-            now = datetime.now(timezone.utc)
+            now = bar_time
 
             for leg in [trade.c1, trade.c2]:
                 leg.entry_price = fill_price
