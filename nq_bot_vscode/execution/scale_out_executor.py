@@ -403,7 +403,7 @@ class ScaleOutExecutor:
                 contracts=total,
                 entry_price=trade.entry_price,
                 stop_loss=trade.initial_stop,
-                take_profit=c3_target,
+                take_profit=c2_target,
                 signal_confidence=signal_score,
             ))
 
