@@ -65,9 +65,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .health-item .label{color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:1px}
 .health-item .value{font-weight:600;color:var(--text)}
 .health-item .value.good{color:var(--green)}.health-item .value.fair{color:var(--amber)}.health-item .value.poor{color:var(--red)}
-.quality-bar{width:60px;height:4px;background:var(--border-light);border-radius:2px;overflow:hidden}
-.quality-fill{height:100%;border-radius:2px;transition:width .5s,background .5s}
-.quality-fill.good{background:var(--green);width:100%}.quality-fill.fair{background:var(--amber);width:66%}.quality-fill.poor{background:var(--red);width:33%}
+.conn-status{font-weight:700;font-size:11px;font-family:var(--mono);letter-spacing:.5px}
+.conn-status.connected{color:var(--green)}.conn-status.disconnected{color:var(--red)}
 
 /* SPARKLINE */
 .sparkline{display:inline-flex;gap:2px;align-items:end;margin-left:auto}
@@ -84,7 +83,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .price-banner .pnl.pos{color:var(--green)}.price-banner .pnl.neg{color:var(--red)}.price-banner .pnl.flat{color:var(--text-muted)}
 
 /* KPI GRID */
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
 .kpi{background:var(--surface);border:1px solid var(--border-light);border-radius:10px;padding:16px;text-align:center;transition:box-shadow .2s}
 .kpi:hover{box-shadow:0 4px 12px rgba(61,46,34,0.06)}
 .kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px;font-weight:600}
@@ -96,6 +95,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .panel{background:var(--surface);border:1px solid var(--border-light);border-radius:12px;padding:20px;transition:box-shadow .2s}
 .panel:hover{box-shadow:0 4px 12px rgba(61,46,34,0.06)}
 .panel h3{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px;font-weight:700}
+.panel.full-width{grid-column:1/-1}
 
 /* MOD ROWS */
 .mod-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-light)}
@@ -121,6 +121,21 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .bias-badge.bullish{background:var(--green-bg);color:var(--green)}
 .bias-badge.bearish{background:var(--red-bg);color:var(--red)}
 .bias-badge.neutral{background:var(--amber-bg);color:var(--amber)}
+
+/* TRADE CHART */
+.trade-chart-wrap{background:var(--surface);border:1px solid var(--border-light);border-radius:12px;padding:20px;margin-bottom:20px}
+.trade-chart-wrap h3{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px;font-weight:700}
+.trade-chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.trade-info{display:flex;gap:16px;align-items:center}
+.trade-side{padding:3px 12px;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px}
+.trade-side.long{background:var(--green-bg);color:var(--green)}
+.trade-side.short{background:var(--red-bg);color:var(--red)}
+.trade-meta{font-family:var(--mono);font-size:11px;color:var(--text2)}
+.trade-pnl{font-family:var(--mono);font-size:14px;font-weight:700}
+.trade-pnl.pos{color:var(--green)}.trade-pnl.neg{color:var(--red)}.trade-pnl.flat{color:var(--text-muted)}
+.chart-canvas-wrap{position:relative;width:100%;height:220px;border-radius:8px;overflow:hidden;background:var(--surface-alt)}
+.chart-canvas-wrap canvas{width:100%;height:100%}
+.no-trade-msg{text-align:center;padding:40px 0;color:var(--text-muted);font-size:12px;font-family:var(--mono)}
 
 /* REFRESH BAR */
 .refresh-bar{background:var(--surface);border:1px solid var(--border-light);border-radius:10px;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
@@ -150,6 +165,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   .heartbeat-label{margin-left:0}
   .health-bar{gap:12px}
   .sparkline{display:none}
+  .chart-canvas-wrap{height:180px}
 }
 @media(max-width:480px){
   .kpi-grid{grid-template-columns:repeat(2,1fr)}
@@ -174,7 +190,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <div class="loading"><div class="spinner"></div><br>Connecting to live data...</div>
   </div>
   <footer class="footer">
-    Data refreshes every 30s from publish_stats.py · Sanitized: no account numbers, no dollar amounts, no order IDs
+    Data refreshes every 30s &middot; Sanitized: no account numbers, no dollar amounts, no order IDs
     <br><br>
     <span style="font-size:9px;line-height:1.6;color:var(--text-muted)">
       RISK DISCLOSURE: Past backtested performance does not guarantee future results.
@@ -190,23 +206,17 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   const POLL_INTERVAL = 30;
   let countdown = POLL_INTERVAL;
   let data = null;
-  let fetchTime = null; // timestamp of last successful fetch
-  let sparkHistory = []; // last 30 statuses for sparkline
+  let fetchTime = null;
+  let sparkHistory = [];
 
   var TRADING_MODE = "OFFLINE";
   const MODE_LABELS = {
-    "PAPER": "PAPER TRADING — NOT LIVE CAPITAL",
-    "LIVE": "LIVE TRADING — REAL CAPITAL",
-    "OFFLINE": "AWAITING IBKR CONNECTION — v1.3.1 VALIDATED"
+    "PAPER": "SIMULATION TRADING (TESTING)",
+    "LIVE": "LIVE TRADING \u2014 REAL CAPITAL",
+    "OFFLINE": "AWAITING IBKR CONNECTION \u2014 v1.3.1 VALIDATED"
   };
 
   function $(id){ return document.getElementById(id); }
-
-  function formatTime(iso){
-    if(!iso) return '\u2014';
-    const d = new Date(iso);
-    return d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZoneName:'short'});
-  }
 
   function relativeTime(iso){
     if(!iso) return '\u2014';
@@ -242,6 +252,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   function pnlClass(v){ return v > 0 ? 'pos' : v < 0 ? 'neg' : 'flat'; }
   function pnlSign(v){ return v > 0 ? '+' : ''; }
 
+  function isConnected(d){
+    if(!d) return false;
+    var hb = d.heartbeat || {};
+    var q = hb.connection_quality || '';
+    return d.status === 'LIVE' && (q === 'good' || q === 'fair');
+  }
+
   function renderSparkline(){
     return sparkHistory.slice(-30).map(function(s){
       var cls = s === 'trading' ? 'active' : s === 'monitoring' ? 'idle' : 'off';
@@ -249,12 +266,182 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     }).join('');
   }
 
+  // ─── MINI TRADE CHART (canvas candlestick) ───
+  function drawTradeChart(canvasId, trade, candles){
+    var canvas = $(canvasId);
+    if(!canvas || !candles || candles.length === 0) return;
+
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    var W = rect.width, H = rect.height;
+    var pad = {top:20, bottom:30, left:10, right:60};
+    var chartW = W - pad.left - pad.right;
+    var chartH = H - pad.top - pad.bottom;
+
+    // Find price range
+    var allHigh = -Infinity, allLow = Infinity;
+    candles.forEach(function(c){
+      if(c.h > allHigh) allHigh = c.h;
+      if(c.l < allLow) allLow = c.l;
+    });
+    // Add entry price to range if trade exists
+    if(trade && trade.entry_price){
+      if(trade.entry_price > allHigh) allHigh = trade.entry_price;
+      if(trade.entry_price < allLow) allLow = trade.entry_price;
+    }
+    var priceRange = allHigh - allLow || 1;
+    allHigh += priceRange * 0.05;
+    allLow -= priceRange * 0.05;
+    priceRange = allHigh - allLow;
+
+    function yFromPrice(p){ return pad.top + chartH * (1 - (p - allLow) / priceRange); }
+
+    // Background
+    ctx.fillStyle = '#FAF7F4';
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid lines
+    ctx.strokeStyle = '#F0EAE3';
+    ctx.lineWidth = 0.5;
+    var gridSteps = 5;
+    for(var i = 0; i <= gridSteps; i++){
+      var gp = allLow + (priceRange * i / gridSteps);
+      var gy = yFromPrice(gp);
+      ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(W - pad.right, gy); ctx.stroke();
+      // Price label
+      ctx.fillStyle = '#B8A48E';
+      ctx.font = '9px JetBrains Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(gp.toFixed(2), W - pad.right + 4, gy + 3);
+    }
+
+    // Draw candles
+    var barW = Math.max(2, Math.floor(chartW / candles.length) - 2);
+    var gap = chartW / candles.length;
+
+    candles.forEach(function(c, idx){
+      var x = pad.left + idx * gap + gap / 2;
+      var isUp = c.c >= c.o;
+      var bodyTop = yFromPrice(Math.max(c.o, c.c));
+      var bodyBot = yFromPrice(Math.min(c.o, c.c));
+      var wickTop = yFromPrice(c.h);
+      var wickBot = yFromPrice(c.l);
+
+      // Wick
+      ctx.strokeStyle = isUp ? '#2D8C4E' : '#C53D1B';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, wickTop); ctx.lineTo(x, wickBot); ctx.stroke();
+
+      // Body
+      ctx.fillStyle = isUp ? '#2D8C4E' : '#C53D1B';
+      var bodyH = Math.max(1, bodyBot - bodyTop);
+      ctx.fillRect(x - barW/2, bodyTop, barW, bodyH);
+    });
+
+    // Draw entry line if trade exists
+    if(trade && trade.entry_price){
+      var ey = yFromPrice(trade.entry_price);
+      var isLong = trade.side === 'LONG';
+
+      // Dashed entry line
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = isLong ? '#2D8C4E' : '#C53D1B';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(pad.left, ey); ctx.lineTo(W - pad.right, ey); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Entry label
+      ctx.fillStyle = isLong ? '#2D8C4E' : '#C53D1B';
+      ctx.font = 'bold 10px JetBrains Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText((isLong ? '\u25B2' : '\u25BC') + ' ENTRY ' + trade.entry_price.toFixed(2), pad.left + 4, ey - 6);
+
+      // Stop loss line if available
+      if(trade.stop_price){
+        var sy = yFromPrice(trade.stop_price);
+        ctx.setLineDash([2, 2]);
+        ctx.strokeStyle = '#C53D1B88';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.left, sy); ctx.lineTo(W - pad.right, sy); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#C53D1B';
+        ctx.font = '9px JetBrains Mono, monospace';
+        ctx.fillText('STOP ' + trade.stop_price.toFixed(2), pad.left + 4, sy + 12);
+      }
+
+      // Target line if available
+      if(trade.target_price){
+        var ty = yFromPrice(trade.target_price);
+        ctx.setLineDash([2, 2]);
+        ctx.strokeStyle = '#2D8C4E88';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.left, ty); ctx.lineTo(W - pad.right, ty); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#2D8C4E';
+        ctx.font = '9px JetBrains Mono, monospace';
+        ctx.fillText('TARGET ' + trade.target_price.toFixed(2), pad.left + 4, ty - 4);
+      }
+    }
+
+    // Time labels on x-axis (first and last)
+    if(candles.length > 1){
+      ctx.fillStyle = '#B8A48E';
+      ctx.font = '9px JetBrains Mono, monospace';
+      ctx.textAlign = 'center';
+      var firstT = candles[0].t || '';
+      var lastT = candles[candles.length-1].t || '';
+      function shortTime(iso){
+        if(!iso) return '';
+        var d = new Date(iso);
+        return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
+      }
+      ctx.fillText(shortTime(firstT), pad.left + gap/2, H - 8);
+      ctx.fillText(shortTime(lastT), pad.left + (candles.length-1)*gap + gap/2, H - 8);
+    }
+  }
+
+  function renderTradeChart(d){
+    var trade = (d.active_trade || null);
+    var candles = (d.candle_buffer || []);
+
+    if(!trade){
+      return '<div class="trade-chart-wrap">'+
+        '<h3>Trade Replay</h3>'+
+        '<div class="no-trade-msg">Waiting for next trade entry...<br>'+
+        '<span style="font-size:10px;color:var(--brown-200)">A live candlestick chart will appear here when a trade is active</span></div>'+
+      '</div>';
+    }
+
+    var isLong = trade.side === 'LONG';
+    var pnlVal = trade.unrealized_pnl || 0;
+    var pnlCls = pnlVal > 0 ? 'pos' : pnlVal < 0 ? 'neg' : 'flat';
+
+    return '<div class="trade-chart-wrap">'+
+      '<div class="trade-chart-header">'+
+        '<div class="trade-info">'+
+          '<h3 style="margin-bottom:0">Trade Replay</h3>'+
+          '<span class="trade-side '+(isLong?'long':'short')+'">'+trade.side+'</span>'+
+          '<span class="trade-meta">'+trade.contracts+'x @ '+trade.entry_price.toFixed(2)+'</span>'+
+        '</div>'+
+        '<span class="trade-pnl '+pnlCls+'">'+pnlSign(pnlVal)+'$'+Math.abs(pnlVal).toFixed(2)+'</span>'+
+      '</div>'+
+      '<div class="chart-canvas-wrap"><canvas id="trade-canvas"></canvas></div>'+
+    '</div>';
+  }
+
+  // ─── MAIN RENDER ───
   function render(d){
     var state = botState(d);
     var age = dataAgeSec();
     var quality = qualityFromAge(age);
 
-    // Dynamically set trading mode from data
     if(d.trading_mode === 'LIVE') TRADING_MODE = 'LIVE';
     else if(d.trading_mode === 'PAPER') TRADING_MODE = 'PAPER';
     else if(d.status === 'LIVE') TRADING_MODE = 'PAPER';
@@ -262,11 +449,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
     var modeClass = TRADING_MODE === 'PAPER' ? 'paper' : TRADING_MODE === 'LIVE' ? 'live' : 'off';
 
-    // Heartbeat data (from extended schema or computed)
     var hb = d.heartbeat || {};
     var lastSeen = hb.last_seen || d.updated;
     var uptime = hb.uptime_pct != null ? hb.uptime_pct.toFixed(1) + '%' : '\u2014';
-    var connQuality = hb.connection_quality || quality.toUpperCase();
+    var conn = isConnected(d);
 
     var app = $('app');
     app.className = 'fade-in';
@@ -286,20 +472,16 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
       '<div class="health-bar">'+
         '<div class="health-item">'+
-          '<span class="label">Data Age</span>'+
-          '<span class="value '+quality+'" id="data-age">'+age+'s</span>'+
-        '</div>'+
-        '<div class="health-item">'+
-          '<span class="label">Quality</span>'+
-          '<div class="quality-bar"><div class="quality-fill '+quality+'" id="q-fill"></div></div>'+
-        '</div>'+
-        '<div class="health-item">'+
-          '<span class="label">Connection</span>'+
-          '<span class="value '+quality+'">'+connQuality+'</span>'+
+          '<span class="label">Status</span>'+
+          '<span class="conn-status '+(conn?'connected':'disconnected')+'">'+(conn?'Connected':'Disconnected')+'</span>'+
         '</div>'+
         '<div class="health-item">'+
           '<span class="label">Uptime</span>'+
           '<span class="value">'+uptime+'</span>'+
+        '</div>'+
+        '<div class="health-item">'+
+          '<span class="label">Data Age</span>'+
+          '<span class="value '+quality+'" id="data-age">'+age+'s</span>'+
         '</div>'+
         '<div class="sparkline" id="sparkline">'+renderSparkline()+'</div>'+
       '</div>'+
@@ -320,7 +502,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       '<div class="kpi-grid">'+
         '<div class="kpi">'+
           '<div class="kpi-label">Mode</div>'+
-          '<div class="kpi-value" style="color:var(--accent);font-size:15px">'+TRADING_MODE+'</div>'+
+          '<div class="kpi-value" style="color:var(--accent);font-size:15px">SIMULATION</div>'+
         '</div>'+
         '<div class="kpi">'+
           '<div class="kpi-label">Trades Today</div>'+
@@ -338,24 +520,23 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
           '<div class="kpi-label">Bars Processed</div>'+
           '<div class="kpi-value">'+d.bars_processed.toLocaleString()+'</div>'+
         '</div>'+
-        '<div class="kpi">'+
-          '<div class="kpi-label">Signals</div>'+
-          '<div class="kpi-value"><span style="color:var(--green)">'+d.signals_approved+'</span> / <span style="color:var(--red)">'+d.signals_rejected+'</span></div>'+
-        '</div>'+
       '</div>'+
+
+      // Trade Replay Chart
+      renderTradeChart(d)+
 
       // Validated backtest banner when offline
       (state === 'offline' && d.backtest_validated ? (
         '<div style="background:var(--green-bg);border:1px solid var(--green-border);border-radius:12px;padding:20px 24px;margin-bottom:20px;text-align:center">'+
-          '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--green);font-weight:700;margin-bottom:8px">VALIDATED BACKTEST — v'+d.backtest_validated.version+'</div>'+
+          '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--green);font-weight:700;margin-bottom:8px">VALIDATED BACKTEST \u2014 v'+d.backtest_validated.version+'</div>'+
           '<div style="font-family:var(--mono);font-size:28px;font-weight:800;color:var(--green);margin-bottom:4px">+$'+d.backtest_validated.total_pnl.toLocaleString()+'</div>'+
           '<div style="font-size:12px;color:var(--text2)">'+
-            d.backtest_validated.total_trades+' trades · PF '+d.backtest_validated.profit_factor+' · '+d.backtest_validated.win_rate+'% WR · '+d.backtest_validated.max_drawdown_pct+'% max DD'+
+            d.backtest_validated.total_trades+' trades \u00B7 PF '+d.backtest_validated.profit_factor+' \u00B7 '+d.backtest_validated.win_rate+'% WR \u00B7 '+d.backtest_validated.max_drawdown_pct+'% max DD'+
           '</div>'+
           '<div style="font-family:var(--mono);font-size:12px;color:var(--text2);margin-top:8px">'+
-            '$'+d.backtest_validated.account_start.toLocaleString()+' → $'+d.backtest_validated.account_end.toLocaleString()+' · '+d.backtest_validated.date_range+
+            '$'+d.backtest_validated.account_start.toLocaleString()+' \u2192 $'+d.backtest_validated.account_end.toLocaleString()+' \u00B7 '+d.backtest_validated.date_range+
           '</div>'+
-          '<div style="font-size:11px;color:var(--text-muted);margin-top:12px">C3 Delayed Runner: '+d.backtest_validated.c3_blocked+' trades blocked · $'+d.backtest_validated.c3_savings.toLocaleString()+' saved</div>'+
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:12px">C3 Delayed Runner: '+d.backtest_validated.c3_blocked+' trades blocked \u00B7 $'+d.backtest_validated.c3_savings.toLocaleString()+' saved</div>'+
         '</div>'
       ) : '')+
 
@@ -369,21 +550,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
           '<div class="mod-row">'+
             '<span class="mod-name">Safety Rails</span>'+
             '<span class="'+(d.safety_rails==='OK'?'safety-ok':'safety-alert')+'">'+d.safety_rails+'</span>'+
-          '</div>'+
-          '<div class="mod-row">'+
-            '<span class="mod-name">Approval Rate</span>'+
-            '<span class="mod-val">'+(d.signals_approved+d.signals_rejected>0?((d.signals_approved/(d.signals_approved+d.signals_rejected))*100).toFixed(1):'0.0')+'%</span>'+
-          '</div>'+
-          '<div style="margin-top:16px">'+
-            '<h3>Modifiers</h3>'+
-            Object.entries(d.modifiers||{}).map(function(kv){
-              var k=kv[0], v=kv[1];
-              var val = typeof v === 'object' ? (v.multiplier || v.value || 0) : v;
-              return '<div class="mod-row">'+
-                '<span class="mod-name">'+k+'</span>'+
-                '<span class="mod-val" style="color:'+(val!==1.0?'var(--amber)':'var(--text)')+'">'+Number(val).toFixed(2)+'</span>'+
-              '</div>';
-            }).join('')+
           '</div>'+
         '</div>'+
 
@@ -400,9 +566,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
           }).join('')+
         '</div>'+
       '</div>';
+
+    // Draw trade chart after DOM is ready
+    if(d.active_trade && d.candle_buffer){
+      setTimeout(function(){ drawTradeChart('trade-canvas', d.active_trade, d.candle_buffer); }, 50);
+    }
   }
 
-  // Live-updating timestamps (every 1 second, without full re-render)
   function tickTimestamps(){
     var hbEl = $('hb-label');
     if(hbEl && data){
@@ -410,13 +580,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       hbEl.textContent = 'Last seen: ' + relativeTime(hb.last_seen || data.updated);
     }
     var ageEl = $('data-age');
-    var qEl = $('q-fill');
     if(ageEl){
       var age = dataAgeSec();
       var q = qualityFromAge(age);
       ageEl.textContent = age + 's';
       ageEl.className = 'value ' + q;
-      if(qEl) qEl.className = 'quality-fill ' + q;
     }
   }
 
@@ -430,7 +598,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         data = d;
         fetchTime = Date.now();
         countdown = POLL_INTERVAL;
-        // Track spark history
         sparkHistory.push(botState(d));
         if(sparkHistory.length > 30) sparkHistory.shift();
         render(d);
@@ -447,7 +614,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       });
   }
 
-  // Countdown + timestamp tick (1s interval)
   setInterval(function(){
     countdown--;
     var el = $('cd');
