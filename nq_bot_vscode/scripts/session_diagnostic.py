@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent  # nq_bot_vscode/
 REPO_ROOT = PROJECT_DIR.parent
-OUTPUT_PATH = REPO_ROOT / "logs" / "session_diagnostic.json"
+OUTPUT_PATH = PROJECT_DIR / "logs" / "session_diagnostic.json"
 
 sys.path.insert(0, str(PROJECT_DIR))
 
@@ -337,9 +337,10 @@ def print_comparison_table(diagnostic: dict) -> None:
         for s in sessions:
             val = sb.get(s, {}).get(key, 0)
             if fmt == "d":
-                row += f" {val:>14d}"
+                row += f" {int(val):>14d}"
             else:
-                row += f" {val:>14{fmt}}"
+                formatted = f"{val:{fmt}}"
+                row += f" {formatted:>14}"
         print(row)
 
     print("=" * 100)

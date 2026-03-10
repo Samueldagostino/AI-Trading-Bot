@@ -815,6 +815,7 @@ class TradingOrchestrator:
                 atr=atr_for_entry,
                 signal_score=entry_score,
                 regime=self._current_regime,
+                timestamp=bar.timestamp,
             )
 
             if trade:

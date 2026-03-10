@@ -1012,6 +1012,7 @@ class CausalReplayEngine:
             regime=pending["regime"],
             regime_multiplier=pending.get("regime_multiplier", 1.0),
             structural_target=pending.get("structural_target", 0.0),
+            timestamp=bar["timestamp"],
         )
 
         if trade:

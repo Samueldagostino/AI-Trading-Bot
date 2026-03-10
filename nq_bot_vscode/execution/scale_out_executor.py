@@ -236,6 +236,22 @@ class ScaleOutExecutor:
     def active_trade(self) -> Optional[ScaleOutTrade]:
         return self._active_trade
 
+    def get_stats(self) -> dict:
+        """Return executor statistics for replay simulator results."""
+        history = self._trade_history
+        total = len(history)
+        wins = sum(1 for t in history if t.total_net_pnl > 0)
+        losses = sum(1 for t in history if t.total_net_pnl <= 0)
+        total_pnl = sum(t.total_net_pnl for t in history)
+        return {
+            "total_trades": total,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins / total * 100, 1) if total else 0.0,
+            "total_pnl": round(total_pnl, 2),
+            "c3_stats": dict(self._c3_stats),
+        }
+
     # ================================================================
     # SCORING & SIZING
     # ================================================================
@@ -300,6 +316,7 @@ class ScaleOutExecutor:
         regime: str = "unknown",
         regime_multiplier: float = 1.0,
         structural_target: float = 0.0,
+        timestamp: Optional[datetime] = None,
     ) -> Optional[ScaleOutTrade]:
         """
         Enter a 5-contract trade: C1 (1) + C2 (1) + C3 (3).
@@ -380,7 +397,7 @@ class ScaleOutExecutor:
 
         # Execute entry
         if self.config.execution.paper_trading:
-            await self._paper_enter(trade, entry_price)
+            await self._paper_enter(trade, entry_price, timestamp=timestamp)
         else:
             await self._live_enter(trade)
 
@@ -409,7 +426,7 @@ class ScaleOutExecutor:
 
         return trade
 
-    async def _paper_enter(self, trade: ScaleOutTrade, price: float) -> None:
+    async def _paper_enter(self, trade: ScaleOutTrade, price: float, timestamp: Optional[datetime] = None) -> None:
         """Simulated entry fill."""
         import random
 
@@ -420,7 +437,7 @@ class ScaleOutExecutor:
             fill_price = price - slippage
 
         fill_price = round(fill_price, 2)
-        now = datetime.now(timezone.utc)
+        now = timestamp if timestamp is not None else datetime.now(timezone.utc)
 
         for leg in trade.all_legs:
             if leg.contracts > 0:
