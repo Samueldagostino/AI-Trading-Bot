@@ -1,8 +1,8 @@
 {
-  "updated": "2026-03-10T19:18:44.670102+00:00",
+  "updated": "2026-03-10T19:20:20.114018+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
-  "bars_processed": 1329,
+  "bars_processed": 1330,
   "trades_today": 0,
   "win_rate": 0.0,
   "profit_factor": 0.0,
@@ -29,7 +29,7 @@
       "display": "1.0x (normal)"
     }
   },
-  "last_price": 25054.75,
+  "last_price": 25061.75,
   "recent_decisions": [
     {
       "time": "15:35:10 ET",
@@ -93,8 +93,8 @@
     }
   ],
   "heartbeat": {
-    "last_seen": "2026-03-10T19:18:41.750113+00:00",
-    "seconds_since_last": 2.9,
+    "last_seen": "2026-03-10T19:20:11.765529+00:00",
+    "seconds_since_last": 8.3,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
@@ -105,13 +105,6 @@
   },
   "active_trade": null,
   "candle_buffer": [
-    {
-      "t": "2026-03-10T17:59:40+00:00",
-      "o": 25172.75,
-      "h": 25180.25,
-      "l": 25169.5,
-      "c": 25170.75
-    },
     {
       "t": "2026-03-10T18:01:40+00:00",
       "o": 25170.75,
@@ -384,6 +377,13 @@
       "h": 25056.0,
       "l": 25036.5,
       "c": 25054.75
+    },
+    {
+      "t": "2026-03-10T19:19:40+00:00",
+      "o": 25054.75,
+      "h": 25073.0,
+      "l": 25052.5,
+      "c": 25061.75
     }
   ]
 }
