@@ -13,9 +13,12 @@ Do not loosen these gates without new backtested evidence across the full
 
 # ── HIGH-CONVICTION FILTER ────────────────────────────────────────
 #   Rule 1 – Min signal score >= 0.75  (eliminates low-conviction noise)
-#   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
+#   Rule 2 – Max stop distance <= 45 pts (caps tail risk per trade)
+#   Raised from 30pt: ATR*2.0 with ATR>15 blocked every trade.
+#   Prior forensic (Mar 6) showed blocked trades were +$1,692 profitable.
+#   UCL wide-stop recovery was never implemented, so 30pt was a dead end.
 HIGH_CONVICTION_MIN_SCORE: float = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS: float = 30.0
+HIGH_CONVICTION_MAX_STOP_PTS: float = 45.0
 HIGH_CONVICTION_MIN_STOP_PTS: float = 0.0   # Legacy — kept for import compat
 
 # ── MIN R:R GATE (DISABLED for C1 time-exit strategy) ──────────────
@@ -50,9 +53,9 @@ HTF_STALENESS_LIMITS: dict = {
 
 # ── UNIVERSAL CONFIRMATION LAYER (UCL) v2 ────────────────────────
 # v2 removes weak-signal rescue (0.60-0.74 → net negative, PF 0.54).
-# Instead: FVG confluence boosts strong signals, and wide-stop sweeps
-# (score >= 0.75, stop > 30pt) get converted to tight-stop entries
-# via post-sweep confirmation.
+# FVG confluence boosts strong signals.
+# NOTE: Wide-stop post-sweep confirmation was planned but never implemented.
+# Max stop raised to 45pt to compensate (Mar 2026).
 UCL_FVG_CONFLUENCE_BOOST: float = 0.05   # score boost when entry is near active FVG
 UCL_CONFIRMATION_BOOST: float = 0.10
 UCL_FVG_BOOST: float = 0.05

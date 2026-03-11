@@ -500,15 +500,27 @@ class IBKRLivePipeline:
 
         # === 6. HIGH-CONVICTION GATE 1 — min score ===
         if entry_score < HIGH_CONVICTION_MIN_SCORE:
+            logger.info(
+                "HC GATE REJECT: %s score=%.2f < %.2f [source=%s, levels=%s]",
+                entry_direction, entry_score, HIGH_CONVICTION_MIN_SCORE,
+                entry_source,
+                getattr(sweep_signal, 'swept_levels', []) if sweep_signal else [],
+            )
             return None
 
         # === 7. RISK CHECK ===
+        # Pass sweep structural stop so risk engine uses min(structural, ATR)
+        structural_stop = None
+        if sweep_signal and sweep_signal.entry_price and sweep_signal.stop_price:
+            structural_stop = abs(sweep_signal.entry_price - sweep_signal.stop_price)
+
         risk_assessment = self._risk_engine.evaluate_trade(
             direction=entry_direction,
             entry_price=bar.close,
             atr=features.atr_14,
             vix=features.vix_level or 0,
             current_time=bar.timestamp,
+            structural_stop_distance=structural_stop,
         )
 
         raw_stop = risk_assessment.suggested_stop_distance
@@ -519,15 +531,29 @@ class IBKRLivePipeline:
 
         # === 8. HIGH-CONVICTION GATE 2 — stop distance cap ===
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+            logger.info(
+                "STOP CAP REJECT: %s stop=%.1f > %.1f max [score=%.2f, source=%s, levels=%s]",
+                entry_direction, raw_stop, HIGH_CONVICTION_MAX_STOP_PTS,
+                entry_score, entry_source,
+                getattr(sweep_signal, 'swept_levels', []) if sweep_signal else [],
+            )
             return None
 
         # Regime gate
         if regime_adj["size_multiplier"] == 0:
+            logger.info(
+                "REGIME REJECT: %s blocked — regime size_multiplier=0 [score=%.2f]",
+                entry_direction, entry_score,
+            )
             return None
 
         if risk_assessment.decision not in (
             RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE
         ):
+            logger.info(
+                "RISK REJECT: %s blocked — risk decision=%s [score=%.2f]",
+                entry_direction, risk_assessment.decision, entry_score,
+            )
             return None
 
         # ═══════════════════════════════════════════════════
