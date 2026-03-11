@@ -32,6 +32,7 @@ from config.constants import (
     UCL_FVG_CONFLUENCE_BOOST,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
     AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
+    MIN_RR_OVERRIDE,
     get_dollar_risk_budget,
 )
 from config.validator import validate_config
@@ -61,7 +62,11 @@ logger = logging.getLogger(__name__)
 
 
 # All HC constants imported from config.constants (single source of truth)
-MIN_RR_RATIO = 1.5  # Minimum risk/reward ratio for entry
+# ── MIN R:R GATE ─────────────────────────────────────────────────
+# Sourced from config/constants.py (single source of truth).
+# MIN_RR_OVERRIDE = 0.0 effectively disables the gate for the
+# C1 time-exit strategy where R:R is irrelevant.
+MIN_RR_RATIO = MIN_RR_OVERRIDE if MIN_RR_OVERRIDE is not None else 1.5
 
 # ── CONFIG D GATE ASSERTION ───────────────────────────────────────────
 # Both HTFBiasEngine.STRENGTH_GATE and HTF_STRENGTH_GATE now source from
@@ -784,10 +789,10 @@ class TradingOrchestrator:
             entry_score, dollar_budget, effective_max_stop, raw_stop,
         )
 
-        # -- Min R:R Check --
+        # -- Min R:R Check (disabled when MIN_RR_RATIO=0.0 for C1 time-exit) --
         # Uses session-scaled ATR (consistent with stop calculation)
         target_distance = scaled_atr * self.config.risk.atr_multiplier_target
-        if raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
+        if MIN_RR_RATIO > 0 and raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
             logger.debug(
                 f"HC REJECT: R:R {target_distance / raw_stop:.2f} "
                 f"< {MIN_RR_RATIO} (unfavorable risk/reward)"
