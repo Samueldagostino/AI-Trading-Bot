@@ -699,10 +699,17 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     btn.textContent = 'SENDING...';
     msg.textContent = '';
 
+    // Use FormData — Google Apps Script handles form submissions natively
+    // and 'no-cors' mode preserves form-encoded bodies (but strips JSON bodies)
+    var formData = new FormData();
+    formData.append('phone', fullPhone);
+    formData.append('timestamp', new Date().toISOString());
+    formData.append('source', 'live-page');
+
     fetch(NOTIFY_ENDPOINT, {
       method: 'POST',
       mode: 'no-cors',
-      body: JSON.stringify({ phone: fullPhone, timestamp: new Date().toISOString(), source: 'live-page' }),
+      body: formData,
     })
     .then(function(){
       msg.textContent = "You're on the list! We'll text you when the bot goes live.";

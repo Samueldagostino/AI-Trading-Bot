@@ -17,7 +17,13 @@
 
 function doPost(e) {
   try {
-    var data = JSON.parse(e.postData.contents);
+    // Handle both JSON body and form-encoded body
+    var data = {};
+    if (e.postData && e.postData.type === "application/json") {
+      data = JSON.parse(e.postData.contents);
+    } else if (e.parameter) {
+      data = e.parameter;
+    }
     var phone = (data.phone || "").toString().trim();
 
     if (!phone || phone.replace(/[\s\-\(\)\+]/g, "").length < 7) {
