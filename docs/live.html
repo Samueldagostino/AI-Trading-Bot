@@ -166,11 +166,20 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Crosshair tooltip */
 .chart-crosshair{position:absolute;pointer-events:none;display:none;z-index:10}
-.crosshair-h,.crosshair-v{position:absolute;background:rgba(61,46,34,0.2)}
+.crosshair-h,.crosshair-v{position:absolute;background:rgba(61,46,34,0.25)}
 .crosshair-h{left:0;right:56px;height:1px}
 .crosshair-v{top:0;bottom:24px;width:1px}
-.crosshair-price{position:absolute;right:0;background:var(--brown-900);color:#fff;font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 6px;border-radius:3px;transform:translateY(-50%);white-space:nowrap}
-.crosshair-time{position:absolute;bottom:0;background:var(--brown-900);color:#fff;font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:3px;transform:translateX(-50%);white-space:nowrap}
+.crosshair-price{position:absolute;right:0;background:var(--brown-900);color:#fff;font-family:var(--mono);font-size:10px;font-weight:600;padding:3px 8px;border-radius:3px;transform:translateY(-50%);white-space:nowrap;letter-spacing:.3px}
+.crosshair-time{position:absolute;bottom:0;background:var(--brown-900);color:#fff;font-family:var(--mono);font-size:10px;font-weight:600;padding:3px 10px;border-radius:3px;transform:translateX(-50%);white-space:nowrap;letter-spacing:.3px}
+.crosshair-ohlc{position:absolute;top:4px;left:8px;background:rgba(61,46,34,0.88);color:#fff;font-family:var(--mono);font-size:10px;font-weight:500;padding:5px 10px;border-radius:5px;white-space:nowrap;line-height:1.5;letter-spacing:.2px;backdrop-filter:blur(4px)}
+.crosshair-ohlc .ohlc-label{color:rgba(255,255,255,0.55);font-size:9px;margin-right:2px}
+.crosshair-ohlc .ohlc-up{color:#5BEA80}.crosshair-ohlc .ohlc-dn{color:#FF6B5A}.crosshair-ohlc .ohlc-flat{color:rgba(255,255,255,0.7)}
+
+/* Timeframe selector */
+.tf-selector{display:flex;gap:0;background:var(--surface-alt);border:1px solid var(--border-light);border-radius:6px;overflow:hidden}
+.tf-btn{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--text-muted);background:transparent;border:none;padding:5px 14px;cursor:pointer;letter-spacing:.5px;transition:all .2s var(--ease-out-expo)}
+.tf-btn:hover{color:var(--text);background:var(--border-light)}
+.tf-btn.active{color:#fff;background:var(--brown-900)}
 
 /* Trade overlay info */
 .trade-overlay{display:flex;gap:12px;align-items:center;padding:10px 22px;border-bottom:1px solid var(--border-light);background:var(--surface)}
@@ -285,6 +294,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
   // Store chart state for crosshair
   var chartState = {candles:null, trade:null, allHigh:0, allLow:0, priceRange:0, pad:{top:16,bottom:28,left:8,right:60}, W:0, H:0};
+  var selectedTimeframe = 1; // 1, 2, or 5 minutes
 
   var MODE_LABELS = {
     "PAPER": "SIMULATION MODE",
@@ -388,10 +398,36 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     return html;
   }
 
+  // ─── CANDLE AGGREGATION ───
+  function aggregateCandles(candles, tf){
+    if(!candles || candles.length === 0 || tf <= 1) return candles;
+    var result = [];
+    for(var i = 0; i < candles.length; i += tf){
+      var chunk = candles.slice(i, i + tf);
+      if(chunk.length === 0) continue;
+      var agg = {
+        t: chunk[0].t,  // Use first candle's time
+        o: chunk[0].o,
+        h: chunk[0].h,
+        l: chunk[0].l,
+        c: chunk[chunk.length - 1].c
+      };
+      for(var j = 1; j < chunk.length; j++){
+        if(chunk[j].h > agg.h) agg.h = chunk[j].h;
+        if(chunk[j].l < agg.l) agg.l = chunk[j].l;
+      }
+      result.push(agg);
+    }
+    return result;
+  }
+
   // ─── CHART DRAWING ───
   function drawChart(canvasId, trade, candles){
     var canvas = $(canvasId);
     if(!canvas || !candles || candles.length === 0) return;
+
+    // Aggregate candles based on selected timeframe
+    candles = aggregateCandles(candles, selectedTimeframe);
 
     var dpr = window.devicePixelRatio || 1;
     var rect = canvas.parentElement.getBoundingClientRect();
@@ -481,7 +517,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       }
     }
 
-    // Time labels on x-axis
+    // Time labels on x-axis — show multiple labels across the chart
     if(candles.length > 1){
       ctx.fillStyle = '#A89070';
       ctx.font = '500 9px JetBrains Mono, monospace';
@@ -491,10 +527,25 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         var dd = new Date(iso);
         return dd.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
       }
-      var firstT = candles[0].t || '', lastT = candles[candles.length-1].t || '';
-      if(firstT) ctx.fillText(shortTime(firstT), pad.left + gap/2, H - 8);
+      // Show ~5 evenly spaced time labels
+      var numLabels = Math.min(5, candles.length);
+      var step = Math.max(1, Math.floor((candles.length - 1) / (numLabels - 1)));
+      for(var ti = 0; ti < candles.length; ti += step){
+        var tStr = candles[ti].t ? shortTime(candles[ti].t) : '';
+        if(tStr) ctx.fillText(tStr, pad.left + ti * gap + gap/2, H - 8);
+      }
+      // Always show last label
+      var lastT = candles[candles.length-1].t || '';
       if(lastT) ctx.fillText(shortTime(lastT), pad.left + (candles.length-1)*gap + gap/2, H - 8);
     }
+
+    // "MNQ FUTURES" watermark — subtle top-right
+    ctx.save();
+    ctx.font = '600 11px JetBrains Mono, monospace';
+    ctx.fillStyle = 'rgba(139,105,20,0.18)';
+    ctx.textAlign = 'right';
+    ctx.fillText('MNQ FUTURES · ' + selectedTimeframe + 'min', W - pad.right - 4, pad.top + 14);
+    ctx.restore();
   }
 
   // ─── CROSSHAIR ───
@@ -538,12 +589,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       var vLine = ch.querySelector('.crosshair-v');
       vLine.style.left = snapX + 'px';
 
-      // Price label
+      // Price label — show "MNQ" prefix
       var pLabel = ch.querySelector('.crosshair-price');
       pLabel.style.top = my + 'px';
       pLabel.textContent = price.toFixed(2);
 
-      // Time label — show candle OHLC time
+      // Time label — show candle time (HH:MM:SS)
       var tLabel = ch.querySelector('.crosshair-time');
       tLabel.style.left = snapX + 'px';
       var timeStr = '';
@@ -551,10 +602,28 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         var dd = new Date(candle.t);
         timeStr = dd.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
       } else {
-        // No timestamp data — show bar index
-        timeStr = 'Bar ' + (idx + 1);
+        // Estimate time from position if no timestamp
+        var pctPos = idx / Math.max(1, s.candles.length - 1);
+        var minsAgo = Math.round((1 - pctPos) * s.candles.length * selectedTimeframe);
+        timeStr = minsAgo > 0 ? '-' + minsAgo + 'min' : 'now';
       }
       tLabel.textContent = timeStr;
+
+      // OHLC info panel for the hovered candle
+      var ohlcEl = ch.querySelector('.crosshair-ohlc');
+      if(ohlcEl && candle){
+        var isUp = candle.c >= candle.o;
+        var cls = isUp ? 'ohlc-up' : 'ohlc-dn';
+        var chg = candle.c - candle.o;
+        var chgStr = (chg >= 0 ? '+' : '') + chg.toFixed(2);
+        ohlcEl.innerHTML =
+          '<span class="ohlc-label">O</span><span class="'+cls+'">'+candle.o.toFixed(2)+'</span> ' +
+          '<span class="ohlc-label">H</span><span class="'+cls+'">'+candle.h.toFixed(2)+'</span> ' +
+          '<span class="ohlc-label">L</span><span class="'+cls+'">'+candle.l.toFixed(2)+'</span> ' +
+          '<span class="ohlc-label">C</span><span class="'+cls+'">'+candle.c.toFixed(2)+'</span> ' +
+          '<span class="'+cls+'" style="margin-left:6px">'+chgStr+'</span>';
+        ohlcEl.style.display = 'block';
+      }
     });
 
     body.addEventListener('mouseleave', function(){
@@ -564,10 +633,20 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
   function renderChartPanel(d){
     var trade = d.active_trade || null;
-    var candles = d.candle_buffer || [];
+    var rawCandles = d.candle_buffer || [];
+    var dispCount = Math.ceil(rawCandles.length / selectedTimeframe);
 
     var html = '<div class="chart-header">' +
-      '<h3>Price Action' + (candles.length > 0 ? ' \u00B7 ' + candles.length + ' bars' : '') + '</h3>' +
+      '<h3 style="display:flex;align-items:center;gap:8px">' +
+        '<span style="color:var(--accent);font-size:11px;font-weight:800;letter-spacing:1px">MNQ</span>' +
+        '<span style="color:var(--text-muted);font-size:10px;font-weight:500">Micro E-mini Nasdaq-100 Futures</span>' +
+        (rawCandles.length > 0 ? '<span style="color:var(--text-muted);font-size:10px;font-weight:500;opacity:.6">\u00B7 '+dispCount+' bars</span>' : '') +
+      '</h3>' +
+      '<div class="tf-selector">' +
+        '<button class="tf-btn'+(selectedTimeframe===1?' active':'')+'" onclick="window._setTF(1)">1m</button>' +
+        '<button class="tf-btn'+(selectedTimeframe===2?' active':'')+'" onclick="window._setTF(2)">2m</button>' +
+        '<button class="tf-btn'+(selectedTimeframe===5?' active':'')+'" onclick="window._setTF(5)">5m</button>' +
+      '</div>' +
     '</div>';
 
     if(trade && trade.side){
@@ -583,6 +662,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     html += '<div class="chart-body" id="chart-body">' +
       '<canvas id="chart-canvas"></canvas>' +
       '<div class="chart-crosshair" id="chart-crosshair">' +
+        '<div class="crosshair-ohlc" style="display:none"></div>' +
         '<div class="crosshair-h"></div>' +
         '<div class="crosshair-v"></div>' +
         '<div class="crosshair-price"></div>' +
@@ -590,12 +670,24 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       '</div>';
 
     if(!trade){
-      html += '<div class="chart-idle-msg">No active trade \u2014 showing recent price action</div>';
+      html += '<div class="chart-idle-msg">No active trade \u2014 showing recent MNQ price action</div>';
     }
 
     html += '</div>';
     return html;
   }
+
+  // Expose timeframe setter globally for onclick
+  window._setTF = function(tf){
+    selectedTimeframe = tf;
+    if(data && data.candle_buffer && data.candle_buffer.length > 0){
+      drawChart('chart-canvas', data.active_trade, data.candle_buffer);
+      initCrosshair();
+    }
+    // Update button active states
+    var btns = document.querySelectorAll('.tf-btn');
+    btns.forEach(function(b){ b.classList.remove('active'); if(b.textContent === tf+'m') b.classList.add('active'); });
+  };
 
   // ─── MAIN RENDER ───
   function render(d){
