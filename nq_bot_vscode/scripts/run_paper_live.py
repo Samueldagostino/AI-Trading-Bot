@@ -47,6 +47,7 @@ import logging.handlers
 import os
 import random
 import signal
+import subprocess
 import sys
 import time
 import traceback
@@ -660,8 +661,6 @@ class PaperLiveRunner:
         try:
             ib = self._ibkr_client._ib  # Access underlying ib_insync.IB instance
             contract = self._ibkr_client._contract  # Use already-qualified contract (has conId + localSymbol)
-            contract = self._ibkr_client.contract  # Use already-qualified contract (has conId + localSymbol)
-            contract = self._ibkr_client._contract  # Use already-qualified contract (has conId + localSymbol)
 
             for tf_name, tf_cfg in HISTORICAL_TF_CONFIG.items():
                 try:
@@ -1124,6 +1123,25 @@ All circuit breakers require manual restart after tripping.
         datefmt="%Y-%m-%d %H:%M:%S",
     ))
     root_logger.addHandler(file_handler)
+
+    # ── Google Drive backup on startup ──────────────────────────
+    _gdrive_sync = script_dir / "sync_to_gdrive.ps1"
+    if sys.platform == "win32" and _gdrive_sync.exists():
+        logger.info("Backing up to Google Drive before trading...")
+        try:
+            _sync_result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(_gdrive_sync)],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _sync_result.returncode == 0:
+                logger.info("Google Drive backup complete")
+            else:
+                logger.warning("Google Drive backup had warnings (non-fatal)")
+        except subprocess.TimeoutExpired:
+            logger.warning("Google Drive backup timed out (continuing without)")
+        except Exception as _e:
+            logger.warning("Google Drive backup failed: %s (continuing without)", _e)
+    # ─────────────────────────────────────────────────────────────
 
     # Use ibkr_startup flow when not in dry-run mode for automated startup
     if not args.dry_run:

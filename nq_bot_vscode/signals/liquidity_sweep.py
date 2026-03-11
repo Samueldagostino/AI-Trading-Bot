@@ -135,7 +135,12 @@ class LiquiditySweepDetector:
     }
     MIN_SWEEP_DEPTH_DEFAULT = 10.0  # Fallback for unlisted timeframes
     STOP_BUFFER = 3.0               # Buffer beyond HTF sweep extreme for stop
-    ROUND_NUMBER_INTERVAL = 100     # Round numbers every 100pts (shadow-tested: 50pt too dense)
+    # Round number intervals for sweep detection.
+    # 100pt removed — too dense, generates noise sweeps on every intraday move.
+    # 1000pt = major psychological (19000, 20000, 21000) — massive liquidity pools.
+    # 500pt  = intermediate psychological (19500, 20500) — significant but less dense.
+    ROUND_NUMBER_MAJOR = 1000       # Major round levels (strongest)
+    ROUND_NUMBER_MINOR = 500        # Intermediate round levels
     ENTRY_WINDOW_BARS = 15          # Max 2m bars to find entry after HTF sweep (30 min)
     REVERSAL_CONFIRM_BARS = 5       # 2m bars to confirm reversal pattern (10 min)
 
@@ -569,12 +574,24 @@ class LiquiditySweepDetector:
         # VWAP removed — shadow analysis showed it's not a true liquidity pool
         # (36.6% WR, -$3,427 over 590 trades vs 39.5% WR without it)
 
+        # Major round numbers (1000pt): 19000, 20000, 21000 — strongest psychological levels
+        # These get "round_major" type so scoring treats them like PDH/PDL (strong).
         if current_price > 0:
-            base = int(current_price / self.ROUND_NUMBER_INTERVAL) * self.ROUND_NUMBER_INTERVAL
-            for offset in range(-3, 4):
-                rn = base + offset * self.ROUND_NUMBER_INTERVAL
+            base_major = int(current_price / self.ROUND_NUMBER_MAJOR) * self.ROUND_NUMBER_MAJOR
+            for offset in range(-2, 3):
+                rn = base_major + offset * self.ROUND_NUMBER_MAJOR
                 if rn > 0:
-                    levels.append(KeyLevel(f"round_{rn}", float(rn), "round"))
+                    levels.append(KeyLevel(f"round_{rn}", float(rn), "round_major"))
+
+        # Minor round numbers (500pt): 19500, 20500 — significant but not as strong
+        # Skip any that overlap with major levels (e.g. 20000 is both 500 and 1000).
+        if current_price > 0:
+            base_minor = int(current_price / self.ROUND_NUMBER_MINOR) * self.ROUND_NUMBER_MINOR
+            major_prices = {base_major + o * self.ROUND_NUMBER_MAJOR for o in range(-2, 3)}
+            for offset in range(-2, 3):
+                rn = base_minor + offset * self.ROUND_NUMBER_MINOR
+                if rn > 0 and rn not in major_prices:
+                    levels.append(KeyLevel(f"round_{rn}", float(rn), "round_minor"))
 
         self._key_levels = levels
 
@@ -633,9 +650,13 @@ class LiquiditySweepDetector:
         }
         score += tf_bonus.get(candidate.htf_timeframe, 0.0)
 
-        # +0.10 if sweeping prior day or prior week level (strongest institutional levels)
+        # +0.10 if sweeping prior day, prior week, or major round number level
+        # Major rounds (20000, 21000) have institutional significance comparable to PDH/PDL.
         strong_levels = {"PDH", "PDL", "PWH", "PWL"}
-        if any(lvl in strong_levels for lvl in candidate.swept_levels):
+        has_strong = any(lvl in strong_levels for lvl in candidate.swept_levels)
+        has_major_round = any(lvl.startswith("round_") and
+                              self._is_major_round(lvl) for lvl in candidate.swept_levels)
+        if has_strong or has_major_round:
             score += 0.10
 
         score = min(score, 1.0)
@@ -691,6 +712,14 @@ class LiquiditySweepDetector:
         )
 
         return signal
+
+    def _is_major_round(self, level_name: str) -> bool:
+        """Check if a round level name corresponds to a major (1000pt) round."""
+        try:
+            price = float(level_name.replace("round_", ""))
+            return price % self.ROUND_NUMBER_MAJOR == 0
+        except (ValueError, ZeroDivisionError):
+            return False
 
     def _avg_volume(self) -> float:
         """20-bar average volume (2m bars)."""

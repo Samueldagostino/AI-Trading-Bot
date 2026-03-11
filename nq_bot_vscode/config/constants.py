@@ -18,8 +18,37 @@ Do not loosen these gates without new backtested evidence across the full
 #   Prior forensic (Mar 6) showed blocked trades were +$1,692 profitable.
 #   UCL wide-stop recovery was never implemented, so 30pt was a dead end.
 HIGH_CONVICTION_MIN_SCORE: float = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS: float = 45.0
-HIGH_CONVICTION_MIN_STOP_PTS: float = 0.0   # Legacy — kept for import compat
+HIGH_CONVICTION_MAX_STOP_PTS: float = 50.0   # Absolute safety ceiling (overridden by dollar tiers in practice)
+HIGH_CONVICTION_MIN_STOP_PTS: float = 15.0   # Floor: prevents micro-stops that get clipped by noise
+
+# ── DOLLAR-BASED STOP TIERS ────────────────────────────────────────
+#   Conviction score determines max dollar risk per trade (all contracts combined).
+#   Within each tier, dollar budget interpolates linearly from min->max.
+#   Higher conviction = more room (wider stop) because the signal is stronger.
+#
+#   With 4 MNQ contracts @ $2/pt:
+#     $150 -> 18.75 pts | $200 -> 25 pts | $300 -> 37.5 pts | $400 -> 50 pts
+#
+#   Format: (score_min, score_max, dollar_min, dollar_max)
+DOLLAR_STOP_TIERS: list = [
+    (0.75, 0.80, 150.0, 200.0),   # Standard conviction
+    (0.80, 0.85, 200.0, 300.0),   # High conviction
+    (0.85, 1.01, 300.0, 400.0),   # Very high conviction
+]
+DOLLAR_STOP_DEFAULT: float = 150.0  # Fallback if score doesn't match any tier
+
+
+def get_dollar_risk_budget(score: float) -> float:
+    """Return the max dollar risk for a trade based on conviction score.
+
+    Interpolates linearly within each tier so there are no cliff edges.
+    Example: score=0.77 -> halfway through Standard tier -> ~$175.
+    """
+    for min_s, max_s, min_d, max_d in DOLLAR_STOP_TIERS:
+        if min_s <= score < max_s:
+            t = (score - min_s) / (max_s - min_s)
+            return round(min_d + t * (max_d - min_d), 2)
+    return DOLLAR_STOP_DEFAULT
 
 # ── MIN R:R GATE (DISABLED for C1 time-exit strategy) ──────────────
 # R:R is irrelevant when using time-based exits instead of profit targets.

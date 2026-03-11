@@ -54,7 +54,7 @@ MNQ_TICK_SIZE = 0.25                # Minimum price increment (default, overridd
 ENTRY_CHASE_TICKS = 2               # 2 ticks chase allowance
 ENTRY_TIMEOUT_SECONDS = 5.0         # Cancel entry if not filled
 ORDER_WATCHDOG_SECONDS = 30.0       # Cancel any order stuck > 30s
-DAILY_LOSS_LIMIT = 500.0            # Reject new entries if daily PnL <= -$500
+DAILY_LOSS_LIMIT = 1500.0           # Reject new entries if daily PnL <= -$1500
 MAX_CONSECUTIVE_LOSSES = 5          # Reject after 5 consecutive losses
 HEARTBEAT_STALE_SECONDS = 300.0     # Reject if last bar > 300s ago
 KILL_SWITCH_DRAWDOWN_PCT = 10.0     # Close all if drawdown > 10% from peak

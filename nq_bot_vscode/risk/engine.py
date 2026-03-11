@@ -306,6 +306,31 @@ class RiskEngine:
 
         return final_contracts
 
+    def dollar_budget_to_max_stop_pts(
+        self, dollar_budget: float, num_contracts: int
+    ) -> float:
+        """Convert a dollar risk budget to max stop distance in points.
+
+        Args:
+            dollar_budget: Total dollar risk for the trade (all contracts).
+            num_contracts: Number of contracts that will be traded.
+
+        Returns:
+            Maximum stop distance in instrument points.
+
+        Example (4 MNQ @ $2/pt):
+            $200 budget / (4 contracts * $2/pt) = 25.0 pts max stop
+        """
+        point_value = self._point_value
+        if num_contracts <= 0 or point_value <= 0:
+            return 0.0
+        # Subtract commission from budget before computing stop room
+        commission = self.config.get_commission(self._instrument)
+        usable_budget = dollar_budget - (commission * num_contracts)
+        if usable_budget <= 0:
+            return 0.0
+        return round(usable_budget / (num_contracts * point_value), 2)
+
     def _compute_stop_target(
         self, atr: float, structural_stop_distance: Optional[float] = None
     ) -> Tuple[float, float]:

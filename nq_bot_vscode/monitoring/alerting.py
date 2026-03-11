@@ -99,15 +99,19 @@ class ConsoleChannel(NotificationChannel):
         """Log alert to console."""
         try:
             emoji = {
-                AlertSeverity.INFO: "ℹ",
-                AlertSeverity.WARNING: "⚠",
-                AlertSeverity.CRITICAL: "🔴",
-                AlertSeverity.EMERGENCY: "🚨",
-            }.get(alert.severity, "•")
+                AlertSeverity.INFO: "[i]",
+                AlertSeverity.WARNING: "[!]",
+                AlertSeverity.CRITICAL: "[X]",
+                AlertSeverity.EMERGENCY: "[!!!]",
+            }.get(alert.severity, "*")
+
+            # Strip non-ASCII to avoid Windows cp1252 encoding crashes
+            def _safe(s: str) -> str:
+                return s.encode("ascii", errors="replace").decode("ascii")
 
             log_msg = (
-                f"{emoji} [{alert.severity.value}] {alert.title}\n"
-                f"   {alert.message}"
+                f"{emoji} [{alert.severity.value}] {_safe(alert.title)}\n"
+                f"   {_safe(alert.message)}"
             )
 
             if alert.data:

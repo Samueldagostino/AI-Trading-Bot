@@ -62,3 +62,6 @@ doc/
 # Credentials / tokens
 config/quantdata_token.txt
 config/quantdata_instance_id.txt
+
+# Archived files (old/unused, kept locally for reference)
+_archive/

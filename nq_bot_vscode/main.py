@@ -25,12 +25,14 @@ from zoneinfo import ZoneInfo
 from config.settings import BotConfig, CONFIG
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    HIGH_CONVICTION_MIN_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
     HTF_STRENGTH_GATE,
     UCL_FVG_CONFLUENCE_BOOST,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
     AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
+    get_dollar_risk_budget,
 )
 from config.validator import validate_config
 from database.connection import DatabaseManager
@@ -631,7 +633,7 @@ class TradingOrchestrator:
                 entry_score += UCL_FVG_CONFLUENCE_BOOST
                 logger.info(
                     f"FVG confluence: +{UCL_FVG_CONFLUENCE_BOOST} boost, "
-                    f"score {old_score:.3f} → {entry_score:.3f}"
+                    f"score {old_score:.3f} -> {entry_score:.3f}"
                 )
 
         # === 5d. UCL v2 — PROCESS CONFIRMED SIGNALS ===
@@ -650,7 +652,7 @@ class TradingOrchestrator:
                 sweep_stop_override = abs(bar.close - cs.metadata["sweep_low"])
             logger.info(
                 f"UCL wide-stop conversion: {entry_direction} via {cs.setup_type} | "
-                f"original stop {cs.metadata.get('original_stop', '?')}pt → "
+                f"original stop {cs.metadata.get('original_stop', '?')}pt -> "
                 f"confirmed stop {sweep_stop_override or '?'}pt | "
                 f"boosted={cs.boosted_score:.3f} | bars={cs.bars_to_confirm}"
             )
@@ -673,7 +675,7 @@ class TradingOrchestrator:
                     htf_bias.consensus_strength, entry_source, entry_score,
                 )
         elif entry_direction is not None and htf_bias is None:
-            # Fail-safe: no HTF data → block all trades
+            # Fail-safe: no HTF data -> block all trades
             logger.warning(
                 "HTF GATE BLOCK: %s entry blocked — no HTF data available "
                 "[source=%s]", entry_direction, entry_source,
@@ -732,8 +734,25 @@ class TradingOrchestrator:
                            features.atr_14, "NaN stop distance", 4)
             return None
 
-        # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
-        if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+        # -- MINIMUM STOP FLOOR (prevents micro-stops from structural noise) --
+        if HIGH_CONVICTION_MIN_STOP_PTS > 0 and raw_stop < HIGH_CONVICTION_MIN_STOP_PTS:
+            logger.info(
+                "Stop floor applied: %.1f pts -> %.1f pts (min %s)",
+                raw_stop, HIGH_CONVICTION_MIN_STOP_PTS, HIGH_CONVICTION_MIN_STOP_PTS,
+            )
+            raw_stop = HIGH_CONVICTION_MIN_STOP_PTS
+
+        # -- HIGH-CONVICTION GATE 2: Dollar-Tiered Stop Cap --
+        # Conviction score determines max dollar risk -> max stop in points.
+        dollar_budget = get_dollar_risk_budget(entry_score)
+        num_contracts = self.config.scale_out.total_contracts
+        dollar_max_stop = self.risk_engine.dollar_budget_to_max_stop_pts(
+            dollar_budget, num_contracts
+        )
+        # Use the tighter of dollar-tier cap and absolute safety ceiling
+        effective_max_stop = min(dollar_max_stop, HIGH_CONVICTION_MAX_STOP_PTS)
+
+        if raw_stop > effective_max_stop:
             # UCL v2: route wide-stop sweeps to watch state for post-sweep confirmation
             if (self._ucl_enabled and entry_source == "sweep"
                     and entry_direction is not None):
@@ -748,16 +767,22 @@ class TradingOrchestrator:
                 )
                 _set_rejection(entry_direction, entry_score, raw_stop,
                                features.atr_14,
-                               "Max stop exceeded — routed to UCL watch", 5)
+                               f"Dollar stop cap ${dollar_budget:.0f} -> {effective_max_stop:.1f}pts exceeded -- routed to UCL watch", 5)
                 return None
 
             logger.debug(
                 f"HC REJECT: stop {raw_stop:.1f} pts "
-                f"> {HIGH_CONVICTION_MAX_STOP_PTS} (too wide, wait for tighter entry)"
+                f"> {effective_max_stop:.1f} (${dollar_budget:.0f} budget @ {num_contracts} contracts)"
             )
             _set_rejection(entry_direction, entry_score, raw_stop,
-                           features.atr_14, "Max stop exceeded", 5)
+                           features.atr_14,
+                           f"Dollar stop cap exceeded (${dollar_budget:.0f}/{effective_max_stop:.1f}pts)", 5)
             return None
+
+        logger.info(
+            "Dollar tier: score=%.2f -> $%.0f budget -> %.1f pts max stop (raw=%.1f pts)",
+            entry_score, dollar_budget, effective_max_stop, raw_stop,
+        )
 
         # -- Min R:R Check --
         # Uses session-scaled ATR (consistent with stop calculation)
@@ -794,7 +819,7 @@ class TradingOrchestrator:
                         htf_bias_direction=htf_dir,
                     )
                 except Exception as e:
-                    # GRACEFUL DEGRADATION: modifier failure → use 1.0x multipliers
+                    # GRACEFUL DEGRADATION: modifier failure -> use 1.0x multipliers
                     logger.warning(
                         "Modifier engine calculate() failed — using 1.0x multipliers: %s", e
                     )
@@ -812,14 +837,14 @@ class TradingOrchestrator:
                     raw_stop *= modifier_result.stop_multiplier
                     atr_for_entry = features.atr_14 * modifier_result.runner_multiplier
 
-                # Re-check HC max stop after modifier widening
-                if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+                # Re-check dollar-tier stop cap after modifier widening
+                if raw_stop > effective_max_stop:
                     logger.info(
-                        "HC REJECT post-modifier: stop %.1f pts > %.1f (modifier widened)",
-                        raw_stop, HIGH_CONVICTION_MAX_STOP_PTS,
+                        "HC REJECT post-modifier: stop %.1f pts > %.1f ($%.0f budget, modifier widened)",
+                        raw_stop, effective_max_stop, dollar_budget,
                     )
                     _set_rejection(entry_direction, entry_score, raw_stop,
-                                   features.atr_14, "Max stop exceeded after modifier", 5)
+                                   features.atr_14, "Dollar stop cap exceeded after modifier", 5)
                     return None
 
                 if (modifier_result
@@ -864,6 +889,8 @@ class TradingOrchestrator:
                     "regime": self._current_regime,
                     "htf_bias": htf_dir,
                     "htf_strength": round(htf_str, 3),
+                    "dollar_risk_budget": dollar_budget,
+                    "dollar_max_stop_pts": effective_max_stop,
                 }
                 # Attach institutional modifier metadata
                 if modifier_result is not None:
