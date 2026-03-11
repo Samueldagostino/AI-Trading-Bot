@@ -296,7 +296,7 @@ function NQForensicVisualizer() {
     return Math.floor((x / w) * count) + viewStart;
   }, [viewStart, viewEnd, getChartWidth]);
 
-  // ── RENDER CHART ──────────────────────────────────────────
+  // ── RENDER CHART — Premium Institutional-Grade ──────────
   useEffect(() => {
     const canvas = chartRef.current;
     const volCanvas = volRef.current;
@@ -313,21 +313,48 @@ function NQForensicVisualizer() {
     const count = visibleCandles.length;
     const candleW = Math.max(MIN_CANDLE_W, Math.min(MAX_CANDLE_W, chartW / count - 1));
     const bodyW = Math.max(1, candleW - 2);
-    ctx.fillStyle = T.bg; ctx.fillRect(0, 0, w, chartH);
-    vctx.fillStyle = T.bg; vctx.fillRect(0, 0, w, VOL_H);
-    // Grid
+
+    // ── Premium gradient background ──
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, chartH);
+    bgGrad.addColorStop(0, '#FAF7F2');
+    bgGrad.addColorStop(1, '#F3EDE4');
+    ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, w, chartH);
+    const volBg = vctx.createLinearGradient(0, 0, 0, VOL_H);
+    volBg.addColorStop(0, '#F5F0EA');
+    volBg.addColorStop(1, '#F0EAE0');
+    vctx.fillStyle = volBg; vctx.fillRect(0, 0, w, VOL_H);
+
+    // ── Smart grid with nice-number algorithm ──
     const { min: pMin, max: pMax } = priceRange;
     const pRange = pMax - pMin;
-    const gridStep = pRange > 200 ? 50 : pRange > 100 ? 25 : pRange > 50 ? 10 : 5;
-    const gridStart = Math.ceil(pMin / gridStep) * gridStep;
-    ctx.strokeStyle = T.grid; ctx.lineWidth = 0.5; ctx.setLineDash([]);
-    for (let p = gridStart; p <= pMax; p += gridStep) {
+    let niceStep = pRange / 6;
+    const mag = Math.pow(10, Math.floor(Math.log10(niceStep)));
+    const residual = niceStep / mag;
+    if (residual <= 1.5) niceStep = 1 * mag;
+    else if (residual <= 3.5) niceStep = 2.5 * mag;
+    else if (residual <= 7.5) niceStep = 5 * mag;
+    else niceStep = 10 * mag;
+    niceStep = Math.max(niceStep, 0.25);
+    const gridStart = Math.ceil(pMin / niceStep) * niceStep;
+
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let p = gridStart; p <= pMax; p += niceStep) {
       const y = priceToY(p);
+      if (y < 4 || y > chartH - 4) continue;
+      ctx.strokeStyle = "rgba(200, 188, 172, 0.35)";
+      ctx.lineWidth = 0.5; ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(chartW, y); ctx.stroke();
-      ctx.fillStyle = T.textMuted;
-      ctx.font = "11px 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace";
-      ctx.textAlign = "right"; ctx.fillText(formatPrice(p), w - 8, y + 4);
+      ctx.fillStyle = "#A89070";
+      ctx.font = "500 10px 'JetBrains Mono', 'SF Mono', monospace";
+      ctx.fillText(formatPrice(p), w - 8, y);
     }
+
+    // ── Right axis line ──
+    ctx.strokeStyle = "rgba(200, 188, 172, 0.5)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(chartW, 0); ctx.lineTo(chartW, chartH); ctx.stroke();
+    vctx.strokeStyle = "rgba(200, 188, 172, 0.5)"; vctx.lineWidth = 1;
+    vctx.beginPath(); vctx.moveTo(chartW, 0); vctx.lineTo(chartW, VOL_H); vctx.stroke();
+
     // Maintenance shading
     visibleCandles.forEach((c, i) => {
       if (isMaintenance(c.time)) {
@@ -344,11 +371,12 @@ function NQForensicVisualizer() {
         const x = (i / count) * chartW;
         ctx.strokeStyle = T.gridMajor; ctx.lineWidth = 0.5;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, chartH); ctx.stroke();
-        ctx.fillStyle = T.textMuted; ctx.font = "10px 'SF Mono', monospace";
+        ctx.fillStyle = T.textMuted; ctx.font = "10px 'JetBrains Mono', monospace";
         ctx.textAlign = "center"; ctx.fillText(formatDate(c.time), x, chartH - 4);
       }
       lastDay = day;
     });
+
     // Selected trade overlay
     if (selectedTrade) {
       const st = selectedTrade;
@@ -357,57 +385,94 @@ function NQForensicVisualizer() {
       if (entryIdx >= viewStart && entryIdx < viewEnd) {
         const eX = ((entryIdx - viewStart) / count) * chartW;
         const xX = exitIdx >= viewStart ? ((exitIdx - viewStart) / count) * chartW : chartW;
+
+        // Stop level with background pill
         const stopY = priceToY(st.stopPrice);
         ctx.strokeStyle = T.red; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
         ctx.beginPath(); ctx.moveTo(eX, stopY); ctx.lineTo(xX, stopY); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle = T.redBg; ctx.fillRect(eX - 1, stopY - 9, 78, 16);
-        ctx.fillStyle = T.red; ctx.font = "bold 9px monospace"; ctx.textAlign = "left";
-        ctx.fillText(`STOP ${formatPrice(st.stopPrice)}`, eX + 3, stopY + 3);
+        const stopLabel = `STOP ${formatPrice(st.stopPrice)}`;
+        ctx.font = "bold 9px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
+        const stopLW = ctx.measureText(stopLabel).width + 10;
+        ctx.fillStyle = "rgba(253,232,226,0.92)";
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(eX, stopY - 9, stopLW, 16, 3); ctx.fill(); }
+        else { ctx.fillRect(eX, stopY - 9, stopLW, 16); }
+        ctx.fillStyle = T.red; ctx.fillText(stopLabel, eX + 4, stopY + 3);
+
+        // Risk zone shading
+        const entryY = priceToY(st.entryPrice);
+        const riskTop = Math.min(entryY, stopY), riskBot = Math.max(entryY, stopY);
+        ctx.fillStyle = "rgba(197,61,27,0.04)";
+        ctx.fillRect(eX, riskTop, xX - eX, riskBot - riskTop);
+
+        // PT1 level with pill
         const tp1Y = priceToY(st.tp1Price);
         ctx.strokeStyle = T.blue; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
         ctx.beginPath(); ctx.moveTo(eX, tp1Y); ctx.lineTo(xX, tp1Y); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle = T.blueDim; ctx.fillRect(eX - 1, tp1Y - 9, 72, 16);
-        ctx.fillStyle = T.blue; ctx.font = "bold 9px monospace";
-        ctx.fillText(`PT1 ${formatPrice(st.tp1Price)}`, eX + 3, tp1Y + 3);
+        const pt1Label = `PT1 ${formatPrice(st.tp1Price)}`;
+        const pt1LW = ctx.measureText(pt1Label).width + 10;
+        ctx.fillStyle = "rgba(239,246,255,0.92)";
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(eX, tp1Y - 9, pt1LW, 16, 3); ctx.fill(); }
+        else { ctx.fillRect(eX, tp1Y - 9, pt1LW, 16); }
+        ctx.fillStyle = T.blue; ctx.fillText(pt1Label, eX + 4, tp1Y + 3);
+
+        // PT2 level with pill
         const tp2Y = priceToY(st.tp2Price);
         ctx.strokeStyle = T.purple; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
         ctx.beginPath(); ctx.moveTo(eX, tp2Y); ctx.lineTo(xX, tp2Y); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle = T.purpleDim; ctx.fillRect(eX - 1, tp2Y - 9, 72, 16);
-        ctx.fillStyle = T.purple; ctx.font = "bold 9px monospace";
-        ctx.fillText(`PT2 ${formatPrice(st.tp2Price)}`, eX + 3, tp2Y + 3);
-        const entryY = priceToY(st.entryPrice);
+        const pt2Label = `PT2 ${formatPrice(st.tp2Price)}`;
+        const pt2LW = ctx.measureText(pt2Label).width + 10;
+        ctx.fillStyle = "rgba(232,225,243,0.92)";
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(eX, tp2Y - 9, pt2LW, 16, 3); ctx.fill(); }
+        else { ctx.fillRect(eX, tp2Y - 9, pt2LW, 16); }
+        ctx.fillStyle = T.purple; ctx.fillText(pt2Label, eX + 4, tp2Y + 3);
+
+        // Reward zone shading
+        const rwTop = Math.min(entryY, tp1Y), rwBot = Math.max(entryY, tp1Y);
+        ctx.fillStyle = "rgba(45,140,78,0.03)";
+        ctx.fillRect(eX, rwTop, xX - eX, rwBot - rwTop);
+
+        // Entry line
         ctx.strokeStyle = T.textBright; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]);
         ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, entryY); ctx.stroke(); ctx.setLineDash([]);
+
+        // P&L trajectory line
         const exitY = priceToY(st.exitPrice);
         ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.85;
         ctx.beginPath(); ctx.moveTo(eX, entryY); ctx.lineTo(xX, exitY); ctx.stroke(); ctx.globalAlpha = 1;
         const topY = Math.min(entryY, exitY), botY = Math.max(entryY, exitY);
-        ctx.fillStyle = st.pnl >= 0 ? "rgba(45,140,78,0.25)" : "rgba(197,61,27,0.25)";
+        ctx.fillStyle = st.pnl >= 0 ? "rgba(45,140,78,0.2)" : "rgba(197,61,27,0.2)";
         ctx.fillRect(eX, topY, xX - eX, botY - topY);
+
+        // Entry arrow
         ctx.fillStyle = st.side === "long" ? T.green : T.red;
         ctx.beginPath();
         if (st.side === "long") { ctx.moveTo(eX, entryY + 8); ctx.lineTo(eX - 8, entryY + 20); ctx.lineTo(eX + 8, entryY + 20); }
         else { ctx.moveTo(eX, entryY - 8); ctx.lineTo(eX - 8, entryY - 20); ctx.lineTo(eX + 8, entryY - 20); }
-        ctx.fill();
-        ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fill(); ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1.5; ctx.stroke();
+
+        // Exit circle
         ctx.fillStyle = st.pnl >= 0 ? T.green : T.red;
         ctx.beginPath(); ctx.arc(xX, exitY, 7, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1.5; ctx.stroke();
-        ctx.fillStyle = T.bg; ctx.beginPath(); ctx.arc(xX, exitY, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#FAF7F2"; ctx.beginPath(); ctx.arc(xX, exitY, 3, 0, Math.PI * 2); ctx.fill();
+
+        // Summary label pill
         const labelX = eX + (xX - eX) / 2;
         const labelY = st.side === "long" ? Math.min(tp1Y, entryY) - 20 : Math.max(stopY, entryY) + 30;
         const labelText = `${st.rMultiple > 0 ? "+" : ""}${st.rMultiple}R  $${st.pnl > 0 ? "+" : ""}${st.pnl.toFixed(0)}  ${st.exitType.replace(/_/g, " ").toUpperCase()}`;
-        ctx.font = "bold 9px monospace";
-        const lw = ctx.measureText(labelText).width + 12;
-        ctx.fillStyle = st.pnl >= 0 ? "#0a2a1a" : "#2a0a0e";
+        ctx.font = "bold 9px 'JetBrains Mono', monospace";
+        const lw = ctx.measureText(labelText).width + 14;
+        const lx = labelX - lw / 2, ly = labelY - 9, lh = 20;
+        ctx.fillStyle = st.pnl >= 0 ? "rgba(10,42,26,0.95)" : "rgba(42,10,14,0.95)";
         ctx.strokeStyle = st.pnl >= 0 ? T.green : T.red; ctx.lineWidth = 1;
-        const lx = labelX - lw / 2, ly = labelY - 8, lh = 18;
-        ctx.beginPath(); ctx.roundRect(lx, ly, lw, lh, 4); ctx.fill(); ctx.stroke();
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(lx, ly, lw, lh, 5); ctx.fill(); ctx.stroke(); }
+        else { ctx.fillRect(lx, ly, lw, lh); ctx.strokeRect(lx, ly, lw, lh); }
         ctx.fillStyle = st.pnl >= 0 ? T.green : T.red;
         ctx.textAlign = "center"; ctx.fillText(labelText, labelX, labelY + 4);
       }
     }
-    // Candles
+
+    // ── Candles — premium rendering ──
     visibleCandles.forEach((c, i) => {
       const x = (i / count) * chartW + (chartW / count - bodyW) / 2;
       const xCenter = (i / count) * chartW + (chartW / count) / 2;
@@ -415,18 +480,60 @@ function NQForensicVisualizer() {
       const color = isGreen ? T.green : T.red;
       const oY = priceToY(c.open), cY = priceToY(c.close);
       const hY = priceToY(c.high), lY = priceToY(c.low);
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
+
+      // Wick
+      ctx.strokeStyle = color; ctx.lineWidth = bodyW >= 8 ? 1.5 : 1;
       ctx.beginPath(); ctx.moveTo(xCenter, hY); ctx.lineTo(xCenter, lY); ctx.stroke();
+
+      // Body — solid with subtle opacity
       const bodyTop = Math.min(oY, cY), bodyHeight = Math.max(1, Math.abs(oY - cY));
-      if (isGreen) {
-        ctx.fillStyle = color; ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
+      ctx.fillStyle = color; ctx.globalAlpha = 0.92;
+      if (bodyW >= 6 && ctx.roundRect) {
+        ctx.beginPath(); ctx.roundRect(x, bodyTop, bodyW, bodyHeight, Math.min(2, bodyW / 4)); ctx.fill();
       } else {
-        ctx.fillStyle = color; ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
+        ctx.fillRect(x, bodyTop, bodyW, bodyHeight);
       }
+      ctx.globalAlpha = 1.0;
+
+      // Volume bars with gradient
       const vH = (c.volume / volRange.max) * (VOL_H - 8);
-      vctx.fillStyle = isGreen ? T.greenDim : T.redDim;
-      vctx.fillRect(x, VOL_H - vH, bodyW, vH);
+      const vBarW = Math.max(2, bodyW - 1);
+      const volGrad = vctx.createLinearGradient(0, VOL_H - vH, 0, VOL_H);
+      if (isGreen) {
+        volGrad.addColorStop(0, "rgba(45,140,78,0.55)");
+        volGrad.addColorStop(1, "rgba(45,140,78,0.18)");
+      } else {
+        volGrad.addColorStop(0, "rgba(197,61,27,0.55)");
+        volGrad.addColorStop(1, "rgba(197,61,27,0.18)");
+      }
+      vctx.fillStyle = volGrad;
+      if (vBarW >= 4 && vctx.roundRect) {
+        vctx.beginPath(); vctx.roundRect(x, VOL_H - vH, vBarW, vH, [2, 2, 0, 0]); vctx.fill();
+      } else {
+        vctx.fillRect(x, VOL_H - vH, vBarW, vH);
+      }
     });
+
+    // ── Last price line with tag ──
+    if (visibleCandles.length > 0) {
+      const lastC = visibleCandles[visibleCandles.length - 1];
+      const lastY = priceToY(lastC.close);
+      const lastIsUp = lastC.close >= lastC.open;
+      ctx.setLineDash([2, 3]);
+      ctx.strokeStyle = lastIsUp ? "rgba(45,140,78,0.4)" : "rgba(197,61,27,0.4)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, lastY); ctx.lineTo(chartW, lastY); ctx.stroke();
+      ctx.setLineDash([]);
+      // Price tag on right axis
+      const tagW = 68, tagH = 20, tagX = chartW + 3, tagY = lastY - tagH / 2;
+      ctx.fillStyle = lastIsUp ? T.green : T.red;
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(tagX, tagY, tagW, tagH, 3); ctx.fill(); }
+      else { ctx.fillRect(tagX, tagY, tagW, tagH); }
+      ctx.fillStyle = "#FFFFFF";
+      ctx.font = "bold 10px 'JetBrains Mono', monospace";
+      ctx.textAlign = "center"; ctx.fillText(formatPrice(lastC.close), tagX + tagW / 2, lastY + 3.5);
+    }
+
     // Non-selected trade markers
     filteredTrades.forEach(t => {
       if (selectedTrade && t.id === selectedTrade.id) return;
@@ -444,22 +551,32 @@ function NQForensicVisualizer() {
       }
       ctx.globalAlpha = 1;
     });
-    // Crosshair
+
+    // ── Crosshair — dashed lines ──
     if (crosshairPos) {
       const { x, y } = crosshairPos;
-      ctx.strokeStyle = T.crosshair; ctx.lineWidth = 0.5; ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = "rgba(139,105,20,0.3)"; ctx.lineWidth = 0.5; ctx.setLineDash([4, 4]);
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, chartH); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(chartW, y); ctx.stroke(); ctx.setLineDash([]);
       const price = pMin + ((chartH - y) / chartH) * pRange;
-      ctx.fillStyle = T.bgActive; ctx.fillRect(chartW + 2, y - 10, PRICE_AXIS_W - 4, 20);
-      ctx.fillStyle = T.textBright; ctx.font = "bold 11px monospace"; ctx.textAlign = "right";
-      ctx.fillText(formatPrice(price), w - 8, y + 4);
+      // Price label on axis
+      ctx.fillStyle = T.textBright;
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(chartW + 2, y - 10, PRICE_AXIS_W - 4, 20, 3); }
+      ctx.fillStyle = "#3D2E22";
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(chartW + 2, y - 10, PRICE_AXIS_W - 4, 20, 3); ctx.fill(); }
+      else { ctx.fillRect(chartW + 2, y - 10, PRICE_AXIS_W - 4, 20); }
+      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 10px 'JetBrains Mono', monospace"; ctx.textAlign = "right";
+      ctx.fillText(formatPrice(price), w - 10, y + 3.5);
     }
-    // Price axis border
-    ctx.strokeStyle = T.border; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(chartW, 0); ctx.lineTo(chartW, chartH); ctx.stroke();
-    vctx.strokeStyle = T.border; vctx.lineWidth = 1;
-    vctx.beginPath(); vctx.moveTo(chartW, 0); vctx.lineTo(chartW, VOL_H); vctx.stroke();
+
+    // ── Watermark ──
+    ctx.save();
+    ctx.font = "600 10px 'JetBrains Mono', monospace";
+    ctx.fillStyle = "rgba(139,105,20,0.1)";
+    ctx.textAlign = "right";
+    ctx.fillText("MNQ FORENSIC ANALYZER", chartW - 8, 18);
+    ctx.restore();
+
   }, [visibleCandles, priceRange, volRange, selectedTrade, filteredTrades, crosshairPos, candles, viewStart, viewEnd, priceToY, getChartWidth, chartH]);
 
   // Mouse handlers
