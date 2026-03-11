@@ -642,19 +642,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
     fetch(NOTIFY_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      mode: 'no-cors',
       body: JSON.stringify({ phone: phone, timestamp: new Date().toISOString(), source: 'live-page' }),
     })
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(d.result === 'success'){
-        msg.textContent = "You're on the list! We'll text you when the bot goes live.";
-        msg.className = 'notify-msg ok';
-        $('phoneInput').value = '';
-      } else {
-        msg.textContent = d.error || 'Something went wrong. Try again.';
-        msg.className = 'notify-msg err';
-      }
+    .then(function(){
+      msg.textContent = "You're on the list! We'll text you when the bot goes live.";
+      msg.className = 'notify-msg ok';
+      $('phoneInput').value = '';
     })
     .catch(function(){
       msg.textContent = 'Network error. Please try again.';

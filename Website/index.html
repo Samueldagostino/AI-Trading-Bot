@@ -348,21 +348,14 @@ async function handleNotify(e) {
   msg.textContent = '';
 
   try {
-    const res = await fetch(NOTIFY_ENDPOINT, {
+    await fetch(NOTIFY_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      mode: 'no-cors',
       body: JSON.stringify({ phone: phone, timestamp: new Date().toISOString() }),
     });
-    const data = await res.json();
-
-    if (data.result === 'success') {
-      msg.textContent = 'You\'re on the list! We\'ll text you when the bot goes live.';
-      msg.className = 'notify-msg ok';
-      document.getElementById('phoneInput').value = '';
-    } else {
-      msg.textContent = data.error || 'Something went wrong. Try again.';
-      msg.className = 'notify-msg err';
-    }
+    msg.textContent = 'You\'re on the list! We\'ll text you when the bot goes live.';
+    msg.className = 'notify-msg ok';
+    document.getElementById('phoneInput').value = '';
   } catch (err) {
     msg.textContent = 'Network error. Please try again.';
     msg.className = 'notify-msg err';
