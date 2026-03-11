@@ -74,7 +74,7 @@ class TWSAutoConfig:
     # ── Launch Settings ──
     startup_timeout: int = 120     # Seconds to wait for TWS to accept connections
     port_probe_interval: float = 2.0  # Seconds between port probes during startup
-    post_login_delay: int = 15     # Extra seconds after port is open (TWS needs warm-up)
+    post_login_delay: int = 30     # Extra seconds after port is open (TWS needs warm-up)
 
     # ── Health Monitor ──
     health_check_interval: float = 10.0  # Seconds between health checks

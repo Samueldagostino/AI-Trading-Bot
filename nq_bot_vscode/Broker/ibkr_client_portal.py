@@ -1042,8 +1042,24 @@ class IBKRClient:
         The user must have already logged in via the CP Gateway web UI.
         """
         data = await self._get("/iserver/auth/status")
+        logger.info("Auth status response: %s", data)
         if data is None:
-            return False
+            # Try without /v1/api prefix (some gateway versions differ)
+            logger.info("Trying auth check without /v1/api prefix...")
+            try:
+                url = f"https://{self.config.gateway_host}:{self.config.gateway_port}/iserver/auth/status"
+                async with self._session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        logger.info("Auth status (no prefix): %s", data)
+                    else:
+                        body = await resp.text()
+                        logger.info("Auth status (no prefix) [%d]: %s", resp.status, body[:300])
+            except Exception as e:
+                logger.info("Auth check (no prefix) error: %s", e)
+
+            if data is None:
+                return False
 
         authenticated = data.get("authenticated", False)
         competing = data.get("competing", False)

@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from zoneinfo import ZoneInfo
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBiasResult
@@ -79,6 +79,13 @@ class PipelineState(Enum):
     STOPPING = "stopping"
     HALTED = "halted"
     ERROR = "error"
+
+
+class TradePhase(Enum):
+    """Current phase of the active trade — mirrors ScaleOutPhase from backtest."""
+    PHASE_1 = "phase_1"     # All contracts open, C1 5-bar timer running
+    SCALING = "scaling"     # C1 exited, managing C2/C3 independently
+    DONE = "done"           # Trade complete
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -143,6 +150,30 @@ class IBKRLivePipeline:
 
         # ── Active trade tracking ──
         self._active_group_id: Optional[str] = None
+        self._c3_delayed_entry = bot_config.scale_out.c3_delayed_entry_enabled
+        # Track C3 state per group for delayed entry logic
+        # Maps group_id -> {"c3_position_id": str, "c3_broker_order_id": str}
+        self._c3_tracking: Dict[str, Dict[str, str]] = {}
+
+        # ── Trade management state (mirrors scale_out_executor.py) ──
+        self._trade_phase: TradePhase = TradePhase.DONE
+        self._trade_direction: Optional[str] = None  # "long" or "short"
+        self._entry_price: float = 0.0
+        self._initial_stop: float = 0.0
+        self._stop_distance: float = 0.0
+        self._atr_at_entry: float = 0.0
+        self._entry_time: Optional[datetime] = None
+        self._c2_target_price: float = 0.0
+
+        # C1 bar counter (Phase 1)
+        self._c1_bars_elapsed: int = 0
+
+        # Per-leg state: {position_id: {best_price, mfe, stop, bars_since_active,
+        #                                be_triggered, trailing_stop, exit_strategy}}
+        self._leg_state: Dict[str, Dict[str, Any]] = {}
+
+        # Scale-out config reference
+        self._scale_config = bot_config.scale_out
 
         # ── QuantData market context (LOG-ONLY) ──
         self._quantdata_client = QuantDataClient()
@@ -375,9 +406,10 @@ class IBKRLivePipeline:
         # === 3c. PHASE 3 ADDITIVE: FVG STATE MACHINE (data collection) ===
         self._update_sweep_fvg_state(bar)
 
-        # === 4. SKIP IF POSITION ACTIVE ===
+        # === 4. MANAGE ACTIVE TRADE (if any) ===
         if self._active_group_id is not None:
-            return None
+            result = await self._manage_active_trade(bar)
+            return result
 
         # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
         if getattr(self, '_maintenance_entry_blocked', False):
@@ -530,17 +562,19 @@ class IBKRLivePipeline:
             )
             return None
 
-        # Execute via IBKR order executor
+        # Execute via IBKR order executor (5-contract: C1+C2+C3)
         params = bridge_result.params
         records = await self._executor.place_scale_out_entry(
             direction=params.direction,
             limit_price=params.limit_price,
             stop_loss=params.stop_loss,
             c1_take_profit=params.c1_take_profit,
+            c3_contracts=3,
         )
 
         c1_record = records["c1"]
         c2_record = records["c2"]
+        c3_record = records["c3"]
 
         if not c1_record.accepted:
             logger.warning(
@@ -552,6 +586,42 @@ class IBKRLivePipeline:
         # Register with PositionManager
         group_id = str(uuid.uuid4())[:12]
         self._active_group_id = group_id
+
+        # ── Initialize trade management state ──
+        self._trade_phase = TradePhase.PHASE_1
+        self._trade_direction = entry_direction
+        self._entry_price = c1_record.fill_price
+        self._initial_stop = params.stop_loss
+        self._stop_distance = bridge_result.metadata.get("stop_distance_pts", 0.0)
+        self._atr_at_entry = features.atr_14
+        self._entry_time = bar.timestamp
+        self._c1_bars_elapsed = 0
+        self._leg_state.clear()
+
+        # C2 target: use BACKTEST-IDENTICAL 2×R formula, NOT bridge's ATR target.
+        # Backtest: structural_target=0 -> fallback = 2 × stop_distance from entry.
+        # Validated in backtest at 2×R; bridge uses ATR×1.5 which differs.
+        c2_fallback_dist = self._stop_distance * 2.0
+        if entry_direction == "long":
+            self._c2_target_price = round(
+                c1_record.fill_price + c2_fallback_dist, 2
+            )
+        else:
+            self._c2_target_price = round(
+                c1_record.fill_price - c2_fallback_dist, 2
+            )
+        # Validate: C2 target must be at least 1×R away
+        min_target_dist = self._stop_distance * 1.0
+        if entry_direction == "long":
+            if self._c2_target_price - c1_record.fill_price < min_target_dist:
+                self._c2_target_price = round(
+                    c1_record.fill_price + self._stop_distance * 2.0, 2
+                )
+        else:
+            if c1_record.fill_price - self._c2_target_price < min_target_dist:
+                self._c2_target_price = round(
+                    c1_record.fill_price - self._stop_distance * 2.0, 2
+                )
 
         self._position_manager.open_position(
             position_id=f"{group_id}-C1",
@@ -580,17 +650,86 @@ class IBKRLivePipeline:
             )
             self._position_manager.mark_partial_fill(group_id, "C2")
 
+        if c3_record.accepted:
+            self._position_manager.open_position(
+                position_id=f"{group_id}-C3",
+                broker_order_id=c3_record.broker_order_id,
+                side=entry_direction,
+                contracts=3,
+                entry_price=c3_record.fill_price,
+                tag="C3",
+                group_id=group_id,
+            )
+            # Track C3 for delayed entry logic
+            self._c3_tracking[group_id] = {
+                "c3_position_id": f"{group_id}-C3",
+                "c3_broker_order_id": c3_record.broker_order_id,
+            }
+        else:
+            logger.warning(
+                "PARTIAL FILL: C3 rejected: %s",
+                c3_record.rejection_reason,
+            )
+            self._position_manager.mark_partial_fill(group_id, "C3")
+
+        # ── Initialize per-leg state for trade management ──
+        fill_price = c1_record.fill_price
+        self._leg_state[f"{group_id}-C1"] = {
+            "best_price": fill_price,
+            "mfe": 0.0,
+            "stop_price": params.stop_loss,
+            "bars_since_active": 0,
+            "be_triggered": False,
+            "trailing_stop": 0.0,
+            "exit_strategy": "time_5bar",
+            "contracts": 1,
+        }
+        if c2_record.accepted:
+            self._leg_state[f"{group_id}-C2"] = {
+                "best_price": fill_price,
+                "mfe": 0.0,
+                "stop_price": params.stop_loss,
+                "bars_since_active": 0,
+                "be_triggered": False,
+                "trailing_stop": 0.0,
+                "exit_strategy": "structural_target",
+                "target_price": self._c2_target_price,
+                "contracts": 1,
+            }
+        if c3_record.accepted:
+            self._leg_state[f"{group_id}-C3"] = {
+                "best_price": fill_price,
+                "mfe": 0.0,
+                "stop_price": params.stop_loss,
+                "bars_since_active": 0,
+                "be_triggered": False,
+                "trailing_stop": 0.0,
+                "exit_strategy": "atr_trail",
+                "contracts": 3,
+            }
+
+        # Compute total contracts entered
+        total_contracts = 1  # C1 always accepted at this point
+        if c2_record.accepted:
+            total_contracts += 1
+        if c3_record.accepted:
+            total_contracts += 3
+
         # Build market context snapshot for logging
         ctx = self._market_context
         action_result = {
             "action": "entry",
             "timestamp": bar.timestamp.isoformat(),
             "direction": entry_direction,
-            "contracts": 2 if c2_record.accepted else 1,
+            "contracts": total_contracts,
             "c1_fill_price": c1_record.fill_price,
             "c2_fill_price": (
                 c2_record.fill_price if c2_record.accepted else None
             ),
+            "c3_fill_price": (
+                c3_record.fill_price if c3_record.accepted else None
+            ),
+            "c3_contracts": 3 if c3_record.accepted else 0,
             "stop_loss": params.stop_loss,
             "c1_take_profit": params.c1_take_profit,
             "signal_score": entry_score,
@@ -611,21 +750,552 @@ class IBKRLivePipeline:
 
         logger.info(
             "ENTRY: %s %d×MNQ @ %.2f | stop=%.2f target=%.2f "
-            "| score=%.3f source=%s group=%s",
+            "| score=%.3f source=%s group=%s [C3=%s]",
             entry_direction.upper(),
-            action_result["contracts"],
+            total_contracts,
             c1_record.fill_price,
             params.stop_loss,
             params.c1_take_profit,
             entry_score,
             entry_source,
             group_id,
+            "active" if c3_record.accepted else "rejected",
         )
 
         # Phase 3 additive: start FVG tracking in background
         self._start_fvg_tracking(entry_direction, features.atr_14)
 
         return action_result
+
+    # ──────────────────────────────────────────────────────────
+    # TRADE MANAGEMENT STATE MACHINE
+    # Mirrors scale_out_executor.py exit logic exactly
+    # ──────────────────────────────────────────────────────────
+
+    async def _manage_active_trade(self, bar: Bar) -> Optional[Dict[str, Any]]:
+        """
+        Bar-by-bar trade management — the core exit logic.
+
+        Routes to Phase 1 or Scaling management based on current phase.
+        This mirrors ScaleOutExecutor.update() from the backtest engine.
+        """
+        if self._trade_phase == TradePhase.DONE:
+            return None
+
+        # Safety net: if all legs were externally closed (reconciliation,
+        # broker disconnect, etc.), finalize the trade gracefully.
+        remaining = self._get_open_leg_ids()
+        if not remaining:
+            logger.warning(
+                "All legs externally closed for group %s — finalizing",
+                self._active_group_id,
+            )
+            self._finalize_trade()
+            return {"action": "trade_closed", "reason": "external_close"}
+
+        price = bar.close
+        current_time = bar.timestamp
+
+        if self._trade_phase == TradePhase.PHASE_1:
+            return await self._manage_phase_1(price, current_time, bar)
+
+        elif self._trade_phase == TradePhase.SCALING:
+            return await self._manage_scaling(price, current_time, bar)
+
+        return None
+
+    async def _manage_phase_1(
+        self, price: float, current_time: datetime, bar: Bar
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Phase 1: All contracts share initial stop. C1 runs its 5-bar timer.
+
+        Mirrors scale_out_executor._manage_phase_1() exactly:
+        - Check initial stop (all legs)
+        - Count C1 bars
+        - C1 5-bar time exit (if unrealized >= 3.0 pts)
+        - C1 12-bar fallback (if unrealized > 0)
+        - C2 structural target check (fast move during Phase 1)
+        """
+        direction = self._trade_direction
+        group_id = self._active_group_id
+
+        # --- Check STOP (all contracts) ---
+        stop_hit = False
+        if direction == "long" and price <= self._initial_stop:
+            stop_hit = True
+        elif direction == "short" and price >= self._initial_stop:
+            stop_hit = True
+
+        if stop_hit:
+            return await self._close_all_legs(price, current_time, "stop")
+
+        # --- Count bars ---
+        self._c1_bars_elapsed += 1
+
+        # --- Compute unrealized profit ---
+        if direction == "long":
+            unrealized = price - self._entry_price
+        else:
+            unrealized = self._entry_price - price
+
+        # --- Update MFE and best prices for all open legs ---
+        self._update_leg_tracking(price, direction, unrealized)
+
+        # --- C2 structural target check during Phase 1 (fast move) ---
+        c2_pos_id = f"{group_id}-C2"
+        if c2_pos_id in self._leg_state:
+            c2_state = self._leg_state[c2_pos_id]
+            target = c2_state.get("target_price", 0.0)
+            if target > 0:
+                target_hit = False
+                if direction == "long" and price >= target:
+                    target_hit = True
+                elif direction == "short" and price <= target:
+                    target_hit = True
+                if target_hit:
+                    self._close_leg(c2_pos_id, target, current_time,
+                                    "structural_target")
+                    logger.info(
+                        "C2 STRUCTURAL TARGET HIT during Phase 1 @ %.2f",
+                        target,
+                    )
+
+        # --- B:5 time-based exit: exit C1 after 5 bars if profitable ---
+        c1_exit_bars = self._scale_config.c1_time_exit_bars
+        if self._c1_bars_elapsed >= c1_exit_bars:
+            c1_in_profit = unrealized >= 3.0
+            if c1_in_profit:
+                return await self._transition_c1_to_scaling(
+                    round(price, 2), current_time,
+                    f"time_{c1_exit_bars}bars",
+                )
+
+        # --- Fallback: max bars, exit if any profit ---
+        max_bars = self._scale_config.c1_max_bars_fallback
+        if self._c1_bars_elapsed >= max_bars:
+            if unrealized > 0:
+                return await self._transition_c1_to_scaling(
+                    round(price, 2), current_time,
+                    f"time_{max_bars}bars_fallback",
+                )
+
+        return None
+
+    async def _transition_c1_to_scaling(
+        self, exit_price: float, current_time: datetime, reason: str
+    ) -> Dict[str, Any]:
+        """
+        Close C1 and transition remaining legs to independent management.
+
+        Mirrors scale_out_executor._transition_c1_to_scaling() exactly:
+        - Close C1
+        - If C1 profitable: move C2/C3 stops to breakeven (entry + 2pt buffer)
+        - If C1 lost: close C3 immediately (delayed block)
+        - Transition to SCALING phase
+        """
+        direction = self._trade_direction
+        group_id = self._active_group_id
+        c1_pos_id = f"{group_id}-C1"
+
+        # Close C1
+        self._close_leg(c1_pos_id, exit_price, current_time, reason)
+
+        # Determine C1 profitability
+        group = self._position_manager.get_scale_out_group(group_id)
+        c1_net_pnl = group.c1.net_pnl if group and group.c1 else 0.0
+
+        if direction == "long":
+            c1_profit_pts = round(exit_price - self._entry_price, 2)
+        else:
+            c1_profit_pts = round(self._entry_price - exit_price, 2)
+
+        c1_was_profitable = c1_net_pnl > 0
+
+        # ── IMMEDIATE BREAKEVEN on remaining legs after C1 profit ──
+        BE_BUFFER_PTS = self._scale_config.c2_breakeven_buffer_points
+        c3_blocked = False
+
+        if c1_was_profitable:
+            for pos_id, state in list(self._leg_state.items()):
+                if pos_id == c1_pos_id:
+                    continue
+                if pos_id not in self._position_manager.open_positions:
+                    continue
+                if direction == "long":
+                    be_stop = round(self._entry_price + BE_BUFFER_PTS, 2)
+                    if be_stop > state["stop_price"]:
+                        state["stop_price"] = be_stop
+                        state["be_triggered"] = True
+                else:
+                    be_stop = round(self._entry_price - BE_BUFFER_PTS, 2)
+                    if be_stop < state["stop_price"]:
+                        state["stop_price"] = be_stop
+                        state["be_triggered"] = True
+
+            be_legs = [pid.split("-")[-1] for pid, s in self._leg_state.items()
+                       if s.get("be_triggered") and pid != c1_pos_id]
+            if be_legs:
+                logger.info(
+                    "BE TRIGGERED on %s after C1 profit | New stop: %.2f",
+                    be_legs,
+                    self._entry_price + (BE_BUFFER_PTS if direction == "long"
+                                         else -BE_BUFFER_PTS),
+                )
+        else:
+            # C1 lost → close C3 immediately (delayed block)
+            c3_pos_id = f"{group_id}-C3"
+            if (self._c3_delayed_entry
+                    and c3_pos_id in self._leg_state
+                    and c3_pos_id in self._position_manager.open_positions):
+                c3_blocked = True
+                self._close_leg(c3_pos_id, exit_price, current_time,
+                                "c3_delayed_blocked")
+                if group:
+                    group.c3_blocked = True
+                self._c3_tracking.pop(group_id, None)
+                logger.info(
+                    "C3 DELAYED BLOCKED at C1 exit: C1 net PnL $%.2f <= 0 | "
+                    "C3 closed at market",
+                    c1_net_pnl,
+                )
+
+        logger.info(
+            "C1 EXIT (%s) @ bar %d | Price: %.2f (%.1fpts) | "
+            "C1 PnL: $%.2f | BE applied: %s | C3 blocked: %s",
+            reason, self._c1_bars_elapsed, exit_price, c1_profit_pts,
+            c1_net_pnl, c1_was_profitable, c3_blocked,
+        )
+
+        # Check if all legs are now closed
+        remaining = self._get_open_leg_ids()
+        if not remaining:
+            self._finalize_trade()
+            return {
+                "action": "trade_closed",
+                "reason": f"c1_{reason}_all_closed",
+                "c1_pnl": c1_net_pnl,
+                "c3_blocked": c3_blocked,
+            }
+
+        # Transition to SCALING phase
+        self._trade_phase = TradePhase.SCALING
+        # Reset bars_since_active for remaining legs
+        for pos_id in remaining:
+            if pos_id in self._leg_state:
+                self._leg_state[pos_id]["bars_since_active"] = 0
+
+        return {
+            "action": "c1_exit",
+            "c1_pnl": c1_net_pnl,
+            "c1_bars": self._c1_bars_elapsed,
+            "remaining_legs": [pid.split("-")[-1] for pid in remaining],
+            "c3_blocked": c3_blocked,
+        }
+
+    async def _manage_scaling(
+        self, price: float, current_time: datetime, bar: Bar
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Manage remaining legs independently after C1 exits.
+
+        Mirrors scale_out_executor._manage_scaling() exactly:
+        - Per-leg stop check
+        - C2: structural target + 20-bar time stop + delayed BE
+        - C3: ATR trailing stop + 150pt max target + 2hr time stop + delayed BE
+        """
+        direction = self._trade_direction
+        group_id = self._active_group_id
+        closed_legs = []
+
+        for pos_id in list(self._get_open_leg_ids()):
+            state = self._leg_state.get(pos_id)
+            if not state:
+                continue
+
+            # Update per-leg tracking
+            state["bars_since_active"] += 1
+
+            if direction == "long":
+                state["best_price"] = max(state["best_price"], price)
+                unrealized = price - self._entry_price
+            else:
+                state["best_price"] = min(state["best_price"], price)
+                unrealized = self._entry_price - price
+
+            if unrealized > 0:
+                state["mfe"] = max(state["mfe"], unrealized)
+
+            # ------ STOP CHECK (per-leg stop) ------
+            stop_to_check = state["stop_price"]
+            stop_hit = False
+            if direction == "long" and price <= stop_to_check:
+                stop_hit = True
+            elif direction == "short" and price >= stop_to_check:
+                stop_hit = True
+
+            if stop_hit:
+                exit_reason = ("trailing" if state["trailing_stop"] > 0
+                               else ("breakeven" if state["be_triggered"]
+                                     else "stop"))
+                self._close_leg(pos_id, stop_to_check, current_time,
+                                exit_reason)
+                closed_legs.append(pos_id.split("-")[-1])
+                continue
+
+            # ------ PER-LEG EXIT STRATEGY ------
+            strategy = state["exit_strategy"]
+
+            if strategy == "structural_target":
+                # C2: Exit at structural target (swing point)
+                target = state.get("target_price", 0.0)
+                if target > 0:
+                    target_hit = False
+                    if direction == "long" and price >= target:
+                        target_hit = True
+                    elif direction == "short" and price <= target:
+                        target_hit = True
+                    if target_hit:
+                        self._close_leg(pos_id, target, current_time,
+                                        "structural_target")
+                        closed_legs.append(pos_id.split("-")[-1])
+                        continue
+
+                # C2: Time stop — max 20 bars (~40 min on 2m bars)
+                if state["bars_since_active"] >= 20:
+                    self._close_leg(pos_id, round(price, 2), current_time,
+                                    "time_20bars")
+                    closed_legs.append(pos_id.split("-")[-1])
+                    continue
+
+                # C2: Delayed BE (Variant B)
+                self._apply_delayed_be(state, direction)
+
+            elif strategy == "atr_trail":
+                # C3: Pure ATR trailing stop (runner)
+                self._update_atr_trail(state, direction)
+
+                # C3: Max target safety valve (150pts)
+                points_from_entry = abs(price - self._entry_price)
+                max_target_pts = self._scale_config.c2_max_target_points
+                if points_from_entry >= max_target_pts:
+                    self._close_leg(pos_id, round(price, 2), current_time,
+                                    "max_target")
+                    closed_legs.append(pos_id.split("-")[-1])
+                    continue
+
+                # C3: Time stop (2 hours max)
+                if self._entry_time:
+                    elapsed_min = (
+                        (current_time - self._entry_time).total_seconds() / 60
+                    )
+                    if elapsed_min >= self._scale_config.c2_time_stop_minutes:
+                        self._close_leg(pos_id, round(price, 2), current_time,
+                                        "time_stop")
+                        closed_legs.append(pos_id.split("-")[-1])
+                        continue
+
+                # C3: Delayed BE
+                self._apply_delayed_be(state, direction)
+
+        # Check if all legs closed
+        remaining = self._get_open_leg_ids()
+        if not remaining:
+            self._finalize_trade()
+            return {
+                "action": "trade_closed",
+                "reason": "all_legs_exited",
+                "closed_legs": closed_legs,
+            }
+
+        if closed_legs:
+            return {
+                "action": "legs_closed",
+                "closed": closed_legs,
+                "remaining": [pid.split("-")[-1] for pid in remaining],
+            }
+
+        return None
+
+    # ──────────────────────────────────────────────────────────
+    # TRADE MANAGEMENT HELPERS
+    # ──────────────────────────────────────────────────────────
+
+    def _update_leg_tracking(
+        self, price: float, direction: str, unrealized: float
+    ) -> None:
+        """Update best_price and MFE for all open legs."""
+        for pos_id in self._get_open_leg_ids():
+            state = self._leg_state.get(pos_id)
+            if not state:
+                continue
+            if direction == "long":
+                state["best_price"] = max(state["best_price"], price)
+            else:
+                state["best_price"] = min(state["best_price"], price)
+            if unrealized > 0:
+                state["mfe"] = max(state["mfe"], unrealized)
+
+    def _apply_delayed_be(self, state: Dict[str, Any], direction: str) -> None:
+        """
+        Variant B: Move stop to breakeven once MFE >= stop_distance × 1.5.
+
+        Mirrors scale_out_executor._apply_delayed_be() exactly.
+        """
+        if state["be_triggered"]:
+            return
+
+        be_multiplier = self._scale_config.c2_be_delay_multiplier
+        threshold = self._stop_distance * be_multiplier
+
+        if state["mfe"] >= threshold:
+            buf = self._scale_config.c2_breakeven_buffer_points
+            if direction == "long":
+                new_stop = round(self._entry_price + buf, 2)
+                if new_stop > state["stop_price"]:
+                    state["stop_price"] = new_stop
+                    state["be_triggered"] = True
+            else:
+                new_stop = round(self._entry_price - buf, 2)
+                if new_stop < state["stop_price"]:
+                    state["stop_price"] = new_stop
+                    state["be_triggered"] = True
+
+    def _update_atr_trail(self, state: Dict[str, Any], direction: str) -> None:
+        """
+        Update ATR-based trailing stop: trail = best_price - (ATR × 2.0).
+
+        Mirrors scale_out_executor._update_atr_trail() exactly.
+        Only tightens (never widens the stop).
+        """
+        multiplier = self._scale_config.c2_trailing_atr_multiplier
+        distance = self._atr_at_entry * multiplier
+
+        if direction == "long":
+            new_trail = state["best_price"] - distance
+            if new_trail > state["stop_price"]:
+                state["stop_price"] = round(new_trail, 2)
+                state["trailing_stop"] = state["stop_price"]
+        else:
+            new_trail = state["best_price"] + distance
+            if new_trail < state["stop_price"]:
+                state["stop_price"] = round(new_trail, 2)
+                state["trailing_stop"] = state["stop_price"]
+
+    def _close_leg(
+        self,
+        position_id: str,
+        exit_price: float,
+        current_time: datetime,
+        exit_reason: str,
+    ) -> None:
+        """
+        Close a single leg via PositionManager.
+
+        Handles the case where the position is already closed
+        (non-fill, reconciliation, etc.) gracefully.
+        """
+        # Remove from leg state tracking
+        self._leg_state.pop(position_id, None)
+
+        # Close via PositionManager (computes P&L, feeds to executor)
+        if position_id in self._position_manager.open_positions:
+            self._position_manager.close_position(
+                position_id, exit_price, exit_reason
+            )
+        else:
+            logger.warning(
+                "close_leg: position %s not in open_positions "
+                "(already closed or non-fill)",
+                position_id,
+            )
+
+    async def _close_all_legs(
+        self, price: float, current_time: datetime, reason: str
+    ) -> Dict[str, Any]:
+        """
+        Close all open legs at once (initial stop hit during Phase 1).
+
+        Mirrors scale_out_executor._close_all() exactly:
+        - When Phase 1 stop is hit, all legs close
+        - C3 is marked as blocked (it never proved direction)
+        """
+        group_id = self._active_group_id
+        direction = self._trade_direction
+
+        # Determine if C3 should be blocked
+        c3_pos_id = f"{group_id}-C3"
+        c3_should_block = (
+            self._c3_delayed_entry
+            and self._trade_phase == TradePhase.PHASE_1
+            and reason == "stop"
+            and c3_pos_id in self._leg_state
+        )
+
+        for pos_id in list(self._get_open_leg_ids()):
+            if c3_should_block and pos_id == c3_pos_id:
+                self._close_leg(pos_id, price, current_time,
+                                "c3_delayed_blocked")
+            else:
+                self._close_leg(pos_id, price, current_time, reason)
+
+        # Mark C3 as blocked in the group
+        if c3_should_block:
+            group = self._position_manager.get_scale_out_group(group_id)
+            if group:
+                group.c3_blocked = True
+            self._c3_tracking.pop(group_id, None)
+
+        self._finalize_trade()
+
+        return {
+            "action": "trade_closed",
+            "reason": f"phase1_{reason}",
+            "c3_blocked": c3_should_block,
+        }
+
+    def _get_open_leg_ids(self) -> List[str]:
+        """Get position IDs of legs that are still open."""
+        group_id = self._active_group_id
+        if not group_id:
+            return []
+        open_ids = []
+        for tag in ("C1", "C2", "C3"):
+            pos_id = f"{group_id}-{tag}"
+            if (pos_id in self._leg_state
+                    and pos_id in self._position_manager.open_positions):
+                open_ids.append(pos_id)
+        return open_ids
+
+    def _finalize_trade(self) -> None:
+        """
+        Clean up trade state after all legs are closed.
+
+        Logs final P&L, resets state, clears active group.
+        """
+        group_id = self._active_group_id
+        if group_id:
+            group = self._position_manager.get_scale_out_group(group_id)
+            if group:
+                logger.info(
+                    "TRADE COMPLETE: group=%s total_pnl=$%.2f "
+                    "c3_blocked=%s",
+                    group_id, group.total_net_pnl, group.c3_blocked,
+                )
+
+        # Reset all trade state
+        self._trade_phase = TradePhase.DONE
+        self._trade_direction = None
+        self._entry_price = 0.0
+        self._initial_stop = 0.0
+        self._stop_distance = 0.0
+        self._atr_at_entry = 0.0
+        self._entry_time = None
+        self._c2_target_price = 0.0
+        self._c1_bars_elapsed = 0
+        self._leg_state.clear()
+        self._c3_tracking.pop(group_id, None)
+        self._active_group_id = None
 
     # ──────────────────────────────────────────────────────────
     # PHASE 3 ADDITIVE: FVG BACKGROUND TRACKING (data only)
@@ -732,7 +1402,7 @@ class IBKRLivePipeline:
                 self._sweep_fvg = None
 
     # ──────────────────────────────────────────────────────────
-    # POSITION CLOSE — called externally on exit signals
+    # POSITION CLOSE — external API (for reconciliation/emergency)
     # ──────────────────────────────────────────────────────────
 
     def close_position(
@@ -742,27 +1412,26 @@ class IBKRLivePipeline:
         exit_reason: str = "",
     ) -> None:
         """
-        Close a tracked position immediately.
+        Close a tracked position immediately (external API).
+
+        Called by reconciliation or emergency flatten — NOT by the
+        trade management state machine (which uses _close_leg directly).
 
         Updates PositionManager -> feeds P&L to executor -> checks
-        kill switch.  If both legs closed, clears active group.
+        kill switch. Also cleans up trade management state.
         """
         self._position_manager.close_position(
             position_id, exit_price, exit_reason
         )
 
+        # Remove from leg state if tracked
+        self._leg_state.pop(position_id, None)
+
         # Check if the full group is now closed
         if self._active_group_id:
-            group = self._position_manager.get_scale_out_group(
-                self._active_group_id
-            )
-            if group and group.is_fully_closed:
-                logger.info(
-                    "Group %s fully closed — P&L: $%.2f",
-                    self._active_group_id,
-                    group.total_net_pnl,
-                )
-                self._active_group_id = None
+            remaining = self._get_open_leg_ids()
+            if not remaining:
+                self._finalize_trade()
 
     # ──────────────────────────────────────────────────────────
     # MARKET CONTEXT REFRESH (LOG-ONLY)

@@ -103,6 +103,87 @@ class TwoCandleAggregator:
 
 
 # ═══════════════════════════════════════════════════════════════
+# HTF CANDLE AGGREGATOR  (2-min → 5-min, 15-min)
+# ═══════════════════════════════════════════════════════════════
+
+class HTFCandleAggregator:
+    """
+    Aggregates 2-minute execution bars into higher-timeframe candles
+    (5-min, 15-min) and routes them to the pipeline's HTF engine.
+
+    Uses clock-aligned boundaries:
+      - 5-min:  boundaries at :00, :05, :10, …, :55
+      - 15-min: boundaries at :00, :15, :30, :45
+
+    When a 2-min bar's timestamp crosses into the next boundary, the
+    accumulated OHLCV candle is emitted and a new one starts.
+    """
+
+    def __init__(self, on_htf_candle):
+        """
+        Args:
+            on_htf_candle: callback(timeframe: str, bar: Bar) called
+                           when a 5m or 15m candle completes.
+        """
+        self._on_htf_candle = on_htf_candle
+        # Separate accumulators for each timeframe
+        self._accum = {}          # tf -> {"o","h","l","c","vol","ts"}
+        self._tf_minutes = {"5m": 5, "15m": 15}
+        self._htf_candles_emitted = 0
+
+    @staticmethod
+    def _boundary(ts: datetime, minutes: int) -> datetime:
+        """Return the clock-aligned boundary start for *ts*."""
+        return ts.replace(
+            minute=(ts.minute // minutes) * minutes,
+            second=0, microsecond=0,
+        )
+
+    def on_bar(self, bar: Bar) -> None:
+        """Feed a 2-minute bar. Emits HTF candles when a boundary is crossed."""
+        for tf, mins in self._tf_minutes.items():
+            boundary = self._boundary(bar.timestamp, mins)
+
+            if tf not in self._accum:
+                # First bar ever for this TF — just start accumulating
+                self._accum[tf] = {
+                    "o": bar.open, "h": bar.high, "l": bar.low,
+                    "c": bar.close, "vol": bar.volume,
+                    "ts": bar.timestamp, "boundary": boundary,
+                }
+                continue
+
+            acc = self._accum[tf]
+
+            if boundary != acc["boundary"]:
+                # We crossed into a new period → emit the completed candle
+                completed = Bar(
+                    timestamp=acc["ts"],  # use last bar's timestamp
+                    open=acc["o"],
+                    high=acc["h"],
+                    low=acc["l"],
+                    close=acc["c"],
+                    volume=acc["vol"],
+                )
+                self._on_htf_candle(tf, completed)
+                self._htf_candles_emitted += 1
+
+                # Start new accumulator with current bar
+                self._accum[tf] = {
+                    "o": bar.open, "h": bar.high, "l": bar.low,
+                    "c": bar.close, "vol": bar.volume,
+                    "ts": bar.timestamp, "boundary": boundary,
+                }
+            else:
+                # Same period — extend OHLCV
+                acc["h"] = max(acc["h"], bar.high)
+                acc["l"] = min(acc["l"], bar.low)
+                acc["c"] = bar.close
+                acc["vol"] += bar.volume
+                acc["ts"] = bar.timestamp
+
+
+# ═══════════════════════════════════════════════════════════════
 # STUB CLIENT (satisfies orchestrator's client interface)
 # ═══════════════════════════════════════════════════════════════
 
@@ -116,10 +197,12 @@ class TWSClientStub:
     Also provides _last_heartbeat for TWSHealthMonitor bar-flow checks.
     """
 
-    def __init__(self, ib=None):
+    def __init__(self, ib=None, runner=None):
         self._connected = True
         self._ib = ib  # real ib_insync.IB instance for health checks
+        self._runner = runner  # reference to TWSLiveRunner for last_price
         self._last_heartbeat: float = 0.0  # updated on each bar arrival
+        self._last_price: float = 0.0  # fallback if no runner
         self._contract = type("Contract", (), {
             "conid": 0, "symbol": "MNQ", "expiry": "", "exchange": "CME",
             "description": "MNQ via TWS"
@@ -142,6 +225,27 @@ class TWSClientStub:
 
     def get_status(self) -> dict:
         return {"connected": self.is_connected}
+
+    def get_current_price(self) -> dict:
+        """Return last known price for paper order fills.
+
+        The executor calls this when limit_price=0 (market orders).
+        We use the runner's _last_price which is updated on every
+        2-min candle and during backfill.
+        """
+        price = self._last_price
+        if self._runner:
+            price = self._runner._last_price or price
+        return {"last": price}
+
+    @property
+    def account_id(self) -> str:
+        """Stub for position manager reconciliation (not used in TWS mode)."""
+        return ""
+
+    async def _get(self, endpoint: str):
+        """Stub for HTTP-based Client Portal calls (not used in TWS mode)."""
+        return None
 
     async def connect(self) -> bool:
         return True
@@ -238,6 +342,7 @@ class TWSLiveRunner:
         self._candle_buffer: list = []  # last 200 candles for website
         self._candle_buffer_max = 200
         self._last_price: float = 0.0
+        self._htf_aggregator = None  # initialized after pipeline
 
         # Structured loggers
         self._decision_log = JSONLineLogger(
@@ -257,39 +362,48 @@ class TWSLiveRunner:
             nest_asyncio.apply()
             from ib_insync import IB, Future
         except ImportError:
-            logger.critical(
+            raise RuntimeError(
                 "ib_insync not installed. Run: pip install ib_insync --break-system-packages"
             )
-            sys.exit(1)
 
-        # ── Connect to TWS ──
+        # ── Connect to TWS (with retries for slow IBC startups) ──
         self._ib = IB()
-        try:
-            await self._ib.connectAsync(
-                self._host, self._port, clientId=self._client_id
-            )
-            logger.info("Connected to TWS at %s:%d (clientId=%d)",
-                        self._host, self._port, self._client_id)
-        except (ConnectionRefusedError, OSError, asyncio.TimeoutError) as e:
-            logger.critical(
-                "Cannot connect to TWS at %s:%d — is TWS running? Error: %s",
-                self._host, self._port, e,
-            )
-            sys.exit(1)
+        max_connect_attempts = 5
+        for attempt in range(1, max_connect_attempts + 1):
+            try:
+                await self._ib.connectAsync(
+                    self._host, self._port, clientId=self._client_id,
+                    timeout=20,
+                )
+                logger.info("Connected to TWS at %s:%d (clientId=%d)",
+                            self._host, self._port, self._client_id)
+                break
+            except (ConnectionRefusedError, OSError, asyncio.TimeoutError) as e:
+                if attempt < max_connect_attempts:
+                    wait = 10 * attempt
+                    logger.warning(
+                        "TWS connect attempt %d/%d failed: %s — retrying in %ds...",
+                        attempt, max_connect_attempts, e, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    self._ib = IB()  # fresh instance for retry
+                else:
+                    raise RuntimeError(
+                        f"Cannot connect to TWS at {self._host}:{self._port} "
+                        f"after {max_connect_attempts} attempts: {e}"
+                    )
 
         # ── Resolve MNQ front-month contract ──
         generic = Future("MNQ", exchange="CME")
         details_list = await self._ib.reqContractDetailsAsync(generic)
         if not details_list:
-            logger.critical("Could not find MNQ contract details")
-            sys.exit(1)
+            raise RuntimeError("Could not find MNQ contract details")
 
         details_list.sort(key=lambda d: d.contract.lastTradeDateOrContractMonth)
         front = details_list[0].contract
         qualified = await self._ib.qualifyContractsAsync(front)
         if not qualified:
-            logger.critical("Could not qualify front-month MNQ contract")
-            sys.exit(1)
+            raise RuntimeError("Could not qualify front-month MNQ contract")
 
         contract = qualified[0]
         logger.info(
@@ -309,7 +423,7 @@ class TWSLiveRunner:
         )
 
         # Replace the Client Portal client/data_feed with our stubs
-        self._pipeline._client = TWSClientStub(ib=self._ib)
+        self._pipeline._client = TWSClientStub(ib=self._ib, runner=self)
         self._pipeline._data_feed = TWSDataFeedStub()
         self._pipeline._state = PipelineState.RUNNING
 
@@ -317,7 +431,13 @@ class TWSLiveRunner:
         self._pipeline._executor.reset_daily()
         self._pipeline._position_manager.reset_daily()
 
+        # ── HTF candle aggregator (2-min → 5-min, 15-min → HTF engine) ──
+        self._htf_aggregator = HTFCandleAggregator(
+            on_htf_candle=self._on_htf_candle,
+        )
+
         logger.info("Pipeline initialized (paper mode, TWS socket)")
+        logger.info("  HTF aggregator: 2m → 5m, 15m → HTF Bias Engine")
 
         # ── Historical backfill — prime ALL indicators + session levels ──
         await self._backfill_historical(contract)
@@ -482,6 +602,10 @@ class TWSLiveRunner:
                         is_rth=is_rth,
                     )
 
+                # Feed into HTF aggregator (builds 5m/15m during backfill)
+                if self._htf_aggregator:
+                    self._htf_aggregator.on_bar(bar)
+
                 # Add to candle buffer for website (last 40 bars)
                 self._candle_buffer.append({
                     "t": bar.timestamp.isoformat(),
@@ -514,6 +638,29 @@ class TWSLiveRunner:
                 "  Feature engine: %d bars in rolling window",
                 len(self._pipeline._feature_engine._bars),
             )
+
+            # Log HTF state after backfill
+            if self._htf_aggregator:
+                logger.info(
+                    "  HTF aggregator: %d candles emitted during backfill",
+                    self._htf_aggregator._htf_candles_emitted,
+                )
+            htf_bias = self._pipeline._htf_bias
+            if htf_bias:
+                logger.info(
+                    "  HTF bias: %s (strength=%.2f) "
+                    "allows_long=%s allows_short=%s",
+                    htf_bias.consensus_direction,
+                    htf_bias.consensus_strength,
+                    htf_bias.htf_allows_long,
+                    htf_bias.htf_allows_short,
+                )
+                logger.info("  HTF per-TF: %s", htf_bias.tf_biases)
+            else:
+                logger.warning(
+                    "  HTF bias: STILL NONE after backfill — "
+                    "check HTF_TIMEFRAMES vs aggregator output"
+                )
 
         except Exception as e:
             logger.error(
@@ -606,9 +753,46 @@ class TWSLiveRunner:
         if len(self._candle_buffer) > self._candle_buffer_max:
             self._candle_buffer = self._candle_buffer[-self._candle_buffer_max:]
 
+        # Feed into HTF aggregator (builds 5m/15m candles → HTF bias)
+        if self._htf_aggregator:
+            self._htf_aggregator.on_bar(candle)
+
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            loop.create_task(self._pipeline._process_bar_guarded(candle))
+            task = loop.create_task(self._safe_process_bar(candle))
+            task.add_done_callback(self._task_exception_handler)
+
+    async def _safe_process_bar(self, candle: Bar) -> None:
+        """Wrapper around _process_bar_guarded with exception logging."""
+        try:
+            await self._pipeline._process_bar_guarded(candle)
+        except Exception:
+            logger.error(
+                "CRITICAL: _process_bar failed on candle %s",
+                candle.timestamp.isoformat(),
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _task_exception_handler(task: asyncio.Task) -> None:
+        """Ensure any unhandled task exceptions get logged."""
+        if not task.cancelled() and task.exception():
+            logger.error("Unhandled task exception: %s", task.exception())
+
+    def _on_htf_candle(self, timeframe: str, bar: Bar) -> None:
+        """A higher-timeframe candle (5m or 15m) has completed."""
+        self._pipeline.process_htf_bar(timeframe, bar)
+        bias = self._pipeline._htf_bias
+        if bias:
+            logger.info(
+                "HTF %s candle → bias=%s strength=%.2f "
+                "(allows_long=%s allows_short=%s)",
+                timeframe,
+                bias.consensus_direction,
+                bias.consensus_strength,
+                bias.htf_allows_long,
+                bias.htf_allows_short,
+            )
 
     def _write_state_files(self) -> None:
         """
@@ -639,13 +823,26 @@ class TWSLiveRunner:
         if positions:
             pos_list = list(positions.values())
             p = pos_list[0]
+            # Get stop/target from orchestrator (where they actually live)
+            orch = self._pipeline
+            stop_price = orch._initial_stop if orch._initial_stop else None
+            target_price = orch._c2_target_price if orch._c2_target_price else None
+            side_str = p.side.value if hasattr(p.side, 'value') else str(p.side)
+            direction_mult = 1 if 'LONG' in side_str.upper() else -1
+            total_contracts = sum(pp.contracts for pp in pos_list)
+            unrealized = 0.0
+            if hasattr(p, 'entry_price') and self._last_price:
+                unrealized = round(
+                    (self._last_price - p.entry_price) * direction_mult
+                    * 5 * total_contracts, 2
+                )
             active_trade = {
-                "side": p.side.value if hasattr(p.side, 'value') else str(p.side),
-                "contracts": sum(pp.contracts for pp in pos_list),
+                "side": side_str,
+                "contracts": total_contracts,
                 "entry_price": round(p.entry_price, 2) if hasattr(p, 'entry_price') else 0.0,
-                "stop_price": round(p.stop_loss, 2) if hasattr(p, 'stop_loss') and p.stop_loss else None,
-                "target_price": round(p.take_profit, 2) if hasattr(p, 'take_profit') and p.take_profit else None,
-                "unrealized_pnl": round((self._last_price - p.entry_price) * (1 if 'LONG' in str(p.side) else -1) * 5 * sum(pp.contracts for pp in pos_list), 2) if hasattr(p, 'entry_price') and self._last_price else 0.0,
+                "stop_price": round(stop_price, 2) if stop_price else None,
+                "target_price": round(target_price, 2) if target_price else None,
+                "unrealized_pnl": unrealized,
                 "entry_time": p.entry_time.isoformat() if hasattr(p, 'entry_time') and p.entry_time else "",
             }
 
@@ -775,6 +972,212 @@ class TWSLiveRunner:
 
 
 # ═══════════════════════════════════════════════════════════════
+# AUTO-LAUNCH + CRASH-RECOVERY SUPERVISOR
+# ═══════════════════════════════════════════════════════════════
+
+class TWSSupervisor:
+    """
+    Wraps TWSLiveRunner with:
+      1. Auto-launch TWS via IBC (if not already running)
+      2. Crash detection — monitors runner health
+      3. Auto-restart — kills TWS, relaunches via IBC, reconnects bot
+
+    This lets the bot run completely unattended:
+      TWS crash/disconnect → supervisor detects → IBC relaunches TWS
+      → bot reconnects → backfill → resume trading
+
+    Usage:
+        python scripts/run_tws.py --auto
+    """
+
+    MAX_RESTART_ATTEMPTS = 10
+    RESTART_COOLDOWN = 60        # seconds between restarts
+    HEALTH_POLL_INTERVAL = 30    # seconds between health checks
+
+    def __init__(self, host, port, client_id, dry_run=False):
+        self._host = host
+        self._port = port
+        self._client_id = client_id
+        self._dry_run = dry_run
+        self._restart_count = 0
+        self._user_shutdown = False
+
+        # TWSLauncher handles TWS process + IBC login
+        from config.tws_auto_config import TWSAutoConfig
+        self._auto_config = TWSAutoConfig()
+        self._launcher = None  # created on first use
+
+    def run(self) -> None:
+        """
+        Main supervisor loop. Keeps restarting the bot until:
+          - User presses Ctrl+C
+          - Max restart attempts exhausted
+        """
+        import nest_asyncio
+        nest_asyncio.apply()
+
+        self._print_supervisor_banner()
+
+        while not self._user_shutdown:
+            if self._restart_count >= self.MAX_RESTART_ATTEMPTS:
+                logger.critical(
+                    "Max restart attempts (%d) reached — giving up. "
+                    "Manual intervention required.",
+                    self.MAX_RESTART_ATTEMPTS,
+                )
+                break
+
+            # Step 1: Ensure TWS is running (launch via IBC if needed)
+            if not self._ensure_tws_running():
+                logger.error(
+                    "Cannot start TWS — retrying in %ds...",
+                    self.RESTART_COOLDOWN,
+                )
+                self._restart_count += 1
+                time.sleep(self.RESTART_COOLDOWN)
+                continue
+
+            # Step 2: Run the bot
+            runner = TWSLiveRunner(
+                host=self._host,
+                port=self._port,
+                client_id=self._client_id,
+                dry_run=self._dry_run,
+            )
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            exit_reason = "unknown"
+            try:
+                logger.info(
+                    "=" * 60 + "\n"
+                    "  SUPERVISOR: Starting bot (attempt %d)\n" +
+                    "=" * 60,
+                    self._restart_count + 1,
+                )
+                loop.run_until_complete(runner.start())
+                exit_reason = "clean_exit"
+            except KeyboardInterrupt:
+                exit_reason = "user_shutdown"
+                self._user_shutdown = True
+                try:
+                    loop.run_until_complete(
+                        asyncio.wait_for(runner.shutdown(), timeout=30)
+                    )
+                except (asyncio.TimeoutError, Exception):
+                    logger.warning("Shutdown timed out during Ctrl+C")
+            except Exception as e:
+                exit_reason = f"crash: {e}"
+                logger.error(
+                    "Bot crashed: %s\n%s", e, traceback.format_exc()
+                )
+                try:
+                    loop.run_until_complete(
+                        asyncio.wait_for(runner.shutdown(), timeout=15)
+                    )
+                except (asyncio.TimeoutError, Exception):
+                    pass
+            finally:
+                loop.close()
+
+            if self._user_shutdown:
+                logger.info("SUPERVISOR: User requested shutdown — exiting")
+                break
+
+            # Step 3: Bot exited — decide whether to restart
+            self._restart_count += 1
+            logger.warning(
+                "SUPERVISOR: Bot exited (%s). Restart %d/%d in %ds...",
+                exit_reason,
+                self._restart_count,
+                self.MAX_RESTART_ATTEMPTS,
+                self.RESTART_COOLDOWN,
+            )
+
+            # Kill TWS so IBC can do a clean relaunch
+            self._kill_tws()
+
+            # Cooldown before restart
+            for remaining in range(self.RESTART_COOLDOWN, 0, -10):
+                if self._user_shutdown:
+                    break
+                logger.info("  Restarting in %ds...", remaining)
+                time.sleep(min(10, remaining))
+
+        logger.info("SUPERVISOR: Exiting")
+
+    def _ensure_tws_running(self) -> bool:
+        """Check if TWS port is open; if not, launch via IBC."""
+        import socket as _socket
+
+        # Quick port check
+        try:
+            with _socket.create_connection(
+                (self._host, self._port), timeout=3.0
+            ):
+                logger.info("SUPERVISOR: TWS already running on port %d", self._port)
+                return True
+        except (ConnectionRefusedError, OSError, _socket.timeout):
+            pass
+
+        # Not running — try to launch via IBC
+        logger.info("SUPERVISOR: TWS not running — launching via IBC...")
+
+        if not self._auto_config.ibc_available:
+            logger.warning(
+                "SUPERVISOR: IBC not found at %s. "
+                "Please install IBC and set IBKR_IBC_PATH in .env, "
+                "OR start TWS manually before running the bot.",
+                self._auto_config.ibc_path or "(not set)",
+            )
+            # Fall back: check if TWS is available for direct launch
+            if not self._auto_config.tws_available:
+                logger.error("SUPERVISOR: Neither IBC nor TWS found")
+                return False
+            logger.info(
+                "SUPERVISOR: Launching TWS directly — you must log in manually"
+            )
+
+        from Broker.tws_launcher import TWSLauncher
+        self._launcher = TWSLauncher(self._auto_config)
+
+        if not self._launcher.launch():
+            logger.error("SUPERVISOR: Failed to launch TWS")
+            return False
+
+        if not self._launcher.wait_for_ready(timeout=180):
+            logger.error("SUPERVISOR: TWS did not become ready in 180s")
+            self._launcher.kill()
+            return False
+
+        logger.info("SUPERVISOR: TWS is ready")
+        return True
+
+    def _kill_tws(self) -> None:
+        """Kill TWS process for a clean restart."""
+        if self._launcher:
+            logger.info("SUPERVISOR: Killing TWS for clean restart...")
+            self._launcher.kill()
+            self._launcher.cleanup()
+            self._launcher = None
+            time.sleep(5)  # give Windows time to release the port
+
+    def _print_supervisor_banner(self) -> None:
+        ibc_status = "AVAILABLE" if self._auto_config.ibc_available else "NOT FOUND"
+        tws_status = "AVAILABLE" if self._auto_config.tws_available else "NOT FOUND"
+        print("\n" + "=" * 60)
+        print("  IBKR TWS AUTO-PILOT SUPERVISOR")
+        print(f"  TWS:     {tws_status}")
+        print(f"  IBC:     {ibc_status}")
+        print(f"  Port:    {self._port}")
+        print(f"  Restart: up to {self.MAX_RESTART_ATTEMPTS} attempts")
+        print(f"  Mode:    {'DRY-RUN' if self._dry_run else 'PAPER TRADING'}")
+        print("=" * 60)
+        print("  Press Ctrl+C to stop\n")
+
+
+# ═══════════════════════════════════════════════════════════════
 # ENTRYPOINT
 # ═══════════════════════════════════════════════════════════════
 
@@ -785,6 +1188,10 @@ def main():
     parser.add_argument(
         "--dry-run", action="store_true",
         help="Connect and process bars but don't execute trades",
+    )
+    parser.add_argument(
+        "--auto", action="store_true",
+        help="Enable auto-pilot: launch TWS via IBC, auto-restart on crash",
     )
     parser.add_argument(
         "--host", type=str, default=None,
@@ -831,7 +1238,16 @@ def main():
     ))
     root_logger.addHandler(file_handler)
 
-    # nest_asyncio allows ib_insync to work inside an already-running loop
+    # ── AUTO-PILOT MODE ──
+    if args.auto:
+        supervisor = TWSSupervisor(
+            host=host, port=port,
+            client_id=client_id, dry_run=args.dry_run,
+        )
+        supervisor.run()
+        return
+
+    # ── MANUAL MODE (original behavior) ──
     import nest_asyncio
     nest_asyncio.apply()
 

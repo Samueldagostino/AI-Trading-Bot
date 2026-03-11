@@ -1,16 +1,16 @@
 """
-IBKR Order Execution Adapter
-==============================
+IBKR Order Execution Adapter — v1.3.1 (5-Contract Scale-Out)
+================================================================
 Places MNQ orders through the IBKR Client Portal Gateway REST API.
 
 Supports:
   - Market and Limit orders
-  - 2-contract scale-out: C1 (fixed target) + C2 (runner with trailing stop)
+  - 5-contract scale-out: C1 (1, canary) + C2 (1, structural) + C3 (3, delayed runner)
   - Paper trading mode only (live raises NotImplementedError)
 
 Safety rails — HARD BLOCKS that cannot be overridden:
-  1. Max 2 contracts per order (MNQ)
-  2. Max 4 open positions at any time
+  1. Max 5 contracts per order (MNQ) — matches validated backtest architecture
+  2. Max 8 open positions at any time (supports full 5-contract group + partial second)
   3. No orders outside RTH unless config explicitly allows ETH
   4. Daily loss limit check before every order ($500 default)
   5. Kill switch: daily P&L hits -$1000 -> halt all trading, cancel open orders
@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 # SAFETY CONSTANTS — DO NOT CHANGE
 # ═══════════════════════════════════════════════════════════════
-MAX_CONTRACTS_PER_ORDER = 2
-MAX_OPEN_POSITIONS = 4
+MAX_CONTRACTS_PER_ORDER = 5      # v1.3.1: C1(1) + C2(1) + C3(3) = 5
+MAX_OPEN_POSITIONS = 8           # Full 5-contract group + room for partial second
 DAILY_LOSS_LIMIT_DOLLARS = 500.0
 KILL_SWITCH_THRESHOLD_DOLLARS = 1000.0
 MNQ_POINT_VALUE = 2.0       # $2.00 per point for Micro E-mini Nasdaq
@@ -220,14 +220,19 @@ class IBKROrderExecutor:
         limit_price: float = 0.0,
         stop_loss: float = 0.0,
         c1_take_profit: float = 0.0,
+        c3_contracts: int = 3,
         instrument: str = "MNQ",
     ) -> Dict[str, OrderRecord]:
         """
-        Place the standard 2-contract scale-out entry.
+        Place the 5-contract scale-out entry (v1.3.1).
 
-        C1: 1 contract with fixed take-profit target.
-        C2: 1 contract as runner (trailing stop managed externally).
-        Both share the same initial stop-loss.
+        C1: 1 contract — canary with 5-bar time exit.
+        C2: 1 contract — structural target (swing point exit).
+        C3: 3 contracts — delayed runner (ATR trailing stop).
+             C3 enters with the group but is closed immediately
+             by the orchestrator if C1 exits at a loss.
+
+        All three share the same initial stop-loss.
         """
         # ── INSTRUMENT VALIDATION GATE ──
         rejection = self._check_instrument_validated(instrument)
@@ -235,12 +240,12 @@ class IBKROrderExecutor:
             now = datetime.now(timezone.utc)
             rejected = OrderRecord(
                 timestamp=now, side=direction, order_type="MKT",
-                contracts=2, price=limit_price, tag="BLOCKED",
+                contracts=5, price=limit_price, tag="BLOCKED",
                 accepted=False, rejection_reason=rejection,
                 state=OrderState.REJECTED,
             )
             self._log_order(rejected)
-            return {"c1": rejected, "c2": rejected}
+            return {"c1": rejected, "c2": rejected, "c3": rejected}
 
         side = OrderSide.BUY if direction == "long" else OrderSide.SELL
         order_type = (IBKROrderType.LIMIT if limit_price > 0
@@ -264,27 +269,51 @@ class IBKROrderExecutor:
             take_profit=0.0,
             tag="C2",
         )
+        c3_request = OrderRequest(
+            side=side,
+            order_type=order_type,
+            contracts=c3_contracts,
+            limit_price=limit_price,
+            stop_loss=stop_loss,
+            take_profit=0.0,
+            tag="C3",
+        )
 
         c1_record = await self.place_order(c1_request)
-        # Only place C2 if C1 was accepted
+        # Only place C2 + C3 if C1 was accepted
         if c1_record.accepted:
             c2_record = await self.place_order(c2_request)
+            c3_record = await self.place_order(c3_request)
         else:
-            # Mirror the rejection for C2
+            # Mirror the rejection for C2 and C3
+            now = datetime.now(timezone.utc)
+            reason = f"C1 rejected: {c1_record.rejection_reason}"
             c2_record = OrderRecord(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=now,
                 side=side.value,
                 order_type=order_type.value,
                 contracts=1,
                 price=limit_price,
                 tag="C2",
                 accepted=False,
-                rejection_reason=f"C1 rejected: {c1_record.rejection_reason}",
+                rejection_reason=reason,
+                state=OrderState.REJECTED,
+            )
+            c3_record = OrderRecord(
+                timestamp=now,
+                side=side.value,
+                order_type=order_type.value,
+                contracts=c3_contracts,
+                price=limit_price,
+                tag="C3",
+                accepted=False,
+                rejection_reason=reason,
                 state=OrderState.REJECTED,
             )
             self._log_order(c2_record)
+            self._log_order(c3_record)
 
-        return {"c1": c1_record, "c2": c2_record}
+        return {"c1": c1_record, "c2": c2_record, "c3": c3_record}
 
     async def modify_stop(
         self, broker_order_id: str, new_stop_price: float

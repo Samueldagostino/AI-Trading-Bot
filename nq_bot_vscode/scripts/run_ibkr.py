@@ -895,11 +895,23 @@ def main():
     root_logger.addHandler(error_handler)
 
     # Build IBKR config from env
+    raw_symbol = args.symbol or os.environ.get("IBKR_SYMBOL", "MNQ")
+
+    # Auto-resolve bare base symbols (e.g. "MNQ") to front-month ("MNQH6")
+    if len(raw_symbol) <= 3:
+        resolved_symbol = ContractRoller.get_front_month(raw_symbol)
+        logger.info(
+            "Resolved bare symbol %s -> front-month %s",
+            raw_symbol, resolved_symbol,
+        )
+    else:
+        resolved_symbol = raw_symbol
+
     ibkr_config = IBKRConfig(
         gateway_host=env_vals["IBKR_GATEWAY_HOST"],
         gateway_port=int(env_vals["IBKR_GATEWAY_PORT"]),
         account_type=env_vals["IBKR_ACCOUNT_TYPE"],
-        symbol=args.symbol or os.environ.get("IBKR_SYMBOL", "MNQ"),
+        symbol=resolved_symbol,
     )
 
     # Safety: paper mode unless explicitly live

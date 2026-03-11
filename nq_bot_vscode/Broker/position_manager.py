@@ -10,8 +10,9 @@ Responsibilities:
   2. Reconciliation loop: every 30s, query IBKR portfolio and compare
   3. Mismatch -> CRITICAL log + HALT (no auto-correction, human intervenes)
   4. Realized P&L per trade and cumulative daily P&L
-  5. Partial fill tracking (C1 fills but C2 doesn't)
+  5. Partial fill tracking (C1 fills but C2/C3 doesn't)
   6. Immediate state update on position close (no waiting for recon cycle)
+  7. 5-contract scale-out: C1 (canary) + C2 (structural) + C3 (delayed runner)
 """
 
 import asyncio
@@ -65,7 +66,7 @@ class TrackedPosition:
     contracts: int
     entry_price: float
     entry_time: datetime
-    tag: str = ""                # "C1", "C2"
+    tag: str = ""                # "C1", "C2", "C3"
 
     # Fill state
     fill_state: FillState = FillState.FILLED
@@ -84,27 +85,42 @@ class TrackedPosition:
 
 @dataclass
 class ScaleOutGroup:
-    """Groups C1 and C2 legs of a single trade entry."""
+    """Groups C1, C2, and C3 legs of a single 5-contract trade entry.
+
+    C1 (1 contract): canary — 5-bar time exit
+    C2 (1 contract): structural target — swing point exit
+    C3 (3 contracts): delayed runner — ATR trailing stop
+        C3 is only kept if C1 exits profitably.
+        If C1 loses, C3 is closed immediately.
+    """
     group_id: str
     direction: str               # "long" or "short"
     c1: Optional[TrackedPosition] = None
     c2: Optional[TrackedPosition] = None
+    c3: Optional[TrackedPosition] = None
+    c3_blocked: bool = False     # True if C3 was closed due to C1 loss
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
 
     @property
     def is_partial(self) -> bool:
-        """True if only one leg filled."""
+        """True if not all expected legs filled."""
         c1_filled = self.c1 is not None and self.c1.fill_state == FillState.FILLED
         c2_filled = self.c2 is not None and self.c2.fill_state == FillState.FILLED
-        return c1_filled != c2_filled
+        c3_filled = self.c3 is not None and self.c3.fill_state == FillState.FILLED
+        filled_count = sum([c1_filled, c2_filled, c3_filled])
+        # Partial if some but not all legs filled (c3_blocked counts as resolved)
+        if self.c3_blocked:
+            return c1_filled != c2_filled
+        return 0 < filled_count < 3
 
     @property
     def is_fully_closed(self) -> bool:
         c1_closed = self.c1 is None or not self.c1.is_open
         c2_closed = self.c2 is None or not self.c2.is_open
-        return c1_closed and c2_closed
+        c3_closed = self.c3 is None or not self.c3.is_open
+        return c1_closed and c2_closed and c3_closed
 
     @property
     def total_net_pnl(self) -> float:
@@ -113,6 +129,8 @@ class ScaleOutGroup:
             pnl += self.c1.net_pnl
         if self.c2:
             pnl += self.c2.net_pnl
+        if self.c3 and not self.c3_blocked:
+            pnl += self.c3.net_pnl
         return round(pnl, 2)
 
 
@@ -220,13 +238,14 @@ class PositionManager:
                 group.c1 = pos
             elif tag == "C2":
                 group.c2 = pos
+            elif tag == "C3":
+                group.c3 = pos
 
             # Check for partial fill
             if group.is_partial:
-                unfilled_tag = "C2" if tag == "C1" else "C1"
                 logger.warning(
-                    "PARTIAL FILL: group=%s — %s filled but %s did not",
-                    group_id, tag, unfilled_tag,
+                    "PARTIAL FILL: group=%s — %s filled, not all legs complete",
+                    group_id, tag,
                 )
 
         logger.info(
@@ -308,6 +327,8 @@ class PositionManager:
             group.c1.fill_state = FillState.UNFILLED
         elif unfilled_tag == "C2" and group.c2:
             group.c2.fill_state = FillState.UNFILLED
+        elif unfilled_tag == "C3" and group.c3:
+            group.c3.fill_state = FillState.UNFILLED
 
         logger.warning(
             "PARTIAL FILL RECORDED: group=%s — %s marked unfilled",
@@ -625,6 +646,8 @@ class PositionManager:
                     "direction": g.direction,
                     "c1_id": g.c1.position_id if g.c1 else None,
                     "c2_id": g.c2.position_id if g.c2 else None,
+                    "c3_id": g.c3.position_id if g.c3 else None,
+                    "c3_blocked": g.c3_blocked,
                     "created_at": g.created_at.isoformat(),
                 }
                 for gid, g in self._scale_out_groups.items()
@@ -683,6 +706,9 @@ class PositionManager:
                 group.c1 = self._open_positions[gdata["c1_id"]]
             if gdata.get("c2_id") and gdata["c2_id"] in self._open_positions:
                 group.c2 = self._open_positions[gdata["c2_id"]]
+            if gdata.get("c3_id") and gdata["c3_id"] in self._open_positions:
+                group.c3 = self._open_positions[gdata["c3_id"]]
+            group.c3_blocked = gdata.get("c3_blocked", False)
             self._scale_out_groups[gid] = group
 
         self._daily_realized_pnl = state.get("daily_realized_pnl", 0.0)

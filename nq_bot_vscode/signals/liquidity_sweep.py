@@ -19,12 +19,12 @@ Why HTF-first?
     stopped out immediately.  Wider HTF-based stops had 10+ pct
     higher win rate.
 
-Key Levels Tracked (same as before):
+Key Levels Tracked:
   - Prior Day High (PDH) / Prior Day Low (PDL)
   - Current Session High / Low (rolling)
   - Prior Week High / Low
-  - Session VWAP (from feature engine)
-  - Round numbers (every 50pts)
+  - Round numbers (every 100pts)
+  Note: VWAP removed after shadow analysis showed negative edge
 
 Signal Output (unchanged interface):
   direction: LONG (sell-side sweep) or SHORT (buy-side sweep)
@@ -135,7 +135,7 @@ class LiquiditySweepDetector:
     }
     MIN_SWEEP_DEPTH_DEFAULT = 10.0  # Fallback for unlisted timeframes
     STOP_BUFFER = 3.0               # Buffer beyond HTF sweep extreme for stop
-    ROUND_NUMBER_INTERVAL = 50      # Round numbers every 50pts
+    ROUND_NUMBER_INTERVAL = 100     # Round numbers every 100pts (shadow-tested: 50pt too dense)
     ENTRY_WINDOW_BARS = 15          # Max 2m bars to find entry after HTF sweep (30 min)
     REVERSAL_CONFIRM_BARS = 5       # 2m bars to confirm reversal pattern (10 min)
 
@@ -566,8 +566,8 @@ class LiquiditySweepDetector:
         if self._prior_week_low > 0:
             levels.append(KeyLevel("PWL", self._prior_week_low, "prior_week"))
 
-        if vwap > 0:
-            levels.append(KeyLevel("VWAP", vwap, "vwap"))
+        # VWAP removed — shadow analysis showed it's not a true liquidity pool
+        # (36.6% WR, -$3,427 over 590 trades vs 39.5% WR without it)
 
         if current_price > 0:
             base = int(current_price / self.ROUND_NUMBER_INTERVAL) * self.ROUND_NUMBER_INTERVAL

@@ -128,10 +128,11 @@ def get_all_subscribers() -> list[dict]:
     return merged
 
 
-def _normalize_phone(phone: str) -> str:
+def _normalize_phone(phone) -> str:
     """Normalize phone number to E.164 format."""
     if not phone:
         return ""
+    phone = str(phone).strip()
     digits = "".join(c for c in phone if c.isdigit())
     if len(digits) == 10:
         return f"+1{digits}"  # Assume US
