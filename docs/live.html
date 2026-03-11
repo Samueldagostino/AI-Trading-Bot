@@ -363,6 +363,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       });
     }
 
+    // Reverse so newest events are at the TOP
+    feed = feed.slice().reverse();
+
     var count = feed.length;
     var newItems = count - prevFeedCount;
     if(newItems < 0) newItems = count;  // Full refresh
@@ -380,7 +383,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       feed.forEach(function(ev, idx){
         var tp = ev.type || 'system';
         var icon = FEED_ICONS[tp] || '\u2022';
-        // Animate only genuinely new items (top of list)
+        // Animate the newest items (now at top of reversed list)
         var animClass = (idx < newItems && prevFeedCount > 0) ? ' feed-new' : '';
         html += '<div class="feed-item type-' + tp + animClass + '">' +
           '<div class="feed-icon ' + tp + '">' + icon + '</div>' +
@@ -472,23 +475,29 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       ctx.fillText(gp.toFixed(2), W - pad.right + 6, gy + 3);
     }
 
-    // Candles
-    var barW = Math.max(3, Math.floor(chartW / candles.length) - 2);
+    // Candles — cap bar width so fewer bars (e.g. 5m view) don't look oversized
     var gap = chartW / candles.length;
+    var barW = Math.max(3, Math.min(Math.floor(gap * 0.7), 18));
+    var wickW = candles.length <= 12 ? 2 : 1;
 
     candles.forEach(function(c, idx){
       var x = pad.left + idx * gap + gap / 2;
       var isUp = c.c >= c.o;
       var bodyTop = yP(Math.max(c.o, c.c));
       var bodyBot = yP(Math.min(c.o, c.c));
+      var bodyH = Math.max(1, bodyBot - bodyTop);
 
       // Wick
       ctx.strokeStyle = isUp ? '#2D8C4E' : '#C53D1B';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = wickW;
       ctx.beginPath(); ctx.moveTo(x, yP(c.h)); ctx.lineTo(x, yP(c.l)); ctx.stroke();
-      // Body
+      // Body with rounded corners for wider bars
       ctx.fillStyle = isUp ? '#2D8C4E' : '#C53D1B';
-      ctx.fillRect(x - barW/2, bodyTop, barW, Math.max(1, bodyBot - bodyTop));
+      if(barW >= 8 && ctx.roundRect){
+        ctx.beginPath(); ctx.roundRect(x - barW/2, bodyTop, barW, bodyH, 2); ctx.fill();
+      } else {
+        ctx.fillRect(x - barW/2, bodyTop, barW, bodyH);
+      }
     });
 
     // Entry / stop / target lines
