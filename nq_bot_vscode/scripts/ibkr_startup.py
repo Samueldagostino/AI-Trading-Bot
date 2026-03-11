@@ -143,7 +143,11 @@ class StartupChecklist:
         self._items: list = []
 
     def add(self, label: str, status: str, detail: str = "") -> None:
-        """Add a checklist item. status: 'OK', 'FAIL', 'WARN'."""
+        """Add a checklist item. status: 'OK', 'FAIL', 'WARN'.
+        If an OK entry replaces a previous FAIL for the same label, remove the FAIL."""
+        if status == "OK":
+            self._items = [(l, s, d) for l, s, d in self._items
+                           if not (l == label and s == "FAIL")]
         self._items.append((label, status, detail))
 
     def print_checklist(self) -> None:
