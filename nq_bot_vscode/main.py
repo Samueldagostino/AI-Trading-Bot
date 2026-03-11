@@ -30,6 +30,7 @@ from config.constants import (
     HTF_STRENGTH_GATE,
     UCL_FVG_CONFLUENCE_BOOST,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
+    AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
 )
 from config.validator import validate_config
 from database.connection import DatabaseManager
@@ -192,6 +193,9 @@ class TradingOrchestrator:
         logger.info(f"  Exec TF:      {self._execution_tf}")
         logger.info(f"  Sweep Det:    {'ENABLED' if self._sweep_enabled else 'DISABLED'} "
                      f"(min score {SWEEP_MIN_SCORE}, confluence +{SWEEP_CONFLUENCE_BONUS})")
+        logger.info(f"  Aggregator:   {'STANDALONE ENABLED' if AGGREGATOR_STANDALONE_ENABLED else 'CONTEXT ONLY'} "
+                     f"(min score {AGGREGATOR_STANDALONE_MIN_SCORE})")
+        logger.info(f"  Trigger Mode: {'DUAL (sweep + aggregator)' if AGGREGATOR_STANDALONE_ENABLED else 'SWEEP ONLY (PATH C)'}")
         logger.info("=" * 60)
 
         if not skip_db:
@@ -436,25 +440,29 @@ class TradingOrchestrator:
             current_time=bar.timestamp,
         )
 
-        # === PATH C: 4-LAYER DECISION ENGINE ===
+        # === PATH C+: DUAL-TRIGGER DECISION ENGINE ===
         # Layer 1: HTF Gate (hard filter — enforced in aggregator)
         # Layer 2: Structural context (aggregator, OB, FVG — boost sweep score)
-        # Layer 3: Entry trigger (SWEEP ONLY — only sweeps generate trades)
+        # Layer 3: Entry trigger — TWO independent paths:
+        #   PATH A: Liquidity sweep (primary) — sweeps generate trades at HC threshold
+        #   PATH B: Aggregator standalone (re-enabled Mar 2026) — high-conviction
+        #           aggregator signals trigger trades independently
         # Layer 4: Risk calibration (downstream HC gates + risk engine)
         #
-        # Non-sweep signal sources are demoted to contextual score modifiers.
-        # The aggregator alone CANNOT trigger trades.
+        # Backtest evidence: aggregator-only trades produced +$12,626 across 1,025
+        # trades.  Sweeps added +$9,896 across 338 trades.  Both paths are profitable
+        # independently — running them together maximizes opportunity capture.
         has_signal = signal and signal.should_trade
         has_sweep = (sweep_signal is not None and
                      sweep_signal.score >= SWEEP_MIN_SCORE)
 
         entry_direction = None
         entry_score = 0.0
-        entry_source = None  # "sweep" or "ucl_confirmed_*" only
+        entry_source = None  # "sweep", "aggregator", or "ucl_confirmed_*"
         sweep_stop_override = None
 
         if has_sweep:
-            # Layer 3: Sweep is the ONLY entry trigger
+            # PATH A: Sweep entry trigger (primary)
             entry_direction = "long" if sweep_signal.direction == "LONG" else "short"
             entry_score = sweep_signal.score
             entry_source = "sweep"
@@ -495,12 +503,34 @@ class TradingOrchestrator:
                 f"Stop: {stop_str}"
             )
 
+        elif has_signal and AGGREGATOR_STANDALONE_ENABLED:
+            # PATH B: Aggregator standalone trigger (re-enabled Mar 2026)
+            # Only fires when aggregator hits high conviction on its own
+            if signal.combined_score >= AGGREGATOR_STANDALONE_MIN_SCORE:
+                entry_direction = "long" if signal.direction == SignalDirection.LONG else "short"
+                entry_score = signal.combined_score
+                entry_source = "aggregator"
+                # Aggregator uses ATR-based stops (no sweep stop override)
+                sweep_stop_override = None
+                logger.info(
+                    f"AGGREGATOR STANDALONE: {entry_direction} | "
+                    f"Score: {entry_score:.3f} (threshold {AGGREGATOR_STANDALONE_MIN_SCORE}) | "
+                    f"Source: aggregator high-conviction"
+                )
+            else:
+                agg_dir = "long" if signal.direction == SignalDirection.LONG else "short"
+                logger.debug(
+                    f"AGGREGATOR BELOW THRESHOLD: {agg_dir} "
+                    f"score={signal.combined_score:.3f} < {AGGREGATOR_STANDALONE_MIN_SCORE} "
+                    f"— no standalone trade"
+                )
+
         elif has_signal:
-            # PATH C: Aggregator alone CANNOT trigger trades — context only
+            # AGGREGATOR_STANDALONE_ENABLED is False — context only (legacy PATH C)
             agg_dir = "long" if signal.direction == SignalDirection.LONG else "short"
             logger.debug(
                 f"CONTEXT ONLY (no sweep): aggregator {agg_dir} "
-                f"score={signal.combined_score:.3f} — no trade (sweep required)"
+                f"score={signal.combined_score:.3f} — no trade (standalone disabled)"
             )
 
         # ── Shadow rejection helper ──────────────────────────────────

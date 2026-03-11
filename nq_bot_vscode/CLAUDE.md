@@ -134,16 +134,21 @@ Detects institutional stop hunts at key structural levels. Runs on every executi
 - HTF alignment bonus: +0.10 (sweep direction matches HTF bias)
 - RTH open bonus: +0.10 (first 30min of RTH)
 
-### Entry Mode: PATH C (Sweep-Only Architecture)
+### Entry Mode: PATH C+ (Dual-Trigger Architecture)
 
-v1.3.1 uses **PATH C**: only liquidity sweeps can trigger entries. The signal aggregator provides Layer 2 context boosts but cannot independently trigger trades.
+v1.3.2 uses **PATH C+**: both liquidity sweeps AND high-conviction aggregator signals can independently trigger trades. This was re-enabled Mar 2026 after analysis showed aggregator-only trades produced +$12,626 across 1,025 trades — more total profit than sweep-only (+$9,896 across 338 trades). There was no documented evidence that demoting the aggregator to context-only (original PATH C) improved performance.
 
 | Mode | Condition | Behavior |
 |------|-----------|----------|
-| **Sweep-only** | Sweep score >= 0.50 | Sweep acts as sole signal source (must pass HC >= 0.60) |
+| **Sweep trigger** | Sweep score >= 0.50 | Sweep acts as primary signal source (must pass HC >= 0.75) |
 | **Confluence** | Sweep + aggregator alignment | Score boosted by context boosts (+0.05 each for aggregator, OB, FVG) |
+| **Aggregator standalone** | Aggregator score >= 0.75 (no sweep) | Aggregator triggers trade independently at high conviction |
 
 HTF bias disagreement applies a -0.10 score penalty (soft gate, not a hard block).
+
+Config flags in `config/constants.py`:
+- `AGGREGATOR_STANDALONE_ENABLED = True` — enables/disables aggregator standalone path
+- `AGGREGATOR_STANDALONE_MIN_SCORE = 0.75` — minimum score for aggregator to trigger independently
 
 ### Key Methods
 - `update_bar(bar, vwap, htf_bias, is_rth)` → `Optional[SweepSignal]`

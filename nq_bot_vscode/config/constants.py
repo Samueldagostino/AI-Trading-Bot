@@ -69,6 +69,16 @@ CONTEXT_AGGREGATOR_BOOST: float = 0.05   # aggregator direction agrees with swee
 CONTEXT_OB_BOOST: float = 0.05           # order block near sweep price
 CONTEXT_FVG_BOOST: float = 0.05          # FVG near sweep price
 
+# ── AGGREGATOR STANDALONE TRIGGER (PATH C+ dual-trigger) ──────────
+# Re-enables aggregator as an independent entry trigger when it reaches
+# high conviction.  Backtest data showed aggregator-only trades produced
+# +$12,626 across 1,025 trades — more total profit than sweep-only.
+# PATH C demoted the aggregator to context-only, but there's no documented
+# evidence that removing standalone triggers improved anything.
+# Mar 2026: Re-enabled alongside sweeps as a dual-trigger architecture.
+AGGREGATOR_STANDALONE_ENABLED: bool = True
+AGGREGATOR_STANDALONE_MIN_SCORE: float = 0.75  # Must meet HC gate independently
+
 # ── TIMEFRAMES ────────────────────────────────────────────────────
 # Intraday-only HTF bias: 5m + 15m (relevant to 10-min C1 scalp window)
 # Higher TFs (30m, 1H, 4H, 1D) removed — irrelevant for scalp timing.
