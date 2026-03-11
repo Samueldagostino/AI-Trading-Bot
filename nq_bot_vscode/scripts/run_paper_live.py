@@ -36,8 +36,8 @@ Port reference:
 Requires TWS / IB Gateway running with API access enabled.
 """
 
-import nest_asyncio
-nest_asyncio.apply()
+from ib_insync import util as _ib_util
+_ib_util.patchAsyncio()
 
 import argparse
 import asyncio
@@ -1083,8 +1083,8 @@ All circuit breakers require manual restart after tripping.
         help="Simulate without IBKR connection (uses random synthetic data)",
     )
     parser.add_argument(
-        "--max-daily-loss", type=float, default=500.0,
-        help="Maximum daily loss before halting (default: $500)",
+        "--max-daily-loss", type=float, default=1500.0,
+        help="Maximum daily loss before halting (default: $1500)",
     )
     parser.add_argument(
         "--log-level", type=str, default="INFO",
@@ -1135,7 +1135,7 @@ All circuit breakers require manual restart after tripping.
                 log_level=args.log_level,
                 port=args.port,
             )
-            loop = asyncio.new_event_loop()
+            loop = asyncio.get_event_loop()
 
             def _startup_signal_handler():
                 logger.info("Shutdown signal received (SIGINT/SIGTERM)")
@@ -1152,8 +1152,6 @@ All circuit breakers require manual restart after tripping.
             except Exception:
                 logger.critical("UNHANDLED EXCEPTION:\n%s", traceback.format_exc())
                 sys.exit(1)
-            finally:
-                loop.close()
             return
         except ImportError:
             logger.info("ibkr_startup not available, falling back to direct runner")
@@ -1166,7 +1164,7 @@ All circuit breakers require manual restart after tripping.
     )
 
     # Event loop with signal handlers
-    loop = asyncio.new_event_loop()
+    loop = asyncio.get_event_loop()
 
     def _signal_handler():
         logger.info("Shutdown signal received (SIGINT/SIGTERM)")

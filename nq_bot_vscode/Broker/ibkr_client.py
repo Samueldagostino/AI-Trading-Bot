@@ -21,17 +21,19 @@ Env vars:
 SECURITY: This module NEVER logs credentials or account numbers.
 """
 
-import nest_asyncio
-nest_asyncio.apply()
-
 import asyncio
 import logging
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 
 from ib_insync import IB, Contract, Future, MarketOrder, LimitOrder, StopOrder, util
+
+# Use ib_insync's own patcher instead of nest_asyncio — fixes
+# "Future attached to a different loop" on Windows Python 3.10+
+util.patchAsyncio()
 
 from features.engine import Bar
 
@@ -146,7 +148,7 @@ class IBKRClient:
         cid = client_id or self._client_id
 
         try:
-            self._ib.connect(h, p, clientId=cid)
+            await self._ib.connectAsync(h, p, clientId=cid)
             self._reconnect_attempts = 0
             self._last_heartbeat = time.monotonic()
             logger.info("Connected to TWS at %s:%d (clientId=%d)", h, p, cid)
@@ -481,7 +483,7 @@ class IBKRClient:
             await asyncio.sleep(delay)
 
             try:
-                self._ib.connect(
+                await self._ib.connectAsync(
                     self._host, self._port, clientId=self._client_id
                 )
                 if self._ib.isConnected():

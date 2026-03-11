@@ -200,8 +200,8 @@ class ScaleOutConfig:
 class RiskConfig:
     """Tuned for $50K, 2x MNQ."""
     account_size: float = 50_000.0
-    max_risk_per_trade_pct: float = 1.0      # $500 max risk per trade
-    max_daily_loss_pct: float = 1.0          # $500 daily limit (v1.3.1 validated)
+    max_risk_per_trade_pct: float = 0.8      # $400 max risk per trade (tighter per-trade cap)
+    max_daily_loss_pct: float = 3.0          # $1,500 daily limit (room for multiple trades)
     max_weekly_loss_pct: float = 5.0
     max_total_drawdown_pct: float = 10.0     # $5,000 = kill switch
     
