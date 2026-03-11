@@ -149,16 +149,19 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .notify-section:hover{box-shadow:0 4px 12px rgba(61,46,34,0.06)}
 .notify-title{font-size:14px;font-weight:700;color:var(--accent);letter-spacing:1.5px;margin-bottom:4px;text-transform:uppercase}
 .notify-subtitle{font-size:12px;color:var(--text2);margin-bottom:18px;line-height:1.5}
-.notify-form{display:flex;gap:10px;justify-content:center;align-items:stretch;max-width:440px;margin:0 auto}
-.notify-input{flex:1;background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s}
+.notify-form{display:flex;gap:0;justify-content:center;align-items:stretch;max-width:460px;margin:0 auto}
+.notify-country{background:var(--surface-alt);border:1px solid var(--border);border-right:none;border-radius:8px 0 0 8px;padding:0 12px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23B8A48E'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;padding-right:24px;min-width:90px;transition:border-color .2s}
+.notify-country:focus{border-color:var(--accent)}
+.notify-input{flex:1;background:var(--surface-alt);border:1px solid var(--border);border-radius:0;padding:12px 16px;color:var(--text);font-family:var(--mono);font-size:14px;outline:none;transition:border-color .2s;letter-spacing:1px}
 .notify-input:focus{border-color:var(--accent)}
-.notify-input::placeholder{color:var(--text-muted)}
-.notify-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:12px 24px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;white-space:nowrap}
+.notify-input::placeholder{color:var(--text-muted);letter-spacing:0}
+.notify-btn{background:var(--accent);color:#fff;border:none;border-radius:0 8px 8px 0;padding:12px 24px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;white-space:nowrap}
 .notify-btn:hover{opacity:.85}
 .notify-btn:disabled{opacity:.5;cursor:not-allowed}
 .notify-msg{font-size:11px;margin-top:12px;min-height:16px}
 .notify-msg.ok{color:var(--green)}.notify-msg.err{color:var(--red)}
 .notify-privacy{font-size:9px;color:var(--text-muted);margin-top:10px}
+@media(max-width:480px){.notify-form{flex-wrap:wrap}.notify-country{border-radius:8px 8px 0 0;border-right:1px solid var(--border);border-bottom:none;width:100%}.notify-input{border-radius:0}.notify-btn{border-radius:0 0 8px 8px;width:100%;text-align:center}}
 
 /* FOOTER */
 .footer{padding:20px 0;margin-top:24px;border-top:1px solid var(--border-light);color:var(--text-muted);font-size:10px;text-align:center;letter-spacing:0.3px}
@@ -253,12 +256,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     return 'poor';
   }
 
-  function botState(d){
-    if(!d || d.status !== 'LIVE') return 'offline';
-    if(d.trades_today > 0 || (d.state && d.state.mode === 'TRADING')) return 'trading';
-    return 'monitoring';
-  }
-
   function stateLabel(s){
     if(s === 'trading') return 'TRADING';
     if(s === 'monitoring') return 'MONITORING';
@@ -270,9 +267,26 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
   function isConnected(d){
     if(!d) return false;
+    // If the data file itself is older than 5 minutes, the bot is NOT connected
+    // (publish_stats.py updates every 60s — if data is 5min old, publisher is dead)
+    if(d.updated){
+      var updatedAge = (Date.now() - new Date(d.updated).getTime()) / 1000;
+      if(updatedAge > 300) return false;
+    }
     var hb = d.heartbeat || {};
     var q = hb.connection_quality || '';
     return d.status === 'LIVE' && (q === 'good' || q === 'fair');
+  }
+
+  function botState(d){
+    if(!d || d.status !== 'LIVE') return 'offline';
+    // Override: if data is older than 5 minutes, treat as offline
+    if(d.updated){
+      var updatedAge = (Date.now() - new Date(d.updated).getTime()) / 1000;
+      if(updatedAge > 300) return 'offline';
+    }
+    if(d.trades_today > 0 || (d.state && d.state.mode === 'TRADING')) return 'trading';
+    return 'monitoring';
   }
 
   function renderSparkline(){
@@ -588,7 +602,39 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         '<div class="notify-title">Get Notified</div>'+
         '<div class="notify-subtitle">Enter your phone number to receive a text when the simulation goes live.</div>'+
         '<form class="notify-form" id="notifyForm">'+
-          '<input class="notify-input" id="phoneInput" type="tel" placeholder="+1 (555) 123-4567" required>'+
+          '<select class="notify-country" id="countryCode">'+
+            '<option value="+1">US +1</option>'+
+            '<option value="+44">UK +44</option>'+
+            '<option value="+61">AU +61</option>'+
+            '<option value="+33">FR +33</option>'+
+            '<option value="+49">DE +49</option>'+
+            '<option value="+34">ES +34</option>'+
+            '<option value="+39">IT +39</option>'+
+            '<option value="+81">JP +81</option>'+
+            '<option value="+82">KR +82</option>'+
+            '<option value="+86">CN +86</option>'+
+            '<option value="+91">IN +91</option>'+
+            '<option value="+52">MX +52</option>'+
+            '<option value="+55">BR +55</option>'+
+            '<option value="+7">RU +7</option>'+
+            '<option value="+971">AE +971</option>'+
+            '<option value="+65">SG +65</option>'+
+            '<option value="+41">CH +41</option>'+
+            '<option value="+31">NL +31</option>'+
+            '<option value="+46">SE +46</option>'+
+            '<option value="+47">NO +47</option>'+
+            '<option value="+353">IE +353</option>'+
+            '<option value="+64">NZ +64</option>'+
+            '<option value="+48">PL +48</option>'+
+            '<option value="+351">PT +351</option>'+
+            '<option value="+57">CO +57</option>'+
+            '<option value="+56">CL +56</option>'+
+            '<option value="+54">AR +54</option>'+
+            '<option value="+234">NG +234</option>'+
+            '<option value="+27">ZA +27</option>'+
+            '<option value="+254">KE +254</option>'+
+          '</select>'+
+          '<input class="notify-input" id="phoneInput" type="tel" inputmode="numeric" pattern="[0-9]*" placeholder="Phone number" required autocomplete="tel-national">'+
           '<button class="notify-btn" id="notifyBtn" type="submit">NOTIFY ME</button>'+
         '</form>'+
         '<div class="notify-msg" id="notifyMsg"></div>'+
@@ -603,6 +649,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     // Attach notify form handler after render
     var nf = $('notifyForm');
     if(nf) nf.addEventListener('submit', handleNotify);
+    enforceNumeric();
   }
 
   function tickTimestamps(){
@@ -623,19 +670,31 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   // ─── Notification signup ───
   var NOTIFY_ENDPOINT = 'https://script.google.com/macros/s/AKfycbysYfimJtDpLRkFmumo9_T8Q2DJNCNQ9zsf8a07WnowxHqaJuGUC_HKtZmvDBiwubI/exec';
 
+  // Strip non-digits on keypress
+  function enforceNumeric(){
+    var el = $('phoneInput');
+    if(el){
+      el.addEventListener('input', function(){
+        this.value = this.value.replace(/[^0-9]/g, '');
+      });
+    }
+  }
+
   function handleNotify(e){
     e.preventDefault();
-    var phone = $('phoneInput').value.trim();
+    var raw = $('phoneInput').value.trim();
+    var digits = raw.replace(/[^0-9]/g, '');
+    var code = $('countryCode').value;
     var msg = $('notifyMsg');
     var btn = $('notifyBtn');
 
-    var digits = phone.replace(/[\s\-\(\)\+]/g, '');
-    if(digits.length < 7 || digits.length > 15){
-      msg.textContent = 'Please enter a valid phone number.';
+    if(digits.length < 6 || digits.length > 15){
+      msg.textContent = 'Please enter a valid phone number (digits only).';
       msg.className = 'notify-msg err';
       return;
     }
 
+    var fullPhone = code + digits;
     btn.disabled = true;
     btn.textContent = 'SENDING...';
     msg.textContent = '';
@@ -643,7 +702,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     fetch(NOTIFY_ENDPOINT, {
       method: 'POST',
       mode: 'no-cors',
-      body: JSON.stringify({ phone: phone, timestamp: new Date().toISOString(), source: 'live-page' }),
+      body: JSON.stringify({ phone: fullPhone, timestamp: new Date().toISOString(), source: 'live-page' }),
     })
     .then(function(){
       msg.textContent = "You're on the list! We'll text you when the bot goes live.";
