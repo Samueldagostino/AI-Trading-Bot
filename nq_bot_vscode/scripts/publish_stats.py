@@ -273,10 +273,15 @@ def _build_activity_feed(
     # ── 4. Trade decisions (newest entries not already in feed) ──
     # We track by timestamp to avoid duplicates across cycles
     existing_times = {e.get("_ts") for e in _accumulated_feed if e.get("_ts")}
+    # Only show decisions from the current publisher session (skip stale ones)
+    session_start = _PUBLISHER_START.isoformat()
     for d in decisions[-20:]:
         ts = d.get("timestamp", "")
         if ts in existing_times:
             continue  # Already in feed
+        # Skip decisions older than this publisher session
+        if ts and ts < session_start:
+            continue
 
         # Format time
         time_et = ""
@@ -648,25 +653,27 @@ def write_stats(stats: dict) -> None:
 
 
 def git_commit_and_push(dry_run: bool = False) -> bool:
-    """Commit and push live_stats.json to GitHub."""
+    """Commit and push live_stats.json to GitHub.
+
+    Strategy: amend the last commit if it was a stats update (keeps repo clean),
+    otherwise create a new commit.  Force-push with lease for safety.
+    If push fails due to divergence, reset to remote and re-commit.
+    """
     try:
-        # Stage the stats file and trade viz file
         rel_path = OUTPUT_FILE.relative_to(ROOT_DIR)
         rel_viz_path = TRADE_VIZ_FILE.relative_to(ROOT_DIR)
+
+        # Stage the stats files
         subprocess.run(
             ["git", "add", str(rel_path), str(rel_viz_path)],
             cwd=str(ROOT_DIR),
-            capture_output=True,
-            text=True,
-            timeout=30,
+            capture_output=True, text=True, timeout=30,
         )
 
         # Check if there are changes to commit
         result = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
-            cwd=str(ROOT_DIR),
-            capture_output=True,
-            timeout=30,
+            cwd=str(ROOT_DIR), capture_output=True, timeout=30,
         )
         if result.returncode == 0:
             logger.debug("No changes to commit")
@@ -674,52 +681,77 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
 
         if dry_run:
             logger.info("[DRY-RUN] Would commit and push live_stats.json")
-            # Unstage in dry-run
             subprocess.run(
                 ["git", "reset", "HEAD", str(rel_path)],
-                cwd=str(ROOT_DIR),
-                capture_output=True,
-                timeout=30,
+                cwd=str(ROOT_DIR), capture_output=True, timeout=30,
             )
             return True
 
-        # Commit
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        result = subprocess.run(
-            ["git", "commit", "-m", f"stats: update live_stats.json ({timestamp})"],
-            cwd=str(ROOT_DIR),
-            capture_output=True,
-            text=True,
-            timeout=30,
+
+        # Check if last commit was a stats update — if so, amend it
+        last_msg = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=10,
         )
+        if last_msg.returncode == 0 and last_msg.stdout.strip().startswith("stats:"):
+            # Amend the previous stats commit (avoids piling up hundreds of commits)
+            result = subprocess.run(
+                ["git", "commit", "--amend", "-m",
+                 f"stats: update live_stats.json ({timestamp})"],
+                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
+            )
+        else:
+            # New commit (after a code commit)
+            result = subprocess.run(
+                ["git", "commit", "-m",
+                 f"stats: update live_stats.json ({timestamp})"],
+                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
+            )
+
         if result.returncode != 0:
             logger.warning("Git commit failed: %s", result.stderr)
             return False
 
-        # Push with retry (use --set-upstream on first attempt)
-        for attempt in range(4):
-            push_cmd = ["git", "push"]
-            if attempt == 0:
-                push_cmd = ["git", "push", "--set-upstream", "origin", "HEAD"]
+        # Push (force-with-lease because we may have amended)
+        for attempt in range(3):
             result = subprocess.run(
-                push_cmd,
-                cwd=str(ROOT_DIR),
-                capture_output=True,
-                text=True,
-                timeout=60,
+                ["git", "push", "--force-with-lease", "origin", "HEAD"],
+                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=60,
             )
             if result.returncode == 0:
                 logger.info("Stats pushed to GitHub")
                 return True
 
-            wait = 2 ** (attempt + 1)
-            logger.warning(
-                "Git push failed (attempt %d/4): %s — retrying in %ds",
-                attempt + 1, result.stderr.strip(), wait,
-            )
-            time.sleep(wait)
+            stderr = result.stderr.strip()
+            logger.warning("Git push failed (attempt %d/3): %s", attempt + 1, stderr)
 
-        logger.error("Git push failed after 4 attempts")
+            # If diverged from remote, fetch and reset to remote, then re-apply
+            if "rejected" in stderr or "fetch first" in stderr or "non-fast-forward" in stderr:
+                logger.info("Diverged from remote — syncing...")
+                subprocess.run(
+                    ["git", "fetch", "origin", "main"],
+                    cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
+                )
+                subprocess.run(
+                    ["git", "reset", "--soft", "origin/main"],
+                    cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=10,
+                )
+                # Re-stage and commit
+                subprocess.run(
+                    ["git", "add", str(rel_path), str(rel_viz_path)],
+                    cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m",
+                     f"stats: update live_stats.json ({timestamp})"],
+                    cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
+                )
+                continue
+
+            time.sleep(2 ** (attempt + 1))
+
+        logger.error("Git push failed after 3 attempts")
         return False
 
     except subprocess.TimeoutExpired:
