@@ -504,6 +504,132 @@ def build_sanitized_stats() -> dict:
     }
 
 
+TRADE_VIZ_FILE = DOCS_DATA_DIR / "trade_viz_data.json"
+
+
+def build_trade_viz_data() -> dict | None:
+    """
+    Build a simplified viz_data.json from paper_trades.json + candle_buffer.json.
+    This feeds the Forensic Analyzer page with live/paper trade data.
+
+    SECURITY: Prices are publicly available market data. PnL is already
+    in paper_trades.json as dollar amounts — we convert to points for the
+    analyzer (which works in points, not dollars).
+
+    Returns None if no trade data available.
+    """
+    trades_raw = _read_json_safe(LOGS_DIR / "paper_trades.json", default=[])
+    if not isinstance(trades_raw, list) or not trades_raw:
+        return None
+
+    candles_raw = _read_json_safe(LOGS_DIR / "candle_buffer.json", default=[])
+
+    # Build candle array for the chart
+    candles = []
+    if isinstance(candles_raw, list):
+        for c in candles_raw:
+            candles.append({
+                "time": c.get("t", ""),
+                "open": c.get("o", 0),
+                "high": c.get("h", 0),
+                "low": c.get("l", 0),
+                "close": c.get("c", 0),
+                "volume": c.get("v", 0),
+            })
+
+    # Build trade entry/exit pairs for the analyzer
+    # paper_trades.json has flat records with trade_closed events
+    trades = []
+    for i, t in enumerate(trades_raw):
+        if t.get("event") != "trade_closed":
+            continue
+
+        direction = t.get("direction", "long")
+        entry_price = t.get("entry_price", 0)
+        total_pnl = t.get("total_pnl", 0)
+        c1_pnl = t.get("c1_pnl", 0)
+        c2_pnl = t.get("c2_pnl", 0)
+        c1_reason = t.get("c1_reason", "stop")
+        c2_reason = t.get("c2_reason", "stop")
+
+        # Determine dominant exit type
+        if "trail" in c1_reason or "trail" in c2_reason:
+            exit_type = "trailing_stop"
+        elif "pt2" in c2_reason or "target" in c2_reason:
+            exit_type = "pt2_target"
+        elif "pt1" in c1_reason or "partial" in c1_reason:
+            exit_type = "pt1_partial"
+        elif "be" in c1_reason or "breakeven" in c1_reason:
+            exit_type = "be_plus"
+        else:
+            exit_type = "stop_loss"
+
+        # Calculate approximate exit price from PnL
+        # PnL = (exit - entry) * qty * point_value for long
+        # Assume 2-lot @ $2/pt
+        pts_pnl = total_pnl / (2 * 2.0) if total_pnl else 0
+        if direction == "long":
+            exit_price = entry_price + pts_pnl
+        else:
+            exit_price = entry_price - pts_pnl
+
+        stop_dist = t.get("stop_distance", abs(pts_pnl) if total_pnl < 0 else 10.0)
+
+        trades.append({
+            "id": i + 1,
+            "entryTime": t.get("timestamp", ""),
+            "exitTime": t.get("timestamp", ""),  # Same for closed trades
+            "side": direction,
+            "qty": 2,
+            "entryPrice": round(entry_price, 2),
+            "exitPrice": round(exit_price, 2),
+            "stopPrice": round(entry_price - stop_dist if direction == "long" else entry_price + stop_dist, 2),
+            "tp1Price": round(entry_price + stop_dist * 1.5 if direction == "long" else entry_price - stop_dist * 1.5, 2),
+            "tp2Price": round(entry_price + stop_dist * 3.0 if direction == "long" else entry_price - stop_dist * 3.0, 2),
+            "stopDist": round(stop_dist, 1),
+            "signalScore": t.get("signal_score", 0.85),
+            "regime": t.get("regime", "unknown"),
+            "htfBias": t.get("htf_bias", "neutral"),
+            "exitType": exit_type,
+            "pnl": round(total_pnl, 2),
+            "c1Pnl": round(c1_pnl, 2),
+            "c2Pnl": round(c2_pnl, 2),
+            "slippage": round(t.get("total_slippage_pts", 1.5) * 2.0, 2),
+            "rMultiple": round(pts_pnl / stop_dist, 2) if stop_dist > 0 else 0,
+            "mfe": 0,
+            "mae": 0,
+            "holdBars": t.get("hold_bars", 5),
+            "isCompliant": True,
+        })
+
+    if not trades:
+        return None
+
+    return {
+        "candles": candles,
+        "trades": trades,
+        "source": "live_paper_trading",
+        "updated": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def write_trade_viz(viz_data: dict) -> None:
+    """Write trade viz data atomically to docs/data/trade_viz_data.json."""
+    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = TRADE_VIZ_FILE.with_suffix(".json.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(viz_data, f, indent=2, default=str)
+        os.replace(str(tmp_path), str(TRADE_VIZ_FILE))
+        logger.debug("Trade viz written to %s", TRADE_VIZ_FILE)
+    except OSError as e:
+        logger.warning("Failed to write trade viz: %s", e)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def write_stats(stats: dict) -> None:
     """Write stats atomically to docs/data/live_stats.json."""
     DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -524,10 +650,11 @@ def write_stats(stats: dict) -> None:
 def git_commit_and_push(dry_run: bool = False) -> bool:
     """Commit and push live_stats.json to GitHub."""
     try:
-        # Stage only the stats file
+        # Stage the stats file and trade viz file
         rel_path = OUTPUT_FILE.relative_to(ROOT_DIR)
+        rel_viz_path = TRADE_VIZ_FILE.relative_to(ROOT_DIR)
         subprocess.run(
-            ["git", "add", str(rel_path)],
+            ["git", "add", str(rel_path), str(rel_viz_path)],
             cwd=str(ROOT_DIR),
             capture_output=True,
             text=True,
@@ -649,6 +776,12 @@ def run_loop(interval: int = 60, dry_run: bool = False) -> None:
         try:
             stats = build_sanitized_stats()
             write_stats(stats)
+
+            # Build and write trade viz data for the Analyzer page
+            viz_data = build_trade_viz_data()
+            if viz_data:
+                write_trade_viz(viz_data)
+                logger.debug("Trade viz: %d trades", len(viz_data.get("trades", [])))
 
             logger.info(
                 "Published: status=%s bars=%d trades=%d wr=%.1f%% pf=%.2f pnl=%.3f%%",

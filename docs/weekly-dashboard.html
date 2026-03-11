@@ -17,12 +17,17 @@
     --green: #2D8C4E; --red: #C53D1B; --blue: #5B7BA8;
     --yellow: #B08515; --purple: #8B6DB0; --cyan: #4A9A8E;
     --orange: #C07020;
+    --shadow-sm: 0 1px 2px rgba(61,46,34,0.04);
+    --shadow-md: 0 2px 8px rgba(61,46,34,0.06), 0 1px 2px rgba(61,46,34,0.04);
+    --shadow-lg: 0 4px 16px rgba(61,46,34,0.08), 0 2px 4px rgba(61,46,34,0.04);
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background: var(--bg); color: var(--text); line-height: 1.5;
     padding: 76px 24px 24px; min-height: 100vh;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   }
 
   /* NAV BAR */
@@ -34,8 +39,8 @@
   .nav-link.active{color:#8B6914;border-bottom-color:#8B6914}
 
   .header { text-align: center; margin-bottom: 32px; }
-  .header h1 { font-size: 28px; font-weight: 600; margin-bottom: 4px; }
-  .header p { color: var(--text2); font-size: 14px; }
+  .header h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.02em; }
+  .header p { color: var(--text2); font-size: 13px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.02em; }
 
   .kpi-row {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -43,11 +48,14 @@
   }
   .kpi {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 16px; text-align: center;
+    border-radius: 12px; padding: 18px 16px; text-align: center;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease);
   }
-  .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text2); margin-bottom: 4px; }
-  .kpi-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .kpi-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .kpi:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+  .kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); margin-bottom: 6px; font-weight: 600; }
+  .kpi-value { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; font-family: 'JetBrains Mono', monospace; }
+  .kpi-sub { font-size: 11px; color: var(--text2); margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
   .green { color: var(--green); } .red { color: var(--red); }
   .blue { color: var(--blue); } .yellow { color: var(--yellow); }
   .purple { color: var(--purple); } .cyan { color: var(--cyan); }
@@ -58,18 +66,21 @@
   .controls label { font-size: 12px; color: var(--text2); margin-right: 4px; }
   .pill-group { display: flex; gap: 2px; }
   .pill {
-    padding: 5px 12px; font-size: 12px; border-radius: 16px; cursor: pointer;
+    padding: 6px 14px; font-size: 12px; border-radius: 20px; cursor: pointer;
     border: 1px solid var(--border); background: var(--surface); color: var(--text2);
-    transition: all 0.15s;
+    transition: all 0.2s var(--ease); font-weight: 500;
   }
-  .pill:hover { border-color: #8B6914; color: var(--text); }
-  .pill.active { background: #8B6914; color: #fff; border-color: #8B6914; }
+  .pill:hover { border-color: #8B6914; color: var(--text); box-shadow: var(--shadow-sm); }
+  .pill.active { background: #8B6914; color: #fff; border-color: #8B6914; box-shadow: 0 2px 8px rgba(139,105,20,0.25); }
 
   .chart-section {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 20px; margin-bottom: 20px;
+    border-radius: 14px; padding: 24px; margin-bottom: 20px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.25s var(--ease);
   }
-  .chart-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .chart-section:hover { box-shadow: var(--shadow-md); }
+  .chart-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.01em; }
   .chart-subtitle { font-size: 11px; color: var(--text2); margin-bottom: 16px; }
 
   .equity-chart { width: 100%; height: 200px; position: relative; }
@@ -83,23 +94,25 @@
     display: grid; gap: 2px; margin-top: 8px;
   }
   .hm-cell {
-    border-radius: 3px; font-size: 10px; display: flex; align-items: center;
-    justify-content: center; min-height: 28px; cursor: default;
+    border-radius: 5px; font-size: 10px; display: flex; align-items: center;
+    justify-content: center; min-height: 32px; cursor: default;
     font-variant-numeric: tabular-nums; position: relative;
+    font-family: 'JetBrains Mono', monospace; font-weight: 600;
+    transition: transform 0.15s var(--ease);
   }
-  .hm-cell:hover { outline: 2px solid var(--blue); z-index: 1; }
+  .hm-cell:hover { outline: 2px solid var(--blue); z-index: 1; transform: scale(1.05); }
   .hm-header { font-size: 10px; color: var(--text2); text-align: center; font-weight: 600; }
 
   .table-wrap { overflow-x: auto; margin-top: 8px; }
   table {
     width: 100%; border-collapse: collapse; font-size: 12px;
-    font-variant-numeric: tabular-nums;
+    font-variant-numeric: tabular-nums; font-family: 'JetBrains Mono', 'Inter', monospace;
   }
   th {
-    text-align: right; padding: 6px 10px; border-bottom: 2px solid var(--border);
-    color: var(--text2); font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.04em; white-space: nowrap; cursor: pointer;
-    user-select: none;
+    text-align: right; padding: 8px 10px; border-bottom: 2px solid var(--border);
+    color: var(--text2); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; white-space: nowrap; cursor: pointer;
+    user-select: none; font-family: 'Inter', sans-serif; font-weight: 600;
   }
   th:first-child { text-align: left; }
   th:hover { color: #8B6914; }
@@ -113,9 +126,9 @@
 
   .tooltip {
     position: fixed; background: #FFFFFF; border: 1px solid var(--border);
-    border-radius: 6px; padding: 10px 14px; font-size: 12px; pointer-events: none;
-    z-index: 100; box-shadow: 0 4px 12px rgba(61,46,34,0.12);
-    max-width: 280px; line-height: 1.6;
+    border-radius: 10px; padding: 12px 16px; font-size: 12px; pointer-events: none;
+    z-index: 100; box-shadow: var(--shadow-lg);
+    max-width: 290px; line-height: 1.7;
   }
   .tooltip-row { display: flex; justify-content: space-between; gap: 16px; }
   .tooltip-label { color: var(--text2); }
@@ -157,13 +170,7 @@ const WEEKS_DATA = [{"period": "v1.3.1", "year": 2025, "month": 3, "week_start":
 const { useState, useMemo, useCallback, useRef, useEffect } = React;
 
 const PERIOD_META = {
-  period_1:  { label: 'P1: Sep 2021–Feb 2022', color: '#f85149', short: 'P1' },
-  period_2:  { label: 'P2: Mar 2022–Aug 2022', color: '#f0883e', short: 'P2' },
-  period_3:  { label: 'P3: Sep 2022–Aug 2023', color: '#d29922', short: 'P3' },
-  period_4:  { label: 'P4: Sep 2023–Feb 2024', color: '#3fb950', short: 'P4' },
-  period_5:  { label: 'P5: Mar 2024–Aug 2024', color: '#58a6ff', short: 'P5' },
-  period_5b: { label: 'P5b: Sep 2024–Aug 2025', color: '#bc8cff', short: 'P5b' },
-  period_6:  { label: 'P6: Sep 2025–Feb 2026', color: '#39d2c0', short: 'P6' },
+  'v1.3.1': { label: 'v1.3.1: Mar 2025–Present', color: '#8B6914', short: 'v1.3.1' },
 };
 
 const fmt = (n, d=0) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -319,7 +326,7 @@ function EquityCurve({ weeks }) {
                   <div className="tooltip-row"><span className="tooltip-label">Week PnL</span><span className={pnlClass(p.w.pnl)}>{fmtPnl(p.w.pnl)}</span></div>
                   <div className="tooltip-row"><span className="tooltip-label">Cumulative</span><span className={pnlClass(p.y)}>{fmtPnl(p.y)}</span></div>
                   <div className="tooltip-row"><span className="tooltip-label">Trades</span><span>{p.w.trades} ({fmtPct(p.w.win_rate)} WR)</span></div>
-                  <div className="tooltip-row"><span className="tooltip-label">Period</span><span>{PERIOD_META[p.w.period]?.short}</span></div>
+                  <div className="tooltip-row"><span className="tooltip-label">Period</span><span>{p.w.period}</span></div>
                 </div>
               ))}
               onMouseLeave={hide}
@@ -335,51 +342,120 @@ function EquityCurve({ weeks }) {
 /* ── Weekly PnL Bars ── */
 function WeeklyBars({ weeks }) {
   const { tip, show, hide } = useTooltip();
-  const W = 1000, H = 180, pad = { t: 10, r: 20, b: 30, l: 70 };
+  const W = 1000, H = 240, pad = { t: 20, r: 20, b: 40, l: 75 };
   const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
 
   const maxAbs = Math.max(...weeks.map(w => Math.abs(w.pnl)), 1);
-  const barW = Math.max(1, cw / weeks.length - 1);
+  const niceMax = Math.ceil(maxAbs / 500) * 500;
+  const barW = Math.max(4, (cw / weeks.length) * 0.7);
+  const barGap = (cw / weeks.length - barW) / 2;
   const zeroY = pad.t + ch / 2;
+
+  // Grid ticks
+  const gridTicks = [];
+  const gridStep = niceMax > 3000 ? 1000 : niceMax > 1500 ? 500 : 250;
+  for (let v = gridStep; v <= niceMax; v += gridStep) {
+    gridTicks.push(v);
+    gridTicks.push(-v);
+  }
+
+  // Month labels
+  const monthLabels = [];
+  let lastMonth = -1;
+  weeks.forEach((w, i) => {
+    const dt = new Date(w.week_start + 'T00:00:00');
+    const m = dt.getMonth();
+    if (m !== lastMonth) {
+      monthLabels.push({ i, label: dt.toLocaleDateString('en-US', { month: 'short' }), year: dt.getFullYear() });
+      lastMonth = m;
+    }
+  });
 
   return (
     <div className="chart-section">
-      <div className="chart-title">Weekly PnL</div>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:12}}>
+        <div className="chart-title" style={{marginBottom:0}}>Weekly PnL</div>
+        <div style={{fontSize:11, color:'var(--text2)'}}>
+          <span style={{color:'var(--green)'}}>●</span> Profitable &nbsp;
+          <span style={{color:'var(--red)'}}>●</span> Loss
+        </div>
+      </div>
       <div className="bar-chart">
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{minWidth: Math.max(W, weeks.length * 5)}}>
-          <line x1={pad.l} x2={W - pad.r} y1={zeroY} y2={zeroY} stroke="var(--text2)" strokeWidth="0.5" />
-          <text x={pad.l - 8} y={pad.t + 4} fill="var(--text2)" fontSize="10" textAnchor="end">+${fmt(maxAbs,0)}</text>
-          <text x={pad.l - 8} y={H - pad.b} fill="var(--text2)" fontSize="10" textAnchor="end">-${fmt(maxAbs,0)}</text>
-          {weeks.map((w, i) => {
-            const x = pad.l + (i / weeks.length) * cw;
-            const h = Math.abs(w.pnl) / maxAbs * (ch / 2);
-            const y = w.pnl >= 0 ? zeroY - h : zeroY;
-            const color = PERIOD_META[w.period]?.color || '#58a6ff';
+          <defs>
+            <linearGradient id="greenBar" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#2D8C4E" stopOpacity="0.95"/>
+              <stop offset="100%" stopColor="#2D8C4E" stopOpacity="0.65"/>
+            </linearGradient>
+            <linearGradient id="redBar" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor="#C53D1B" stopOpacity="0.95"/>
+              <stop offset="100%" stopColor="#C53D1B" stopOpacity="0.65"/>
+            </linearGradient>
+            <filter id="barShadow">
+              <feDropShadow dx="0" dy="1" stdDeviation="1.5" floodOpacity="0.08"/>
+            </filter>
+          </defs>
+          {/* Grid lines */}
+          {gridTicks.map(v => {
+            const y = zeroY - (v / niceMax) * (ch / 2);
             return (
-              <rect key={i} x={x} y={y} width={barW} height={Math.max(0.5, h)}
-                fill={color} opacity={0.85} rx={0.5}
-                onMouseEnter={(e) => show(e, (
-                  <div>
-                    <div style={{fontWeight:600, marginBottom:4}}>{w.week_start} → {w.week_end}</div>
-                    <div className="tooltip-row"><span className="tooltip-label">PnL</span><span className={pnlClass(w.pnl)}>{fmtPnl(w.pnl)}</span></div>
-                    <div className="tooltip-row"><span className="tooltip-label">C1/C2</span><span>{fmtPnl(w.c1_pnl)} / {fmtPnl(w.c2_pnl)}</span></div>
-                    <div className="tooltip-row"><span className="tooltip-label">Trades</span><span>{w.trades} ({fmtPct(w.win_rate)})</span></div>
-                    <div className="tooltip-row"><span className="tooltip-label">PF</span><span>{w.pf > 99 ? '∞' : fmt(w.pf, 2)}</span></div>
-                    <div className="tooltip-row"><span className="tooltip-label">Period</span><span style={{color}}>{PERIOD_META[w.period]?.short}</span></div>
-                  </div>
-                ))}
-                onMouseLeave={hide}
-              />
+              <g key={v}>
+                <line x1={pad.l} x2={W - pad.r} y1={y} y2={y} stroke="var(--border)" strokeWidth="0.4" strokeDasharray={v === 0 ? '' : '3,4'} />
+                <text x={pad.l - 10} y={y + 3.5} fill="var(--text2)" fontSize="9.5" textAnchor="end" fontFamily="'JetBrains Mono', monospace">
+                  {v >= 0 ? '+' : ''}{v >= 1000 || v <= -1000 ? (v/1000).toFixed(1) + 'k' : v}
+                </text>
+              </g>
+            );
+          })}
+          {/* Zero line — emphasized */}
+          <line x1={pad.l} x2={W - pad.r} y1={zeroY} y2={zeroY} stroke="var(--text2)" strokeWidth="0.8" />
+          <text x={pad.l - 10} y={zeroY + 3.5} fill="var(--text2)" fontSize="9.5" textAnchor="end" fontFamily="'JetBrains Mono', monospace">$0</text>
+          {/* Month labels on x-axis */}
+          {monthLabels.map((ml, idx) => {
+            const x = pad.l + (ml.i / weeks.length) * cw + barGap;
+            return (
+              <g key={idx}>
+                <line x1={x} x2={x} y1={pad.t} y2={H - pad.b + 4} stroke="var(--border)" strokeWidth="0.3" />
+                <text x={x + 2} y={H - pad.b + 16} fill="var(--text2)" fontSize="9.5" textAnchor="start" fontFamily="'Inter', sans-serif">
+                  {ml.label}
+                </text>
+                {(idx === 0 || ml.year !== monthLabels[idx-1]?.year) && (
+                  <text x={x + 2} y={H - pad.b + 28} fill="var(--text2)" fontSize="8.5" textAnchor="start" fontFamily="'Inter', sans-serif" fontWeight="600">
+                    {ml.year}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+          {/* Bars */}
+          {weeks.map((w, i) => {
+            const x = pad.l + (i / weeks.length) * cw + barGap;
+            const h = Math.abs(w.pnl) / niceMax * (ch / 2);
+            const y = w.pnl >= 0 ? zeroY - h : zeroY;
+            const fill = w.pnl >= 0 ? 'url(#greenBar)' : 'url(#redBar)';
+            return (
+              <g key={i}>
+                <rect x={x} y={y} width={barW} height={Math.max(1, h)}
+                  fill={fill} rx={2} filter="url(#barShadow)"
+                  style={{cursor:'pointer', transition:'opacity 0.15s'}}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; show(e, (
+                    <div>
+                      <div style={{fontWeight:600, marginBottom:6, fontSize:13}}>{w.week_start} → {w.week_end}</div>
+                      <div className="tooltip-row"><span className="tooltip-label">PnL</span><span className={pnlClass(w.pnl)} style={{fontWeight:700}}>{fmtPnl(w.pnl)}</span></div>
+                      <div className="tooltip-row"><span className="tooltip-label">C1 / C2</span><span>{fmtPnl(w.c1_pnl)} / {fmtPnl(w.c2_pnl)}</span></div>
+                      <div className="tooltip-row"><span className="tooltip-label">Trades</span><span>{w.trades} ({fmtPct(w.win_rate)} WR)</span></div>
+                      <div className="tooltip-row"><span className="tooltip-label">PF</span><span>{w.pf > 99 ? '∞' : fmt(w.pf, 2)}</span></div>
+                      <div className="tooltip-row"><span className="tooltip-label">Max DD</span><span className="red">{fmtPct(w.max_dd_pct)}</span></div>
+                    </div>
+                  )); }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; hide(); }}
+                />
+              </g>
             );
           })}
         </svg>
       </div>
       <Tooltip tip={tip} />
-      <div style={{display:'flex', gap:16, justifyContent:'center', marginTop:8, flexWrap:'wrap'}}>
-        {Object.entries(PERIOD_META).map(([k,v]) => (
-          <span key={k} style={{fontSize:11, color: v.color}}>● {v.short}</span>
-        ))}
-      </div>
     </div>
   );
 }
@@ -733,7 +809,15 @@ function App() {
     <div style={{maxWidth: 1200, margin: '0 auto'}}>
       <div className="header">
         <h1>NQ Trading Bot — Weekly Dashboard</h1>
-        <p>7 periods · {allWeeks.length} weeks · Sep 2021 → Feb 2026</p>
+        <p>{(() => {
+          const first = allWeeks[0];
+          const last = allWeeks[allWeeks.length - 1];
+          const fmtDate = (d) => {
+            const dt = new Date(d + 'T00:00:00');
+            return dt.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+          };
+          return `${allWeeks.length} weeks · ${fmtDate(first.week_start)} → ${fmtDate(last.week_end)}`;
+        })()}</p>
       </div>
 
       <div className="controls">
