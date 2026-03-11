@@ -64,6 +64,14 @@ _PUBLISHER_START = datetime.now(timezone.utc)
 _previous_status = "OFFLINE"
 _notification_sent_this_session = False
 
+# ── Activity Feed state tracking ──
+# Track previous modifier/safety/bias values to detect changes between publishes.
+_prev_modifiers = {}
+_prev_htf_bias = ""
+_prev_safety = ""
+_accumulated_feed: list = []   # Persists across publish cycles, trimmed to last 50
+_MAX_FEED_ITEMS = 50
+
 
 def _read_json_safe(filepath: Path, default=None):
     """Read a JSON file, returning default on missing/error."""
@@ -191,6 +199,155 @@ def _build_bot_state(status: dict, decisions: list) -> dict:
     }
 
 
+def _build_activity_feed(
+    decisions: list,
+    modifiers: dict,
+    htf_bias: str,
+    safety_status: str,
+    bot_state_obj: dict,
+    status: dict,
+) -> list:
+    """
+    Build a rich activity feed from multiple data sources.
+
+    Detects state changes (bias, modifiers, safety) and merges with
+    trade decisions to produce a unified timeline.  Each entry has:
+      type, time, title, detail, color
+    """
+    global _prev_modifiers, _prev_htf_bias, _prev_safety, _accumulated_feed
+
+    now = datetime.now(timezone.utc)
+    new_events: list = []
+
+    def _fmt_now() -> str:
+        try:
+            from zoneinfo import ZoneInfo
+            return now.astimezone(ZoneInfo("America/New_York")).strftime("%H:%M:%S ET")
+        except Exception:
+            return now.strftime("%H:%M:%S UTC")
+
+    # ── 1. HTF bias change ──
+    if _prev_htf_bias and htf_bias != _prev_htf_bias:
+        new_events.append({
+            "type": "bias",
+            "time": _fmt_now(),
+            "title": "HTF Bias Shift",
+            "detail": f"{_prev_htf_bias} \u2192 {htf_bias}",
+            "color": "green" if htf_bias == "BULLISH" else "red" if htf_bias == "BEARISH" else "amber",
+        })
+    _prev_htf_bias = htf_bias
+
+    # ── 2. Modifier changes ──
+    if modifiers:
+        for key in ("overnight", "gamma", "har_rv", "fomc"):
+            cur = modifiers.get(key, {})
+            cur_val = cur.get("value", 1.0)
+            prev_val = _prev_modifiers.get(key, {}).get("value", cur_val)
+            if abs(cur_val - prev_val) > 0.01:
+                label = {
+                    "overnight": "Overnight Session",
+                    "gamma": "Gamma Exposure",
+                    "har_rv": "Volatility (HAR-RV)",
+                    "fomc": "FOMC Risk",
+                }.get(key, key.upper())
+                new_events.append({
+                    "type": "modifier",
+                    "time": _fmt_now(),
+                    "title": f"{label} Updated",
+                    "detail": f"{prev_val:.2f}x \u2192 {cur_val:.2f}x \u2014 {cur.get('display', '')}",
+                    "color": "amber" if cur_val > 1.0 else "green" if cur_val < 1.0 else "muted",
+                })
+        _prev_modifiers = {k: dict(v) for k, v in modifiers.items()} if modifiers else {}
+
+    # ── 3. Safety rail change ──
+    if _prev_safety and safety_status != _prev_safety:
+        new_events.append({
+            "type": "safety",
+            "time": _fmt_now(),
+            "title": "Safety Rails" if safety_status == "OK" else "Safety Alert",
+            "detail": f"{_prev_safety} \u2192 {safety_status}",
+            "color": "green" if safety_status == "OK" else "red",
+        })
+    _prev_safety = safety_status
+
+    # ── 4. Trade decisions (newest entries not already in feed) ──
+    # We track by timestamp to avoid duplicates across cycles
+    existing_times = {e.get("_ts") for e in _accumulated_feed if e.get("_ts")}
+    for d in decisions[-20:]:
+        ts = d.get("timestamp", "")
+        if ts in existing_times:
+            continue  # Already in feed
+
+        # Format time
+        time_et = ""
+        if ts:
+            try:
+                from zoneinfo import ZoneInfo
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                et = dt.astimezone(ZoneInfo("America/New_York"))
+                time_et = et.strftime("%H:%M:%S ET")
+            except (ValueError, TypeError):
+                time_et = ""
+
+        direction = d.get("signal_direction", "")
+        decision = d.get("decision", "")
+        stage = d.get("rejection_stage", "")
+        score = d.get("signal_score", d.get("score", None))
+        source = d.get("signal_source", d.get("source", ""))
+
+        if decision == "APPROVED":
+            detail = f"{direction} signal approved"
+            if score is not None:
+                detail += f" (score: {score:.2f})"
+            if source:
+                detail += f" via {source}"
+            new_events.append({
+                "type": "trade",
+                "time": time_et,
+                "title": "Trade Entry",
+                "detail": detail,
+                "color": "green",
+                "_ts": ts,
+            })
+        elif decision == "REJECTED":
+            detail = f"{direction} signal rejected \u2014 {stage}"
+            if score is not None:
+                detail += f" (score: {score:.2f})"
+            new_events.append({
+                "type": "decision",
+                "time": time_et,
+                "title": "Signal Filtered",
+                "detail": detail,
+                "color": "muted",
+                "_ts": ts,
+            })
+
+    # ── 5. System status events (synthesized) ──
+    mode = bot_state_obj.get("mode", "OFFLINE")
+    bars = status.get("bars_processed", 0) if status else 0
+    if bars > 0 and not any(e.get("type") == "system" for e in _accumulated_feed[-5:]):
+        # Periodic "still alive" event every ~5 min (5 publish cycles at 60s)
+        new_events.append({
+            "type": "system",
+            "time": _fmt_now(),
+            "title": "Heartbeat",
+            "detail": f"Bot {mode.lower()} \u2014 {bars:,} bars processed",
+            "color": "green" if mode != "OFFLINE" else "muted",
+        })
+
+    # Merge into accumulated feed (newest first)
+    _accumulated_feed = new_events + _accumulated_feed
+    _accumulated_feed = _accumulated_feed[:_MAX_FEED_ITEMS]
+
+    # Return without internal tracking field
+    return [
+        {k: v for k, v in e.items() if not k.startswith("_")}
+        for e in _accumulated_feed
+    ]
+
+
 def build_sanitized_stats() -> dict:
     """
     Build sanitized stats from log files.
@@ -293,6 +450,16 @@ def build_sanitized_stats() -> dict:
     heartbeat = _build_heartbeat(status, candles)
     bot_state = _build_bot_state(status, decisions)
 
+    # Build activity feed (rich timeline of all bot events)
+    activity_feed = _build_activity_feed(
+        decisions=decisions,
+        modifiers=modifiers or {},
+        htf_bias=htf_bias,
+        safety_status=safety_status,
+        bot_state_obj=bot_state,
+        status=status or {},
+    )
+
     # Active trade for live chart (read from active_trade.json written by run_tws.py)
     active_trade = _read_json_safe(LOGS_DIR / "active_trade.json")
     if not active_trade or not active_trade.get("side"):
@@ -332,6 +499,8 @@ def build_sanitized_stats() -> dict:
         # Trade chart data (publicly available market prices only)
         "active_trade": active_trade,
         "candle_buffer": chart_candles,
+        # Rich activity feed (up to 50 events)
+        "activity_feed": activity_feed,
     }
 
 
