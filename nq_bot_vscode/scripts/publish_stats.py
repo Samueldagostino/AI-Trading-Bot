@@ -257,7 +257,7 @@ def _build_activity_feed(
                     "detail": f"{prev_val:.2f}x \u2192 {cur_val:.2f}x \u2014 {cur.get('display', '')}",
                     "color": "amber" if cur_val > 1.0 else "green" if cur_val < 1.0 else "muted",
                 })
-        _prev_modifiers = {k: dict(v) for k, v in modifiers.items()} if modifiers else {}
+        _prev_modifiers = {k: (dict(v) if isinstance(v, dict) else v) for k, v in modifiers.items()} if modifiers else {}
 
     # ── 3. Safety rail change ──
     if _prev_safety and safety_status != _prev_safety:
