@@ -286,8 +286,10 @@ class TradingOrchestrator:
         bar_et = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
         current_time_et = bar_et.time()
 
-        # Hard flatten at 4:50 PM ET — close ALL positions unconditionally
-        if current_time_et >= dt_time(16, 50):
+        # CME maintenance window: 4:45-5:00 PM ET (futures close 4:59, reopen 6:00 PM)
+        # Hard flatten at 4:50 PM ET, block processing until 6:00 PM ET
+        _in_maintenance = dt_time(16, 50) <= current_time_et <= dt_time(18, 0)
+        if _in_maintenance:
             if self.executor.has_active_trade:
                 result = await self.executor.maintenance_flatten(
                     bar.close, bar.timestamp
@@ -310,10 +312,12 @@ class TradingOrchestrator:
                         exit_reason="EXIT_MAINTENANCE_FLATTEN",
                     )
                     action_result = result
-            return action_result  # No further processing after 4:50 PM ET
+            return action_result  # No processing during CME maintenance window
 
         # Entry cutoff at 4:30 PM ET — block new entries, continue position management
-        self._maintenance_entry_blocked = current_time_et >= dt_time(16, 30)
+        self._maintenance_entry_blocked = (
+            dt_time(16, 30) <= current_time_et < dt_time(16, 50)
+        )
 
         # === SESSION BOUNDARY DETECTION — reset VWAP at new trading day ===
         bar_date = bar_et.date()

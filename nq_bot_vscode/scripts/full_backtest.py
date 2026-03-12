@@ -1751,8 +1751,9 @@ class CausalReplayEngine:
         current_et = ts.astimezone(ET)
         current_time_et = current_et.time()
 
-        # Hard flatten at 4:50 PM ET — close ALL positions unconditionally
-        if current_time_et >= time(16, 50):
+        # CME maintenance window: 4:45-5:00 PM ET (futures close 4:59, reopen 6:00 PM)
+        # Hard flatten at 4:50 PM ET, block processing until 6:00 PM ET
+        if time(16, 50) <= current_time_et <= time(18, 0):
             if self.executor.has_active_trade:
                 result = await self.executor.maintenance_flatten(
                     bar["close"], ts
@@ -1824,7 +1825,9 @@ class CausalReplayEngine:
             return  # No further processing after 4:50 PM ET
 
         # Entry cutoff at 4:30 PM ET — block new entries but continue managing positions
-        self._maintenance_entry_blocked = current_time_et >= time(16, 30)
+        self._maintenance_entry_blocked = (
+            time(16, 30) <= current_time_et < time(16, 50)
+        )
 
         # ── Session boundary check ──
         self._check_session_boundary(ts)
