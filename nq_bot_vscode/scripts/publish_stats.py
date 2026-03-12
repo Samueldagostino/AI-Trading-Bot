@@ -526,7 +526,7 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
 
 
 def _push_branch(branch: str) -> bool:
-    """Push a branch to origin with retry logic."""
+    """Push a branch to origin with retry logic. Auto-pulls on reject."""
     for attempt in range(4):
         _clean_git_locks()
         push_cmd = ["git", "push", "origin", branch]
@@ -540,6 +540,21 @@ def _push_branch(branch: str) -> bool:
         if result.returncode == 0:
             logger.info("Stats pushed to GitHub (%s)", branch)
             return True
+
+        # If rejected because remote is ahead, pull --rebase then retry
+        if "fetch first" in result.stderr or "non-fast-forward" in result.stderr:
+            logger.info("Remote %s is ahead — pulling with rebase...", branch)
+            _clean_git_locks()
+            pull = subprocess.run(
+                ["git", "pull", "--rebase", "origin", branch],
+                cwd=str(ROOT_DIR),
+                capture_output=True, text=True, timeout=60,
+            )
+            if pull.returncode == 0:
+                logger.info("Pull --rebase succeeded, retrying push...")
+                continue  # retry the push immediately
+            else:
+                logger.warning("Pull --rebase failed: %s", pull.stderr.strip())
 
         wait = 2 ** (attempt + 1)
         logger.warning(
