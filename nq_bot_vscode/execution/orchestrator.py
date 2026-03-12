@@ -938,11 +938,15 @@ class IBKRLivePipeline:
 
         c1_was_profitable = c1_net_pnl > 0
 
-        # ── IMMEDIATE BREAKEVEN on remaining legs after C1 profit ──
+        # ── BREAKEVEN on remaining legs after C1 profit ──
+        # Variant B (delayed): skip immediate BE — _apply_delayed_be() handles it
+        # during SCALING once MFE >= 1.5× stop_distance.
         BE_BUFFER_PTS = self._scale_config.c2_breakeven_buffer_points
+        be_variant = getattr(self._scale_config, "c2_be_variant", "D")
         c3_blocked = False
 
-        if c1_was_profitable:
+        if c1_was_profitable and be_variant != "B":
+            # Variant D / A / C: immediate breakeven (original behavior)
             for pos_id, state in list(self._leg_state.items()):
                 if pos_id == c1_pos_id:
                     continue
@@ -963,11 +967,22 @@ class IBKRLivePipeline:
                        if s.get("be_triggered") and pid != c1_pos_id]
             if be_legs:
                 logger.info(
-                    "BE TRIGGERED on %s after C1 profit | New stop: %.2f",
+                    "BE TRIGGERED (immediate) on %s after C1 profit | New stop: %.2f",
                     be_legs,
                     self._entry_price + (BE_BUFFER_PTS if direction == "long"
                                          else -BE_BUFFER_PTS),
                 )
+        elif c1_was_profitable and be_variant == "B":
+            # Variant B: delayed breakeven — keep original stops
+            threshold = round(self._stop_distance * self._scale_config.c2_be_delay_multiplier, 1)
+            open_leg_labels = [pid.split("-")[-1] for pid, s in self._leg_state.items()
+                               if pid != c1_pos_id and pid in self._position_manager.open_positions]
+            logger.info(
+                "BE DELAYED (Variant B) on %s | C1 profitable but BE requires MFE >= %.1fpts "
+                "(%.1fx stop %.1fpts) | Keeping original stops",
+                open_leg_labels, threshold,
+                self._scale_config.c2_be_delay_multiplier, self._stop_distance,
+            )
         else:
             # C1 lost → close C3 immediately (delayed block)
             c3_pos_id = f"{group_id}-C3"
@@ -1167,6 +1182,7 @@ class IBKRLivePipeline:
         Variant B: Move stop to breakeven once MFE >= stop_distance × 1.5.
 
         Mirrors scale_out_executor._apply_delayed_be() exactly.
+        The breakeven trigger is DELAYED until the trade proves itself.
         """
         if state["be_triggered"]:
             return
@@ -1186,6 +1202,22 @@ class IBKRLivePipeline:
                 if new_stop < state["stop_price"]:
                     state["stop_price"] = new_stop
                     state["be_triggered"] = True
+
+            if state["be_triggered"]:
+                logger.info(
+                    "%s BREAKEVEN ACTIVATED: MFE %.1fpts reached threshold "
+                    "%.1fpts — stop moved to %.2f",
+                    state.get("leg_label", "C2"), state["mfe"],
+                    threshold, state["stop_price"],
+                )
+        else:
+            pct = round(state["mfe"] / threshold * 100, 1) if threshold > 0 else 0
+            logger.debug(
+                "%s breakeven DELAYED: MFE %.1fpts < threshold %.1fpts "
+                "(%s%% of target) — keeping original stop at %.2f",
+                state.get("leg_label", "C2"), state["mfe"],
+                threshold, pct, state["stop_price"],
+            )
 
     def _update_atr_trail(self, state: Dict[str, Any], direction: str) -> None:
         """

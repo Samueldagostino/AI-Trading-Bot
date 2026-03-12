@@ -169,7 +169,7 @@ class PaperLiveRunner:
     def __init__(
         self,
         dry_run: bool = False,
-        max_daily_loss: float = 500.0,
+        max_daily_loss: float = 1500.0,
         log_level: str = "INFO",
         port: int = 7497,
     ):
@@ -187,7 +187,7 @@ class PaperLiveRunner:
         self._safety_rails = SafetyRails(SafetyRailsConfig(
             max_daily_loss=max_daily_loss,
             max_consecutive_losses=5,
-            max_position_size=2,       # ABSOLUTE — no exceptions
+            max_position_size=4,       # v3: C1=1 + C2=1 + C3=2 = 4 contracts
             heartbeat_alert_seconds=60.0,
             heartbeat_halt_seconds=300.0,
             log_dir=str(LOGS_DIR),
@@ -661,6 +661,8 @@ class PaperLiveRunner:
         try:
             ib = self._ibkr_client._ib  # Access underlying ib_insync.IB instance
             contract = self._ibkr_client._contract  # Use already-qualified contract (has conId + localSymbol)
+            contract = self._ibkr_client.contract  # Use already-qualified contract (has conId + localSymbol)
+            contract = self._ibkr_client._contract  # Use already-qualified contract (has conId + localSymbol)
 
             for tf_name, tf_cfg in HISTORICAL_TF_CONFIG.items():
                 try:
@@ -1069,10 +1071,11 @@ Port reference:
   4001 = IB Gateway live trading
 
 Safety Rails:
-  - Max daily loss:       $500 (configurable via --max-daily-loss)
+  - Max daily loss:       $1,500 (configurable via --max-daily-loss)
   - Max consecutive loss: 5 trades -> HALT
-  - Max position size:    2 contracts (ABSOLUTE, not configurable)
+  - Max position size:    4 contracts (v3: C1=1, C2=1, C3=2)
   - Heartbeat timeout:    60s alert, 300s halt
+  - Config validator:     Blocks trading if config doesn't match v3 backtest
 
 All circuit breakers require manual restart after tripping.
 """,
@@ -1093,6 +1096,10 @@ All circuit breakers require manual restart after tripping.
     parser.add_argument(
         "--port", type=int, default=7497,
         help="TWS/Gateway port (default: 7497 for TWS paper)",
+    )
+    parser.add_argument(
+        "--force-config", action="store_true",
+        help="Override config validation — trade even if config mismatches v3 baseline (NOT RECOMMENDED)",
     )
     args = parser.parse_args()
 
@@ -1123,6 +1130,14 @@ All circuit breakers require manual restart after tripping.
         datefmt="%Y-%m-%d %H:%M:%S",
     ))
     root_logger.addHandler(file_handler)
+
+    # ── v3 Config Validation ─────────────────────────────────────
+    from config.config_validator import print_config_table
+    config_ok = print_config_table(CONFIG, force=args.force_config)
+    if not config_ok:
+        logger.error("Config validation FAILED — exiting. Use --force-config to override.")
+        sys.exit(1)
+    # ─────────────────────────────────────────────────────────────
 
     # ── Google Drive backup on startup ──────────────────────────
     _gdrive_sync = script_dir / "sync_to_gdrive.ps1"

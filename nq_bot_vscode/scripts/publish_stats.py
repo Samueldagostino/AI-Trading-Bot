@@ -830,6 +830,20 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
              f"stats: update live_stats.json ({timestamp})"],
             cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
         )
+        if last_msg.returncode == 0 and last_msg.stdout.strip().startswith("stats:"):
+            # Amend the previous stats commit (avoids piling up hundreds of commits)
+            result = subprocess.run(
+                ["git", "commit", "-m",
+                 f"stats: update live_stats.json ({timestamp})"],
+                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
+            )
+        else:
+            # New commit (after a code commit)
+            result = subprocess.run(
+                ["git", "commit", "-m",
+                 f"stats: update live_stats.json ({timestamp})"],
+                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
+            )
 
         if result.returncode != 0:
             logger.warning("Git commit failed: %s", result.stderr)
@@ -847,6 +861,11 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
             subprocess.run(
                 ["git", "rebase", "--abort"],
                 cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=10,
+        # Push (force-with-lease because we may have amended)
+        for attempt in range(3):
+            result = subprocess.run(
+                ["git", "push", "origin", "HEAD"],
+                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=60,
             )
             return False
 
