@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-12T13:18:55.855020+00:00",
+  "updated": "2026-03-12T13:19:57.585930+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 200,
@@ -29,50 +29,8 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 24785.25,
+  "last_price": 24790.25,
   "recent_decisions": [
-    {
-      "time": "09:17:40 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "09:17:45 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "09:17:50 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "09:17:55 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "09:18:00 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "09:18:05 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "09:18:10 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
     {
       "time": "09:18:15 ET",
       "direction": "LONG",
@@ -90,11 +48,53 @@
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
+    },
+    {
+      "time": "09:19:10 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "09:19:15 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "09:19:20 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "09:19:25 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "09:19:30 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "09:19:35 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "09:19:40 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
     }
   ],
   "heartbeat": {
     "last_seen": "2026-03-11T17:37:35.115789+00:00",
-    "seconds_since_last": 70880.7,
+    "seconds_since_last": 70942.5,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
@@ -105,90 +105,6 @@
   },
   "active_trade": null,
   "candle_buffer": [
-    {
-      "t": "",
-      "o": 24791.5,
-      "h": 24792.75,
-      "l": 24786.5,
-      "c": 24788.5
-    },
-    {
-      "t": "",
-      "o": 24789.25,
-      "h": 24790.75,
-      "l": 24786.25,
-      "c": 24787.75
-    },
-    {
-      "t": "",
-      "o": 24787.75,
-      "h": 24790.25,
-      "l": 24786.0,
-      "c": 24789.0
-    },
-    {
-      "t": "",
-      "o": 24788.5,
-      "h": 24792.0,
-      "l": 24787.25,
-      "c": 24788.0
-    },
-    {
-      "t": "",
-      "o": 24787.5,
-      "h": 24787.75,
-      "l": 24775.0,
-      "c": 24778.0
-    },
-    {
-      "t": "",
-      "o": 24777.75,
-      "h": 24787.0,
-      "l": 24777.25,
-      "c": 24785.5
-    },
-    {
-      "t": "",
-      "o": 24785.0,
-      "h": 24788.0,
-      "l": 24781.75,
-      "c": 24788.0
-    },
-    {
-      "t": "",
-      "o": 24786.75,
-      "h": 24787.75,
-      "l": 24783.5,
-      "c": 24786.25
-    },
-    {
-      "t": "",
-      "o": 24784.5,
-      "h": 24784.5,
-      "l": 24778.75,
-      "c": 24781.75
-    },
-    {
-      "t": "",
-      "o": 24782.25,
-      "h": 24785.25,
-      "l": 24781.25,
-      "c": 24784.25
-    },
-    {
-      "t": "",
-      "o": 24784.5,
-      "h": 24784.5,
-      "l": 24776.75,
-      "c": 24779.5
-    },
-    {
-      "t": "",
-      "o": 24779.75,
-      "h": 24784.75,
-      "l": 24779.5,
-      "c": 24781.25
-    },
     {
       "t": "",
       "o": 24782.0,
@@ -384,6 +300,90 @@
       "h": 24785.25,
       "l": 24781.75,
       "c": 24785.25
+    },
+    {
+      "t": "",
+      "o": 24785.5,
+      "h": 24786.75,
+      "l": 24783.75,
+      "c": 24785.75
+    },
+    {
+      "t": "",
+      "o": 24785.75,
+      "h": 24803.0,
+      "l": 24785.25,
+      "c": 24800.25
+    },
+    {
+      "t": "",
+      "o": 24799.75,
+      "h": 24813.25,
+      "l": 24798.5,
+      "c": 24799.75
+    },
+    {
+      "t": "",
+      "o": 24799.25,
+      "h": 24801.75,
+      "l": 24791.75,
+      "c": 24791.75
+    },
+    {
+      "t": "",
+      "o": 24792.25,
+      "h": 24793.25,
+      "l": 24789.75,
+      "c": 24790.25
+    },
+    {
+      "t": "",
+      "o": 24790.0,
+      "h": 24794.5,
+      "l": 24790.0,
+      "c": 24793.5
+    },
+    {
+      "t": "",
+      "o": 24793.25,
+      "h": 24795.25,
+      "l": 24792.0,
+      "c": 24792.0
+    },
+    {
+      "t": "",
+      "o": 24793.0,
+      "h": 24798.75,
+      "l": 24791.25,
+      "c": 24798.25
+    },
+    {
+      "t": "",
+      "o": 24797.75,
+      "h": 24798.25,
+      "l": 24795.25,
+      "c": 24797.75
+    },
+    {
+      "t": "",
+      "o": 24797.75,
+      "h": 24802.0,
+      "l": 24795.0,
+      "c": 24799.25
+    },
+    {
+      "t": "",
+      "o": 24799.0,
+      "h": 24802.25,
+      "l": 24798.0,
+      "c": 24801.5
+    },
+    {
+      "t": "",
+      "o": 24800.75,
+      "h": 24802.0,
+      "l": 24789.75,
+      "c": 24790.25
     }
   ]
 }
