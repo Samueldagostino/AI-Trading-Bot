@@ -191,6 +191,74 @@ def _build_bot_state(status: dict, decisions: list) -> dict:
     }
 
 
+def _build_trade_log() -> tuple[list, float]:
+    """
+    Build today's trade log from paper_trades.json.
+    Returns (trade_log_list, session_pnl_dollars).
+
+    Each trade entry contains:
+      - time: HH:MM:SS ET
+      - direction: LONG / SHORT
+      - entry_price: float
+      - c1_pnl: float (dollar PnL for C1 leg)
+      - c1_reason: str (exit reason for C1)
+      - c2_pnl: float (dollar PnL for C2 leg)
+      - c2_reason: str (exit reason for C2)
+      - total_pnl: float (total dollar PnL for the trade)
+      - signal_source: str (sweep / signal / confluence)
+    """
+    trades_file = LOGS_DIR / "paper_trades.json"
+    raw_trades = _read_json_safe(trades_file, default=[])
+
+    if not isinstance(raw_trades, list):
+        return [], 0.0
+
+    from zoneinfo import ZoneInfo
+
+    today_et = datetime.now(ZoneInfo("America/New_York")).date()
+
+    trade_log = []
+    session_pnl = 0.0
+
+    for t in raw_trades:
+        # Filter to today's trades only
+        ts_str = t.get("timestamp", "")
+        if not ts_str:
+            continue
+
+        try:
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            et = dt.astimezone(ZoneInfo("America/New_York"))
+        except (ValueError, TypeError):
+            continue
+
+        if et.date() != today_et:
+            continue
+
+        total_pnl = t.get("total_pnl", 0.0)
+        session_pnl += total_pnl
+
+        direction = t.get("direction", "").upper()
+        if direction not in ("LONG", "SHORT"):
+            direction = direction or "UNKNOWN"
+
+        trade_log.append({
+            "time": et.strftime("%H:%M:%S ET"),
+            "direction": direction,
+            "entry_price": round(t.get("entry_price", 0.0), 2),
+            "c1_pnl": round(t.get("c1_pnl", 0.0), 2),
+            "c1_reason": t.get("c1_reason", ""),
+            "c2_pnl": round(t.get("c2_pnl", 0.0), 2),
+            "c2_reason": t.get("c2_reason", ""),
+            "total_pnl": round(total_pnl, 2),
+            "signal_source": t.get("signal_source", "signal"),
+        })
+
+    return trade_log, round(session_pnl, 2)
+
+
 def build_sanitized_stats() -> dict:
     """
     Build sanitized stats from log files.
@@ -289,6 +357,9 @@ def build_sanitized_stats() -> dict:
         }
         recent_decisions.append(sanitized)
 
+    # Build trade log and session PnL
+    trade_log, session_pnl_dollars = _build_trade_log()
+
     # Build heartbeat and state (backward compatible -- new fields)
     heartbeat = _build_heartbeat(status, candles)
     bot_state = _build_bot_state(status, decisions)
@@ -332,6 +403,9 @@ def build_sanitized_stats() -> dict:
         # Trade chart data (publicly available market prices only)
         "active_trade": active_trade,
         "candle_buffer": chart_candles,
+        # Session PnL and trade log
+        "session_pnl_dollars": session_pnl_dollars,
+        "trade_log": trade_log,
     }
 
 

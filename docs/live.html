@@ -230,6 +230,34 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .notify-privacy{font-size:9px;color:var(--text-muted);margin-top:10px}
 @media(max-width:480px){.notify-form{flex-wrap:wrap}.notify-country{border-radius:8px 8px 0 0;border-right:1px solid var(--border);border-bottom:none;width:100%}.notify-input{border-radius:0}.notify-btn{border-radius:0 0 8px 8px;width:100%;text-align:center}}
 
+/* ═══ SESSION PNL CARD ═══ */
+.session-pnl-card{background:var(--surface);border:1px solid var(--border-light);border-radius:14px;padding:20px 28px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow-sm);transition:box-shadow .2s}
+.session-pnl-card:hover{box-shadow:var(--shadow-md)}
+.session-pnl-card .pnl-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);font-weight:700}
+.session-pnl-card .pnl-amount{font-family:var(--mono);font-size:28px;font-weight:800;font-variant-numeric:tabular-nums}
+.session-pnl-card .pnl-amount.pos{color:var(--green)}.session-pnl-card .pnl-amount.neg{color:var(--red)}.session-pnl-card .pnl-amount.flat{color:var(--text-muted)}
+.session-pnl-card .pnl-trades{font-family:var(--mono);font-size:11px;color:var(--text2)}
+
+/* ═══ TRADE LOG TABLE ═══ */
+.tradelog-section{margin-bottom:20px}
+.tradelog-panel{background:var(--surface);border:1px solid var(--border-light);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-sm);transition:box-shadow .2s}
+.tradelog-panel:hover{box-shadow:var(--shadow-md)}
+.tradelog-header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px 12px;border-bottom:1px solid var(--border-light);background:var(--surface)}
+.tradelog-header h3{font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:1.5px;font-weight:700;margin:0}
+.tradelog-header .tradelog-count{font-family:var(--mono);font-size:10px;color:var(--text-muted);background:var(--surface-alt);padding:3px 10px;border-radius:12px;font-weight:600}
+.tradelog-wrap{overflow-x:auto}
+.tradelog-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums}
+.tradelog-table th{text-align:right;padding:10px 12px;border-bottom:2px solid var(--border);color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px;background:var(--surface-alt);font-weight:700;white-space:nowrap}
+.tradelog-table th:first-child{text-align:left}
+.tradelog-table td{text-align:right;padding:8px 12px;border-bottom:1px solid var(--border-light);color:var(--text);white-space:nowrap}
+.tradelog-table td:first-child{text-align:left;color:var(--brown-900);font-weight:600}
+.tradelog-table tr:hover td{background:var(--surface-alt)}
+.tradelog-table .dir-long{color:var(--green);font-weight:700}.tradelog-table .dir-short{color:var(--red);font-weight:700}
+.tradelog-table .pnl-pos{color:var(--green);font-weight:600}.tradelog-table .pnl-neg{color:var(--red);font-weight:600}
+.tradelog-table .source-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:9px;font-weight:600;letter-spacing:.3px}
+.tradelog-table .source-sweep{background:var(--blue-bg);color:var(--blue)}.tradelog-table .source-signal{background:var(--surface-alt);color:var(--text2)}.tradelog-table .source-confluence{background:var(--amber-bg);color:var(--amber)}
+.tradelog-empty{padding:32px 20px;text-align:center;color:var(--text-muted);font-size:12px}
+
 /* ═══ FOOTER ═══ */
 .footer{padding:20px 0;margin-top:24px;border-top:1px solid var(--border-light);color:var(--text-muted);font-size:10px;text-align:center;letter-spacing:0.3px}
 
@@ -958,6 +986,73 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     btns.forEach(function(b){ b.classList.remove('active'); if(b.textContent === tf+'m') b.classList.add('active'); });
   };
 
+  // ─── SESSION PNL + TRADE LOG ───
+  function renderSessionPnl(d){
+    var pnl = d.session_pnl_dollars || 0;
+    var trades = d.trade_log || [];
+    var cls = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'flat';
+    var sign = pnl > 0 ? '+' : '';
+    return '<div class="session-pnl-card">' +
+      '<div>' +
+        '<div class="pnl-label">Session PnL (Today)</div>' +
+        '<div class="pnl-amount '+cls+'">'+sign+'$'+Math.abs(pnl).toFixed(2)+'</div>' +
+      '</div>' +
+      '<div class="pnl-trades">'+trades.length+' trade'+(trades.length!==1?'s':'')+' today</div>' +
+    '</div>';
+  }
+
+  function renderTradeLog(d){
+    var trades = d.trade_log || [];
+    var html = '<div class="tradelog-section"><div class="tradelog-panel">';
+    html += '<div class="tradelog-header">' +
+      '<h3>Trade Log</h3>' +
+      '<span class="tradelog-count">'+trades.length+' trade'+(trades.length!==1?'s':'')+'</span>' +
+    '</div>';
+
+    if(trades.length === 0){
+      html += '<div class="tradelog-empty">No trades yet today. Waiting for signals...</div>';
+    } else {
+      html += '<div class="tradelog-wrap"><table class="tradelog-table"><thead><tr>' +
+        '<th>Time</th><th>Direction</th><th>Entry</th><th>C1 PnL</th><th>C1 Exit</th><th>C2 PnL</th><th>C2 Exit</th><th>Total PnL</th><th>Source</th>' +
+      '</tr></thead><tbody>';
+
+      trades.forEach(function(t){
+        var dirCls = t.direction === 'LONG' ? 'dir-long' : 'dir-short';
+        var totalCls = t.total_pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+        var c1Cls = t.c1_pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+        var c2Cls = t.c2_pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+        var totalSign = t.total_pnl >= 0 ? '+' : '';
+        var c1Sign = t.c1_pnl >= 0 ? '+' : '';
+        var c2Sign = t.c2_pnl >= 0 ? '+' : '';
+        var src = t.signal_source || 'signal';
+        var srcCls = 'source-' + (src === 'sweep' ? 'sweep' : src === 'confluence' ? 'confluence' : 'signal');
+
+        // Friendly exit reason
+        function friendlyExit(r){
+          if(!r) return '\u2014';
+          return r.replace(/_/g, ' ');
+        }
+
+        html += '<tr>' +
+          '<td>'+t.time+'</td>' +
+          '<td class="'+dirCls+'">'+t.direction+'</td>' +
+          '<td>'+t.entry_price.toFixed(2)+'</td>' +
+          '<td class="'+c1Cls+'">'+c1Sign+'$'+Math.abs(t.c1_pnl).toFixed(2)+'</td>' +
+          '<td>'+friendlyExit(t.c1_reason)+'</td>' +
+          '<td class="'+c2Cls+'">'+c2Sign+'$'+Math.abs(t.c2_pnl).toFixed(2)+'</td>' +
+          '<td>'+friendlyExit(t.c2_reason)+'</td>' +
+          '<td class="'+totalCls+'">'+totalSign+'$'+Math.abs(t.total_pnl).toFixed(2)+'</td>' +
+          '<td><span class="source-badge '+srcCls+'">'+src.toUpperCase()+'</span></td>' +
+        '</tr>';
+      });
+
+      html += '</tbody></table></div>';
+    }
+
+    html += '</div></div>';
+    return html;
+  }
+
   // ─── MAIN RENDER ───
   function render(d){
     var state = botState(d);
@@ -1044,6 +1139,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     html += '<div class="chart-section">' +
       '<div class="chart-panel">' + renderChartPanel(d) + '</div>' +
     '</div>';
+
+    // ═══ SESSION PNL + TRADE LOG ═══
+    html += renderSessionPnl(d);
+    html += renderTradeLog(d);
 
     // ═══ ACTIVITY FEED — continuous bottom stream ═══
     html += '<div class="feed-section">' +
