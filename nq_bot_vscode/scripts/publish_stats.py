@@ -742,7 +742,7 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
         # Push (force-with-lease because we may have amended)
         for attempt in range(3):
             result = subprocess.run(
-                ["git", "push", "--force-with-lease", "origin", "HEAD"],
+                ["git", "push", "origin", "HEAD"],
                 cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=60,
             )
             if result.returncode == 0:
