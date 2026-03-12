@@ -38,6 +38,7 @@ import logging.handlers
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -57,6 +58,114 @@ HEARTBEAT_FILE = LOGS_DIR / "heartbeat_state.json"
 # Account size for percentage calculation (not exposed)
 _ACCOUNT_SIZE = 50_000.0
 
+def atomic_json_write(filepath, data):
+    """Write JSON atomically — write to temp file, then rename."""
+    dir_name = os.path.dirname(filepath)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=dir_name,
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            json.dump(data, tmp, indent=2)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_path = tmp.name
+        os.replace(tmp_path, str(filepath))
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
+def repair_corrupted_jsonl(filepath: Path) -> int:
+    """
+    Attempt to repair a corrupted JSONL file at startup.
+
+    Reads each line, keeps valid JSON objects, writes back atomically.
+    Returns the number of recovered entries, or -1 if no repair needed.
+    """
+    if not filepath.exists():
+        return -1
+
+    try:
+        text = filepath.read_text(encoding="utf-8")
+    except OSError:
+        return -1
+
+    # Quick check: try loading the whole file as JSON first.
+    # If it parses as a single JSON array, the file isn't JSONL — rewrite as JSONL.
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            # File is a JSON array, not JSONL — convert to JSONL
+            lines = [json.dumps(entry) for entry in data]
+            dir_name = str(filepath.parent)
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", dir=dir_name, suffix=".tmp", delete=False,
+                ) as tmp:
+                    tmp.write("\n".join(lines) + "\n" if lines else "")
+                    tmp.flush()
+                    os.fsync(tmp.fileno())
+                    tmp_path = tmp.name
+                os.replace(tmp_path, str(filepath))
+            except OSError:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+            return len(data)
+        # Single JSON object, not a list — no repair needed
+        return -1
+    except json.JSONDecodeError:
+        pass
+
+    # File is either valid JSONL or corrupted — parse line by line
+    recovered = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            recovered.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # Skip corrupted lines
+
+    if not recovered:
+        return 0
+
+    # Write back atomically as clean JSONL
+    dir_name = str(filepath.parent)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=dir_name, suffix=".tmp", delete=False,
+        ) as tmp:
+            for entry in recovered:
+                tmp.write(json.dumps(entry) + "\n")
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_path = tmp.name
+        os.replace(tmp_path, str(filepath))
+    except OSError:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        return 0
+
+    return len(recovered)
+
+
 # Track publisher uptime for heartbeat
 _PUBLISHER_START = datetime.now(timezone.utc)
 
@@ -74,7 +183,7 @@ _MAX_FEED_ITEMS = 50
 
 
 def _read_json_safe(filepath: Path, default=None):
-    """Read a JSON file, returning default on missing/error."""
+    """Read a JSON file safely, returning default on missing/corrupt/error."""
     if default is None:
         default = {}
     try:
@@ -84,8 +193,8 @@ def _read_json_safe(filepath: Path, default=None):
         if not text:
             return default
         return json.loads(text)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Error reading %s: %s", filepath, e)
+    except (json.JSONDecodeError, FileNotFoundError, PermissionError, OSError):
+        # Graceful fallback — file may be mid-write or corrupted
         return default
 
 
@@ -523,8 +632,8 @@ def build_trade_viz_data() -> dict | None:
 
     Returns None if no trade data available.
     """
-    trades_raw = _read_json_safe(LOGS_DIR / "paper_trades.json", default=[])
-    if not isinstance(trades_raw, list) or not trades_raw:
+    trades_raw = _read_jsonl_safe(LOGS_DIR / "paper_trades.json", limit=500)
+    if not trades_raw:
         return None
 
     candles_raw = _read_json_safe(LOGS_DIR / "candle_buffer.json", default=[])
@@ -672,9 +781,9 @@ def _clean_git_locks() -> None:
 def git_commit_and_push(dry_run: bool = False) -> bool:
     """Commit and push live_stats.json to GitHub.
 
-    Strategy: amend the last commit if it was a stats update (keeps repo clean),
-    otherwise create a new commit.  Force-push with lease for safety.
-    If push fails due to divergence, reset to remote and re-commit.
+    Strategy: always create a new commit (no amend), pull --rebase to
+    incorporate remote changes, then standard push.  Never force-push.
+    If rebase fails due to conflicts, log and skip this cycle.
     """
     try:
         # Clean stale lock files before any git operation
@@ -715,69 +824,43 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
 
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-        # Check if last commit was a stats update — if so, amend it
-        last_msg = subprocess.run(
-            ["git", "log", "-1", "--format=%s"],
-            cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=10,
+        # Always create a new commit (never amend — avoids need for force-push)
+        result = subprocess.run(
+            ["git", "commit", "-m",
+             f"stats: update live_stats.json ({timestamp})"],
+            cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
         )
-        if last_msg.returncode == 0 and last_msg.stdout.strip().startswith("stats:"):
-            # Amend the previous stats commit (avoids piling up hundreds of commits)
-            result = subprocess.run(
-                ["git", "commit", "--amend", "-m",
-                 f"stats: update live_stats.json ({timestamp})"],
-                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
-            )
-        else:
-            # New commit (after a code commit)
-            result = subprocess.run(
-                ["git", "commit", "-m",
-                 f"stats: update live_stats.json ({timestamp})"],
-                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
-            )
 
         if result.returncode != 0:
             logger.warning("Git commit failed: %s", result.stderr)
             return False
 
-        # Push (force-with-lease because we may have amended)
-        for attempt in range(3):
-            result = subprocess.run(
-                ["git", "push", "--force-with-lease", "origin", "HEAD"],
-                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=60,
+        # Pull --rebase to incorporate any remote changes before pushing
+        rebase_result = subprocess.run(
+            ["git", "pull", "--rebase", "origin", "main"],
+            cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=60,
+        )
+        if rebase_result.returncode != 0:
+            stderr = rebase_result.stderr.strip()
+            # Rebase conflict — abort and skip this cycle
+            logger.warning("Rebase conflict — aborting and skipping this push cycle: %s", stderr)
+            subprocess.run(
+                ["git", "rebase", "--abort"],
+                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=10,
             )
-            if result.returncode == 0:
-                logger.info("Stats pushed to GitHub")
-                return True
+            return False
 
-            stderr = result.stderr.strip()
-            logger.warning("Git push failed (attempt %d/3): %s", attempt + 1, stderr)
+        # Standard push (no force flags)
+        result = subprocess.run(
+            ["git", "push", "origin", "main"],
+            cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0:
+            logger.info("Stats pushed to GitHub")
+            return True
 
-            # If diverged from remote, fetch and reset to remote, then re-apply
-            if "rejected" in stderr or "fetch first" in stderr or "non-fast-forward" in stderr:
-                logger.info("Diverged from remote — syncing...")
-                subprocess.run(
-                    ["git", "fetch", "origin", "main"],
-                    cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
-                )
-                subprocess.run(
-                    ["git", "reset", "--soft", "origin/main"],
-                    cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=10,
-                )
-                # Re-stage and commit
-                subprocess.run(
-                    ["git", "add", str(rel_path), str(rel_viz_path)],
-                    cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
-                )
-                subprocess.run(
-                    ["git", "commit", "-m",
-                     f"stats: update live_stats.json ({timestamp})"],
-                    cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
-                )
-                continue
-
-            time.sleep(2 ** (attempt + 1))
-
-        logger.error("Git push failed after 3 attempts")
+        stderr = result.stderr.strip()
+        logger.warning("Git push failed: %s", stderr)
         return False
 
     except subprocess.TimeoutExpired:
@@ -885,6 +968,15 @@ def main():
         format="%(asctime)s | %(levelname)-8s | %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # One-time repair of corrupted JSONL files at startup
+    for jsonl_file in [
+        LOGS_DIR / "paper_trades.json",
+        LOGS_DIR / "trade_decisions.json",
+    ]:
+        n = repair_corrupted_jsonl(jsonl_file)
+        if n >= 0:
+            logger.info("Repaired corrupted %s — recovered %d entries", jsonl_file.name, n)
 
     if args.once:
         stats = build_sanitized_stats()
