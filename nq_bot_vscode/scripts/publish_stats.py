@@ -723,7 +723,7 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
         if last_msg.returncode == 0 and last_msg.stdout.strip().startswith("stats:"):
             # Amend the previous stats commit (avoids piling up hundreds of commits)
             result = subprocess.run(
-                ["git", "commit", "--amend", "-m",
+                ["git", "commit", "-m",
                  f"stats: update live_stats.json ({timestamp})"],
                 cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=30,
             )
