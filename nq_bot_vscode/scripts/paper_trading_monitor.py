@@ -22,6 +22,8 @@ Usage:
 import json
 import logging
 import math
+import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -324,7 +326,7 @@ class PaperTradingMonitor:
             self._last_state_save = now
 
     def save_state(self) -> None:
-        """Write full state to paper_trading_state.json."""
+        """Write full state to paper_trading_state.json (atomic write)."""
         state = {
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "account_size": self._account_size,
@@ -348,11 +350,26 @@ class PaperTradingMonitor:
             "sharpe_stable": self.sharpe_is_stable,
             "daily_pnls": {k: round(v, 2) for k, v in self._daily_pnls.items()},
         }
+        tmp_path = None
         try:
-            with open(self._state_path, "w") as f:
-                json.dump(state, f, indent=2)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=str(self._log_dir),
+                suffix=".tmp",
+                delete=False,
+            ) as tmp:
+                json.dump(state, tmp, indent=2)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+                tmp_path = tmp.name
+            os.replace(tmp_path, str(self._state_path))
         except OSError as e:
             logger.warning("Failed to write paper trading state: %s", e)
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
     def _load_state(self) -> None:
         """Load state from disk if available."""
