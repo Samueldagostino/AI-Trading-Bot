@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-12T04:05:26.080770+00:00",
+  "updated": "2026-03-12T04:06:29.290665+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 200,
@@ -7,8 +7,8 @@
   "win_rate": 0.0,
   "profit_factor": 0.0,
   "session_pnl_pct": 0.0,
-  "signals_rejected": 50,
-  "signals_approved": 0,
+  "signals_rejected": 49,
+  "signals_approved": 1,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
@@ -29,26 +29,8 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 24743.25,
+  "last_price": 24738.0,
   "recent_decisions": [
-    {
-      "time": "23:56:40 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:56:50 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:59:35 ET",
-      "direction": "LONG",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
     {
       "time": "23:59:40 ET",
       "direction": "LONG",
@@ -90,77 +72,39 @@
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
+    },
+    {
+      "time": "00:05:30 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "00:05:40 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "00:06:25 ET",
+      "direction": "SHORT",
+      "decision": "APPROVED",
+      "reason": "Approved"
     }
   ],
   "heartbeat": {
     "last_seen": "2026-03-11T17:37:35.115789+00:00",
-    "seconds_since_last": 37671.0,
+    "seconds_since_last": 37734.2,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
   "state": {
     "mode": "MONITORING",
-    "last_trade_time": "",
+    "last_trade_time": "00:06:25 ET",
     "active_positions": 0
   },
   "active_trade": null,
   "candle_buffer": [
-    {
-      "t": "",
-      "o": 24731.5,
-      "h": 24732.75,
-      "l": 24731.0,
-      "c": 24731.75
-    },
-    {
-      "t": "",
-      "o": 24731.75,
-      "h": 24735.75,
-      "l": 24731.75,
-      "c": 24735.25
-    },
-    {
-      "t": "",
-      "o": 24735.25,
-      "h": 24736.0,
-      "l": 24734.5,
-      "c": 24735.0
-    },
-    {
-      "t": "",
-      "o": 24734.5,
-      "h": 24735.0,
-      "l": 24733.0,
-      "c": 24733.75
-    },
-    {
-      "t": "",
-      "o": 24733.5,
-      "h": 24733.75,
-      "l": 24732.0,
-      "c": 24732.0
-    },
-    {
-      "t": "",
-      "o": 24732.25,
-      "h": 24733.75,
-      "l": 24732.0,
-      "c": 24733.75
-    },
-    {
-      "t": "",
-      "o": 24733.25,
-      "h": 24733.5,
-      "l": 24732.75,
-      "c": 24733.25
-    },
-    {
-      "t": "",
-      "o": 24733.75,
-      "h": 24733.75,
-      "l": 24732.5,
-      "c": 24733.25
-    },
     {
       "t": "",
       "o": 24733.5,
@@ -384,9 +328,86 @@
       "h": 24743.5,
       "l": 24742.25,
       "c": 24743.25
+    },
+    {
+      "t": "",
+      "o": 24743.75,
+      "h": 24744.25,
+      "l": 24742.5,
+      "c": 24743.5
+    },
+    {
+      "t": "",
+      "o": 24743.25,
+      "h": 24743.5,
+      "l": 24741.75,
+      "c": 24742.5
+    },
+    {
+      "t": "",
+      "o": 24742.5,
+      "h": 24744.75,
+      "l": 24742.25,
+      "c": 24743.0
+    },
+    {
+      "t": "",
+      "o": 24742.25,
+      "h": 24743.0,
+      "l": 24740.5,
+      "c": 24741.5
+    },
+    {
+      "t": "",
+      "o": 24741.25,
+      "h": 24741.5,
+      "l": 24741.25,
+      "c": 24741.25
+    },
+    {
+      "t": "",
+      "o": 24741.0,
+      "h": 24741.5,
+      "l": 24738.75,
+      "c": 24739.5
+    },
+    {
+      "t": "",
+      "o": 24738.75,
+      "h": 24739.0,
+      "l": 24737.25,
+      "c": 24738.5
+    },
+    {
+      "t": "",
+      "o": 24739.5,
+      "h": 24740.0,
+      "l": 24737.25,
+      "c": 24738.0
     }
   ],
   "activity_feed": [
+    {
+      "type": "decision",
+      "time": "00:05:30 ET",
+      "title": "Signal Filtered",
+      "detail": "LONG signal rejected \u2014 HTF_GATE",
+      "color": "muted"
+    },
+    {
+      "type": "decision",
+      "time": "00:05:40 ET",
+      "title": "Signal Filtered",
+      "detail": "LONG signal rejected \u2014 HTF_GATE",
+      "color": "muted"
+    },
+    {
+      "type": "trade",
+      "time": "00:06:25 ET",
+      "title": "Trade Entry",
+      "detail": "SHORT signal approved",
+      "color": "green"
+    },
     {
       "type": "decision",
       "time": "00:05:20 ET",
