@@ -112,6 +112,12 @@ class GEXMonitor:
         self._mock_cycle = 0
         self._ibkr_client = ibkr_client
 
+        # Exponential backoff for API errors (403, 401, etc.)
+        self._consecutive_errors = 0
+        self._backoff_until: float = 0.0  # time.time() value; skip fetches until then
+        self._BACKOFF_THRESHOLD = 3       # errors before backoff kicks in
+        self._BACKOFF_SECONDS = 900       # 15 minutes
+
         # Log directory for gamma_levels.json
         if log_dir is None:
             log_dir = str(Path(__file__).resolve().parent.parent / "logs")
@@ -330,6 +336,11 @@ class GEXMonitor:
         if not self._enabled:
             return self._generate_mock_data(ticker)
 
+        # Exponential backoff: skip fetch if in cooldown
+        now = time.time()
+        if now < self._backoff_until:
+            return None  # Silently skip — already logged when backoff started
+
         try:
             import requests
             url = f"{QUANTDATA_API_BASE}{QUANTDATA_ENDPOINTS['heat_map']}"
@@ -342,17 +353,40 @@ class GEXMonitor:
             )
 
             if resp.status_code in (401, 403, 404):
-                logger.warning(
-                    "GEX API failed (HTTP %d) for %s — returning None",
-                    resp.status_code, ticker,
-                )
+                self._consecutive_errors += 1
+                if self._consecutive_errors >= self._BACKOFF_THRESHOLD:
+                    self._backoff_until = now + self._BACKOFF_SECONDS
+                    logger.warning(
+                        "GEX API unavailable (HTTP %d, %d consecutive errors) "
+                        "— retrying in %d min",
+                        resp.status_code, self._consecutive_errors,
+                        self._BACKOFF_SECONDS // 60,
+                    )
+                else:
+                    logger.warning(
+                        "GEX API failed (HTTP %d) for %s — %d/%d before backoff",
+                        resp.status_code, ticker,
+                        self._consecutive_errors, self._BACKOFF_THRESHOLD,
+                    )
                 return None
 
             resp.raise_for_status()
+            # Success: reset error counter
+            self._consecutive_errors = 0
+            self._backoff_until = 0.0
             return resp.json()
 
         except Exception as e:
-            logger.warning("GEX fetch failed for %s: %s", ticker, e)
+            self._consecutive_errors += 1
+            if self._consecutive_errors >= self._BACKOFF_THRESHOLD:
+                self._backoff_until = now + self._BACKOFF_SECONDS
+                logger.warning(
+                    "GEX fetch failed (%s) — %d consecutive errors, "
+                    "retrying in %d min",
+                    e, self._consecutive_errors, self._BACKOFF_SECONDS // 60,
+                )
+            else:
+                logger.warning("GEX fetch failed for %s: %s", ticker, e)
             return None
 
     def compute_net_gex(self, raw_data: Optional[dict], ticker: str = "SPY") -> Optional[dict]:

@@ -258,18 +258,18 @@ class ScaleOutExecutor:
     @staticmethod
     def score_based_contracts(signal_score: float, regime_multiplier: float = 1.0) -> dict:
         """
-        5 contracts: C1 (1) + C2 (1) + C3 (3).
+        4 contracts: C1 (1) + C2 (1) + C3 (2).
 
-        C3 (runner) gets 3× allocation — data shows it's the only
-        consistently profitable leg (W/L ratio 1.77, +$3,653 in backtest).
+        C3 (runner) gets 2× allocation — delayed entry + ATR trail captures
+        fat tails while C1 canary validates direction first.
 
         C4 is unused (kept for backward compat).
 
         Partial fill handling: if fewer contracts fill, priority order is
         C3 first (moneymaker), then C1 (quick feedback), then C2 (structural).
         """
-        alloc = {"c1": 1, "c2": 1, "c3": 3, "c4": 0}
-        alloc["total"] = 5
+        alloc = {"c1": 1, "c2": 1, "c3": 2, "c4": 0}
+        alloc["total"] = 4
         return alloc
 
     @staticmethod
@@ -286,8 +286,8 @@ class ScaleOutExecutor:
         adjusted = {"c1": 0, "c2": 0, "c3": 0, "c4": 0}
         remaining = filled_contracts
 
-        # C3 gets up to 3 contracts
-        adjusted["c3"] = min(3, remaining)
+        # C3 gets up to 2 contracts
+        adjusted["c3"] = min(2, remaining)
         remaining -= adjusted["c3"]
 
         # C1 gets 1 if available
@@ -631,17 +631,20 @@ class ScaleOutExecutor:
             trade.c1_exit_profit_pts / max(trade.c1_bars_elapsed, 1), 4
         )
 
-        # ── IMMEDIATE BREAKEVEN on remaining legs after C1 profit ──
-        # If C1 exited profitably, move all remaining stops to breakeven.
-        # Buffer of 2 pts covers spread/slippage on the BE exit.
-        BE_BUFFER_PTS = 2.0
+        # ── BREAKEVEN on remaining legs after C1 profit ──
+        # Variant B (delayed): DO NOT apply immediate BE — let _apply_delayed_be()
+        # handle it during SCALING phase once MFE >= 1.5× stop_distance.
+        # Variant D (immediate): Apply BE instantly on C1 exit (original behavior).
+        cfg = self.scale_config
+        BE_BUFFER_PTS = cfg.c2_breakeven_buffer_points
         c1_was_profitable = trade.c1_exit_profit_pts > 0
+        be_variant = getattr(cfg, "c2_be_variant", "D")
 
-        if c1_was_profitable:
+        if c1_was_profitable and be_variant != "B":
+            # Variant D / A / C: immediate breakeven (original behavior)
             for leg in trade.open_legs:
                 if direction == "long":
                     be_stop = round(trade.entry_price + BE_BUFFER_PTS, 2)
-                    # Only tighten (never widen the stop)
                     if be_stop > leg.stop_price:
                         leg.stop_price = be_stop
                         leg.be_triggered = True
@@ -653,8 +656,18 @@ class ScaleOutExecutor:
 
             be_legs = [l.leg_label for l in trade.open_legs if l.be_triggered]
             logger.info(
-                f"  BE TRIGGERED on {be_legs} after C1 profit | "
+                f"  BE TRIGGERED (immediate) on {be_legs} after C1 profit | "
                 f"New stop: {trade.entry_price + (BE_BUFFER_PTS if direction == 'long' else -BE_BUFFER_PTS):.2f}"
+            )
+        elif c1_was_profitable and be_variant == "B":
+            # Variant B: delayed breakeven — keep original stops, let _apply_delayed_be()
+            # handle BE activation during SCALING once MFE >= threshold
+            threshold = round(trade.stop_distance * cfg.c2_be_delay_multiplier, 1)
+            logger.info(
+                f"  BE DELAYED (Variant B) on {[l.leg_label for l in trade.open_legs]} | "
+                f"C1 profitable but BE requires MFE >= {threshold}pts "
+                f"({cfg.c2_be_delay_multiplier}x stop {trade.stop_distance:.1f}pts) | "
+                f"Keeping original stops"
             )
 
         logger.info(
@@ -870,7 +883,12 @@ class ScaleOutExecutor:
 
     def _apply_delayed_be(self, trade: ScaleOutTrade, leg: ContractLeg,
                           cfg, direction: str) -> None:
-        """Variant B: Move stop to breakeven once MFE >= threshold."""
+        """Variant B: Move stop to breakeven once MFE >= threshold.
+
+        The breakeven trigger is DELAYED until the trade proves itself by
+        reaching MFE >= c2_be_delay_multiplier × stop_distance. This prevents
+        premature BE stops from stealing profitable runners.
+        """
         if leg.be_triggered:
             return
 
@@ -894,10 +912,18 @@ class ScaleOutExecutor:
                 # Update legacy tracking
                 if leg.leg_label == "C2":
                     trade.c2_be_triggered = True
-                logger.debug(
-                    f"  {leg.leg_label} BE triggered @ MFE {leg.mfe:.1f}pts "
-                    f"(threshold {threshold:.1f}pts) | new stop: {new_stop:.2f}"
+                logger.info(
+                    f"  {leg.leg_label} BREAKEVEN ACTIVATED: MFE {leg.mfe:.1f}pts "
+                    f"reached threshold {threshold:.1f}pts — stop moved to {new_stop:.2f}"
                 )
+        else:
+            # MFE not yet at threshold — keep original stop
+            pct = round(leg.mfe / threshold * 100, 1) if threshold > 0 else 0
+            logger.debug(
+                f"  {leg.leg_label} breakeven DELAYED: MFE {leg.mfe:.1f}pts < "
+                f"threshold {threshold:.1f}pts ({pct}% of target) — "
+                f"keeping original stop at {leg.stop_price:.2f}"
+            )
 
     def _update_atr_trail(self, trade: ScaleOutTrade, leg: ContractLeg,
                           cfg, direction: str) -> None:
