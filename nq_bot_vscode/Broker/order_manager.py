@@ -1,11 +1,12 @@
 """
-IBKR Order Manager — 2-Contract Scale-Out Execution
+IBKR Order Manager — 4-Contract Scale-Out Execution
 ======================================================
-Manages the full order lifecycle for the MNQ 2-contract strategy via TWS API.
+Manages the full order lifecycle for the MNQ 4-contract strategy via TWS API.
 
 Architecture:
-  C1: Fixed target exit (limit order at c1_target)
-  C2: Trailing stop runner (dynamically updated stop order)
+  C1 (1): Canary — 5-bar time exit
+  C2 (1): Structural target + delayed breakeven
+  C3 (2): ATR trail runner (delayed entry)
 
 Order flow:
   1. Signal APPROVED -> submit_entry()
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 # CONSTANTS — SAFETY LIMITS (NOT CONFIGURABLE)
 # ═══════════════════════════════════════════════════════════════
-MAX_CONTRACTS = 2                   # ABSOLUTE MAXIMUM — no exceptions
+MAX_CONTRACTS = 4                   # ABSOLUTE MAXIMUM — no exceptions (v3: 4-contract scale-out)
 MNQ_POINT_VALUE = 2.0               # $2.00 per point per contract
 MNQ_TICK_SIZE = 0.25                # Minimum price increment
 ENTRY_CHASE_TICKS = 2               # 2 ticks = 0.50 pts chase allowance

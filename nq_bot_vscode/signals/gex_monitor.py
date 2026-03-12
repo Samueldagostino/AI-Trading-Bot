@@ -619,39 +619,28 @@ class GEXMonitor:
 
     def _generate_mock_data(self, ticker: str) -> dict:
         """
-        Generate realistic mock GEX data for dry-run testing.
-        Simulates negative gamma regime matching current market conditions.
-        Net GEX cycles between -8B and -18B.
+        Return neutral GEX data when API is unavailable.
+
+        No fake data — returns UNKNOWN regime with 1.0x modifier so
+        GEX never influences trade decisions without real market data.
         """
+        if self._mock_cycle == 0:
+            logger.warning(
+                "GEX API token not configured — modifier disabled (1.0x neutral)"
+            )
         self._mock_cycle += 1
-        cycle_pos = math.sin(self._mock_cycle * 0.3)
-
-        # Cycle net_gex between -8B and -18B
-        net_gex = -13e9 + cycle_pos * 5e9  # range: -18B to -8B
-
-        # Spot prices (approximate)
-        spots = {"SPY": 583.55, "QQQ": 502.30}
-        spot = spots.get(ticker, 500.0) + random.uniform(-2, 2)
-
-        display = _format_gex_display(net_gex)
-        regime = self.classify_regime(net_gex)
-
-        # Generate mock strike data for flip/wall calculation
-        gamma_flip = round(spot - 3.0 + random.uniform(-1, 1), 2)
-        call_wall = round(spot + 5.0 + random.uniform(-1, 1), 2)
-        put_wall = round(spot - 8.0 + random.uniform(-1, 1), 2)
 
         return {
             "_mock": True,
             "ticker": ticker,
-            "spot_price": round(spot, 2),
-            "net_gex": net_gex,
-            "net_gex_display": display,
-            "regime": regime,
-            "gamma_flip_strike": gamma_flip,
-            "nearest_call_wall": call_wall,
-            "nearest_put_wall": put_wall,
-            "expirations_included": 4,
-            "strikes_analyzed": 42,
+            "spot_price": 0.0,
+            "net_gex": 0.0,
+            "net_gex_display": "N/A",
+            "regime": "UNKNOWN",
+            "gamma_flip_strike": None,
+            "nearest_call_wall": None,
+            "nearest_put_wall": None,
+            "expirations_included": 0,
+            "strikes_analyzed": 0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }

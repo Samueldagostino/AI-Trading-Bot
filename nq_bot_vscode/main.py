@@ -184,8 +184,9 @@ class TradingOrchestrator:
         logger.info("NQ TRADING BOT - INITIALIZING (MULTI-TIMEFRAME)")
         logger.info(f"  Environment:  {self.config.environment}")
         logger.info(f"  Broker:       Tradovate ({self.config.tradovate.environment})")
-        logger.info(f"  Symbol:       {self.config.tradovate.symbol}")
-        logger.info(f"  Strategy:     2-contract scale-out (HC filtered)")
+        _symbol = self.config.tradovate.resolve_front_month()
+        logger.info(f"  Symbol:       {_symbol}")
+        logger.info(f"  Strategy:     4-contract scale-out (HC filtered, v3)")
         logger.info(f"  C1 Exit:      Trail from +{self.config.scale_out.c1_profit_threshold_pts}pts "
                      f"(trail {self.config.scale_out.c1_trail_distance_pts}pts, "
                      f"fallback {self.config.scale_out.c1_max_bars_fallback} bars)")
