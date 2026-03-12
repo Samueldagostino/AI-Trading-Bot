@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-12T03:08:53.982130+00:00",
+  "updated": "2026-03-12T03:09:56.270535+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 200,
@@ -7,42 +7,30 @@
   "win_rate": 0.0,
   "profit_factor": 0.0,
   "session_pnl_pct": 0.0,
-  "signals_rejected": 43,
-  "signals_approved": 4,
+  "signals_rejected": 42,
+  "signals_approved": 5,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
     "overnight": {
       "value": 1.0,
-      "display": "1.0x (No data)"
+      "display": "1.0x (neutral)"
     },
     "fomc": {
       "value": 1.0,
-      "display": "1.0x (No data)"
+      "display": "1.0x (no_fomc)"
     },
     "gamma": {
-      "value": 1.0,
-      "display": "1.0x (No data)"
+      "value": 1.1,
+      "display": "1.1x (Mild negative GEX -$8.1B, trends may extend)"
     },
     "har_rv": {
-      "value": 1.0,
-      "display": "1.0x (No data)"
+      "value": 1.1,
+      "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-9.2)"
     }
   },
-  "last_price": 24751.0,
+  "last_price": 24745.75,
   "recent_decisions": [
-    {
-      "time": "22:31:40 ET",
-      "direction": "LONG",
-      "decision": "APPROVED",
-      "reason": "Approved"
-    },
-    {
-      "time": "22:35:05 ET",
-      "direction": "LONG",
-      "decision": "EXIT",
-      "reason": "Approved"
-    },
     {
       "time": "22:37:55 ET",
       "direction": "LONG",
@@ -90,112 +78,33 @@
       "direction": "LONG",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:09:05 ET",
+      "direction": "LONG",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:09:10 ET",
+      "direction": "SHORT",
+      "decision": "APPROVED",
+      "reason": "Approved"
     }
   ],
   "heartbeat": {
     "last_seen": "2026-03-11T17:37:35.115789+00:00",
-    "seconds_since_last": 34278.9,
+    "seconds_since_last": 34341.2,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
   "state": {
     "mode": "MONITORING",
-    "last_trade_time": "22:37:55 ET",
+    "last_trade_time": "23:09:10 ET",
     "active_positions": 0
   },
   "active_trade": null,
   "candle_buffer": [
-    {
-      "t": "",
-      "o": 24742.5,
-      "h": 24742.5,
-      "l": 24741.0,
-      "c": 24741.5
-    },
-    {
-      "t": "",
-      "o": 24741.25,
-      "h": 24741.25,
-      "l": 24740.5,
-      "c": 24741.0
-    },
-    {
-      "t": "",
-      "o": 24740.75,
-      "h": 24740.75,
-      "l": 24739.0,
-      "c": 24739.5
-    },
-    {
-      "t": "",
-      "o": 24739.75,
-      "h": 24741.25,
-      "l": 24739.75,
-      "c": 24741.25
-    },
-    {
-      "t": "",
-      "o": 24741.25,
-      "h": 24741.75,
-      "l": 24741.25,
-      "c": 24741.5
-    },
-    {
-      "t": "",
-      "o": 24740.5,
-      "h": 24741.5,
-      "l": 24740.5,
-      "c": 24741.5
-    },
-    {
-      "t": "",
-      "o": 24742.25,
-      "h": 24745.0,
-      "l": 24742.25,
-      "c": 24744.25
-    },
-    {
-      "t": "",
-      "o": 24744.25,
-      "h": 24746.0,
-      "l": 24743.0,
-      "c": 24746.0
-    },
-    {
-      "t": "",
-      "o": 24745.25,
-      "h": 24746.0,
-      "l": 24743.75,
-      "c": 24744.0
-    },
-    {
-      "t": "",
-      "o": 24744.5,
-      "h": 24747.0,
-      "l": 24744.5,
-      "c": 24746.75
-    },
-    {
-      "t": "",
-      "o": 24746.75,
-      "h": 24747.75,
-      "l": 24744.5,
-      "c": 24746.0
-    },
-    {
-      "t": "",
-      "o": 24746.0,
-      "h": 24746.25,
-      "l": 24745.25,
-      "c": 24745.25
-    },
-    {
-      "t": "",
-      "o": 24745.25,
-      "h": 24746.75,
-      "l": 24745.0,
-      "c": 24746.25
-    },
     {
       "t": "",
       "o": 24746.5,
@@ -384,9 +293,128 @@
       "h": 24753.75,
       "l": 24750.25,
       "c": 24751.0
+    },
+    {
+      "t": "",
+      "o": 24750.5,
+      "h": 24751.25,
+      "l": 24749.0,
+      "c": 24749.5
+    },
+    {
+      "t": "",
+      "o": 24749.25,
+      "h": 24749.75,
+      "l": 24748.75,
+      "c": 24749.5
+    },
+    {
+      "t": "",
+      "o": 24749.75,
+      "h": 24751.0,
+      "l": 24749.25,
+      "c": 24750.75
+    },
+    {
+      "t": "",
+      "o": 24751.0,
+      "h": 24751.75,
+      "l": 24750.5,
+      "c": 24751.5
+    },
+    {
+      "t": "",
+      "o": 24751.5,
+      "h": 24751.75,
+      "l": 24750.0,
+      "c": 24750.0
+    },
+    {
+      "t": "",
+      "o": 24750.25,
+      "h": 24751.25,
+      "l": 24750.25,
+      "c": 24751.25
+    },
+    {
+      "t": "",
+      "o": 24750.5,
+      "h": 24750.5,
+      "l": 24749.0,
+      "c": 24749.0
+    },
+    {
+      "t": "",
+      "o": 24749.5,
+      "h": 24749.5,
+      "l": 24747.5,
+      "c": 24747.5
+    },
+    {
+      "t": "",
+      "o": 24747.5,
+      "h": 24747.5,
+      "l": 24746.25,
+      "c": 24747.5
+    },
+    {
+      "t": "",
+      "o": 24747.25,
+      "h": 24747.5,
+      "l": 24746.0,
+      "c": 24747.0
+    },
+    {
+      "t": "",
+      "o": 24746.25,
+      "h": 24747.0,
+      "l": 24744.5,
+      "c": 24744.5
+    },
+    {
+      "t": "",
+      "o": 24744.5,
+      "h": 24745.25,
+      "l": 24744.25,
+      "c": 24744.75
+    },
+    {
+      "t": "",
+      "o": 24745.25,
+      "h": 24746.25,
+      "l": 24745.25,
+      "c": 24745.75
     }
   ],
   "activity_feed": [
+    {
+      "type": "modifier",
+      "time": "23:09:56 ET",
+      "title": "Gamma Exposure Updated",
+      "detail": "1.00x \u2192 1.10x \u2014 ",
+      "color": "amber"
+    },
+    {
+      "type": "modifier",
+      "time": "23:09:56 ET",
+      "title": "Volatility (HAR-RV) Updated",
+      "detail": "1.00x \u2192 1.10x \u2014 ",
+      "color": "amber"
+    },
+    {
+      "type": "decision",
+      "time": "23:09:05 ET",
+      "title": "Signal Filtered",
+      "detail": "LONG signal rejected \u2014 HTF_GATE",
+      "color": "muted"
+    },
+    {
+      "type": "trade",
+      "time": "23:09:10 ET",
+      "title": "Trade Entry",
+      "detail": "SHORT signal approved",
+      "color": "green"
+    },
     {
       "type": "decision",
       "time": "23:03:15 ET",
