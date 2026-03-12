@@ -259,6 +259,64 @@ def _build_trade_log() -> tuple[list, float]:
     return trade_log, round(session_pnl, 2)
 
 
+def _build_trade_events(decisions: list) -> list:
+    """
+    Build trade entry/exit events from decision log for chart markers.
+    Returns list of events with: type (ENTRY/EXIT), timestamp, direction,
+    price, score, stop, target, pnl, reason.
+    """
+    from zoneinfo import ZoneInfo
+    today_et = datetime.now(ZoneInfo("America/New_York")).date()
+    events = []
+
+    for d in decisions:
+        ts_str = d.get("timestamp", "")
+        if not ts_str:
+            continue
+
+        try:
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            et = dt.astimezone(ZoneInfo("America/New_York"))
+        except (ValueError, TypeError):
+            continue
+
+        if et.date() != today_et:
+            continue
+
+        decision = d.get("decision", "")
+
+        if decision == "APPROVED":
+            entry_price = d.get("entry_price", d.get("price_at_signal", 0.0))
+            events.append({
+                "type": "ENTRY",
+                "time": dt.isoformat(),
+                "time_et": et.strftime("%H:%M:%S ET"),
+                "direction": d.get("signal_direction", ""),
+                "price": round(entry_price, 2),
+                "score": round(d.get("confluence_score", 0.0), 3),
+                "stop_width": round(d.get("stop_width", 0.0), 2),
+                "c1_target": round(d.get("c1_target", 0.0), 2),
+                "c2_trail_start": round(d.get("c2_trail_start", 0.0), 2),
+            })
+
+        elif decision == "EXIT":
+            events.append({
+                "type": "EXIT",
+                "time": dt.isoformat(),
+                "time_et": et.strftime("%H:%M:%S ET"),
+                "direction": d.get("signal_direction", ""),
+                "price": round(d.get("exit_price", 0.0), 2),
+                "entry_price": round(d.get("entry_price", 0.0), 2),
+                "pnl": round(d.get("total_pnl", 0.0), 2),
+                "reason": d.get("exit_reason", ""),
+            })
+
+    return events
+
+
+
 def build_sanitized_stats() -> dict:
     """
     Build sanitized stats from log files.
@@ -369,17 +427,37 @@ def build_sanitized_stats() -> dict:
     if not active_trade or not active_trade.get("side"):
         active_trade = None  # No active trade
 
-    # Last 40 candles for the mini trade chart (publicly available price data)
+    # Full-day candles for the chart (publicly available price data)
+    # Include ALL candles from today (12:00 AM - 11:59 PM ET)
     chart_candles = []
     if isinstance(candles, list) and candles:
-        for c in candles[-40:]:
-            chart_candles.append({
-                "t": c.get("t", ""),
-                "o": c.get("o", 0),
-                "h": c.get("h", 0),
-                "l": c.get("l", 0),
-                "c": c.get("c", 0),
-            })
+        from zoneinfo import ZoneInfo
+        today_et = datetime.now(ZoneInfo("America/New_York")).date()
+        for c in candles:
+            ts_str = c.get("t", "")
+            include = True
+            if ts_str:
+                try:
+                    dt = datetime.fromisoformat(ts_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    et = dt.astimezone(ZoneInfo("America/New_York"))
+                    if et.date() != today_et:
+                        include = False
+                except (ValueError, TypeError):
+                    pass
+            if include:
+                chart_candles.append({
+                    "t": c.get("t", ""),
+                    "o": c.get("o", 0),
+                    "h": c.get("h", 0),
+                    "l": c.get("l", 0),
+                    "c": c.get("c", 0),
+                    "v": c.get("vol", c.get("v", 0)),
+                })
+
+    # Build trade events (entries + exits) for chart markers
+    trade_events = _build_trade_events(decisions)
 
     return {
         "updated": datetime.now(timezone.utc).isoformat(),
@@ -406,6 +484,8 @@ def build_sanitized_stats() -> dict:
         # Session PnL and trade log
         "session_pnl_dollars": session_pnl_dollars,
         "trade_log": trade_log,
+        # Trade events for chart markers (entries + exits with prices)
+        "trade_events": trade_events,
     }
 
 
