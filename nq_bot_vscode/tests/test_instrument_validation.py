@@ -90,7 +90,7 @@ async def test_validated_instrument_allowed(executor):
         instrument="MNQ",
     )
 
-    # MNQ is validated — should not be rejected for instrument validation
+    # MNQ is validated -- should not be rejected for instrument validation
     # (may be rejected for other safety reasons, but NOT for validation)
     c1_reason = result["c1"].rejection_reason
     assert "UNVALIDATED_INSTRUMENT" not in c1_reason

@@ -1,5 +1,5 @@
 """
-Watch State Manager — Universal Confirmation Layer v2
+Watch State Manager -- Universal Confirmation Layer v2
 =====================================================
 UCL v2 manages watch states for wide-stop sweep signals that score >= 0.75
 but get blocked by the 30pt max stop gate.  Post-sweep confirmation produces
@@ -93,7 +93,7 @@ class WatchStateManager:
     """
 
     MAX_ACTIVE_WATCHES: int = 3
-    FAST_CONFIRM_THRESHOLD: int = 20   # bars — below this, fast-confirm boost applies
+    FAST_CONFIRM_THRESHOLD: int = 20   # bars -- below this, fast-confirm boost applies
 
     def __init__(self):
         self._watches: List[WatchState] = []

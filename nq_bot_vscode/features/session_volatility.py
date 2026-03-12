@@ -6,10 +6,10 @@ Scales ATR-based measurements by intraday session period.
 Based on the well-documented U-shaped intraday volatility pattern in
 equity index futures (Andersen & Bollerslev 1997, Bollerslev, Cai & Song 2000).
 
-Opening session:  highest vol  — overnight information resolution, opening drive
-Midday session:   lowest vol   — liquidity trough, lunch lull
-Closing session:  rising vol   — gamma hedging, ETF rebalancing, institutional flow
-ETH session:      very low vol — thin overnight liquidity
+Opening session:  highest vol  -- overnight information resolution, opening drive
+Midday session:   lowest vol   -- liquidity trough, lunch lull
+Closing session:  rising vol   -- gamma hedging, ETF rebalancing, institutional flow
+ETH session:      very low vol -- thin overnight liquidity
 
 Feature flag: SESSION_VOLATILITY_SCALING env var (default: "false").
 When disabled, all scale factors return 1.0 (no-op).
@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 
-# Feature flag — default OFF for safety
+# Feature flag -- default OFF for safety
 SESSION_VOLATILITY_SCALING_ENABLED: bool = (
     os.getenv("SESSION_VOLATILITY_SCALING", "false").lower() == "true"
 )
@@ -85,7 +85,7 @@ class SessionVolatilityScaler:
 
         et_time = timestamp.astimezone(ET).time()
 
-        # Weekend check — treat as ETH
+        # Weekend check -- treat as ETH
         et_dt = timestamp.astimezone(ET)
         if et_dt.weekday() >= 5:  # Saturday=5, Sunday=6
             return "eth"

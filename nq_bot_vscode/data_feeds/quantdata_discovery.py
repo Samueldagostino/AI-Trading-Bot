@@ -37,7 +37,7 @@ Step 1: Open v3.quantdata.us in Chrome
 Step 2: Open Developer Tools (F12) → Network tab
 Step 3: Filter by "XHR" or "Fetch"
 Step 4: Load the Gamma Exposure page for SPY or QQQ
-Step 5: Look for API calls — they typically look like:
+Step 5: Look for API calls -- they typically look like:
         https://api.quantdata.us/v1/...  or
         https://v3.quantdata.us/api/...  or
         https://core-lb-prod.quantdata.us/api/...  or
@@ -164,7 +164,7 @@ def save_config(base_url: str, auth: dict, endpoints: dict):
                 f.write(f"\n# QuantData authentication\n{env_line}\n")
             print(f"  Auth value appended to: {env_path}")
         else:
-            print(f"  QUANTDATA_AUTH already exists in {env_path} — update manually if needed")
+            print(f"  QUANTDATA_AUTH already exists in {env_path} -- update manually if needed")
 
 
 def main():
@@ -227,7 +227,7 @@ def main():
 
     if not any_found:
         print("  No endpoints discovered.")
-        print("  Setting mode to 'manual' — use config/quantdata_manual_input.json")
+        print("  Setting mode to 'manual' -- use config/quantdata_manual_input.json")
         save_config(base_url, auth, endpoints)
         config = json.loads(ENDPOINTS_FILE.read_text())
         config["status"] = "manual"

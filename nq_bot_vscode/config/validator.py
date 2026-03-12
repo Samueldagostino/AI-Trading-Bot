@@ -1,10 +1,10 @@
 """
-Configuration Validator — Startup Safety Check
+Configuration Validator -- Startup Safety Check
 ================================================
 Validates all config values are in sane ranges before the bot starts.
 If any config is invalid, prints a clear error and returns False.
 
-Called during TradingOrchestrator.initialize() — if validation fails,
+Called during TradingOrchestrator.initialize() -- if validation fails,
 the bot refuses to start.
 """
 
@@ -31,7 +31,7 @@ class ConfigValidationError:
         self.reason = reason
 
     def __str__(self):
-        return f"  CONFIG ERROR: {self.field} = {self.value!r} — {self.reason}"
+        return f"  CONFIG ERROR: {self.field} = {self.value!r} -- {self.reason}"
 
 
 def validate_config(config: BotConfig) -> list:
@@ -122,7 +122,7 @@ def validate_config(config: BotConfig) -> list:
 
     if errors:
         logger.critical("=" * 60)
-        logger.critical("CONFIGURATION VALIDATION FAILED — %d errors:", len(errors))
+        logger.critical("CONFIGURATION VALIDATION FAILED -- %d errors:", len(errors))
         for err in errors:
             logger.critical(str(err))
         logger.critical("=" * 60)

@@ -12,7 +12,7 @@ Checks every 10 seconds:
 
 3 consecutive failures → trigger auto-relaunch callback.
 
-SECURITY: No sensitive data in heartbeat file — only timestamps and quality metrics.
+SECURITY: No sensitive data in heartbeat file -- only timestamps and quality metrics.
 """
 
 import asyncio
@@ -145,7 +145,7 @@ class TWSHealthMonitor:
             # Trigger restart if threshold reached
             if self._consecutive_failures >= self._failure_threshold:
                 logger.critical(
-                    "Health threshold breached (%d consecutive failures) — triggering recovery",
+                    "Health threshold breached (%d consecutive failures) -- triggering recovery",
                     self._consecutive_failures,
                 )
                 if self._on_critical_failure:
@@ -244,7 +244,7 @@ class TWSHealthMonitor:
 
     @property
     def is_healthy(self) -> bool:
-        """Quick health check — True if no consecutive failures."""
+        """Quick health check -- True if no consecutive failures."""
         return self._consecutive_failures == 0
 
     @property

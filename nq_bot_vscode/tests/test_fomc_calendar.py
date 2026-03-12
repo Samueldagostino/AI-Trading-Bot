@@ -160,7 +160,7 @@ class TestGetFOMCWindow:
         assert get_fomc_window(t) == "STAND_ASIDE"
 
     def test_drift_strong_4_hours_before(self):
-        # 6 hours before — should be DRIFT_STRONG (within 24h)
+        # 6 hours before -- should be DRIFT_STRONG (within 24h)
         fomc = FOMC_2025_DATES[0]
         t = fomc - timedelta(hours=6)
         assert get_fomc_window(t) == "DRIFT_STRONG"
@@ -172,7 +172,7 @@ class TestGetFOMCWindow:
         assert get_fomc_window(t) == "DRIFT_STRONG"
 
     def test_drift_mild_48_hours_before(self):
-        # 48 hours before — should be DRIFT_MILD
+        # 48 hours before -- should be DRIFT_MILD
         fomc = FOMC_2025_DATES[0]
         t = fomc - timedelta(hours=48)
         assert get_fomc_window(t) == "DRIFT_MILD"
@@ -188,19 +188,19 @@ class TestGetFOMCWindow:
         assert get_fomc_window(t) == "NONE"
 
     def test_boundary_exactly_2_hours(self):
-        # Exactly 2 hours before — should be STAND_ASIDE
+        # Exactly 2 hours before -- should be STAND_ASIDE
         fomc = FOMC_2025_DATES[0]
         t = fomc - timedelta(hours=2)
         assert get_fomc_window(t) == "STAND_ASIDE"
 
     def test_boundary_exactly_24_hours(self):
-        # Exactly 24 hours before — should be DRIFT_STRONG
+        # Exactly 24 hours before -- should be DRIFT_STRONG
         fomc = FOMC_2025_DATES[0]
         t = fomc - timedelta(hours=24)
         assert get_fomc_window(t) == "DRIFT_STRONG"
 
     def test_boundary_exactly_72_hours(self):
-        # Exactly 72 hours before — should be DRIFT_MILD
+        # Exactly 72 hours before -- should be DRIFT_MILD
         fomc = FOMC_2025_DATES[0]
         t = fomc - timedelta(hours=72)
         assert get_fomc_window(t) == "DRIFT_MILD"

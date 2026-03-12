@@ -468,7 +468,7 @@ class TradovateClient:
         (or use OCO/bracket) so each contract has its own exit.
         """
         if not self._account:
-            logger.error("No account — cannot place order")
+            logger.error("No account -- cannot place order")
             return None
 
         payload = {
@@ -530,7 +530,7 @@ class TradovateClient:
 
         results = {"c1_order": None, "c2_order": None, "success": False}
 
-        # Contract 1 — Bracket order (entry + TP + SL)
+        # Contract 1 -- Bracket order (entry + TP + SL)
         c1 = await self.place_order(
             action=action,
             qty=1,
@@ -541,13 +541,13 @@ class TradovateClient:
         )
         results["c1_order"] = c1
 
-        # Contract 2 — Entry + Stop only (no TP, we manage trailing manually)
+        # Contract 2 -- Entry + Stop only (no TP, we manage trailing manually)
         c2 = await self.place_order(
             action=action,
             qty=1,
             order_type="Market",
             bracket=True,
-            take_profit=0,  # No fixed TP — we trail this one
+            take_profit=0,  # No fixed TP -- we trail this one
             stop_loss=c2_initial_stop,
         )
         results["c2_order"] = c2
@@ -568,7 +568,7 @@ class TradovateClient:
         return await self._post("/order/cancelOrder", {"orderId": order_id})
 
     async def flatten_position(self) -> Optional[dict]:
-        """Emergency flatten — close all positions immediately."""
+        """Emergency flatten -- close all positions immediately."""
         if not self._account:
             return None
         logger.critical("FLATTEN: Closing all positions immediately")
@@ -609,7 +609,7 @@ class TradovateClient:
         if data and "bars" in data:
             return data["bars"]
         
-        logger.warning("Historical bar fetch returned no data — use CSV import fallback")
+        logger.warning("Historical bar fetch returned no data -- use CSV import fallback")
         return []
 
     # ================================================================

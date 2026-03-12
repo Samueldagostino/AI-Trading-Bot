@@ -1,5 +1,5 @@
 """
-Tests for SignalBridge — the signal-to-execution translation layer.
+Tests for SignalBridge -- the signal-to-execution translation layer.
 
 Covers:
   - Long signal -> correct BUY-side OrderRequest with C1+C2
@@ -308,7 +308,7 @@ class TestMetadataAudit:
 
 
 # ═══════════════════════════════════════════════════════════════
-# REJECTED SIGNALS — BELOW THRESHOLD, NO ORDERS
+# REJECTED SIGNALS -- BELOW THRESHOLD, NO ORDERS
 # ═══════════════════════════════════════════════════════════════
 
 class TestRejectedSignals:

@@ -1,5 +1,5 @@
 """
-QuantData Client — Ingests options market context data.
+QuantData Client -- Ingests options market context data.
 ========================================================
 Supports two modes:
   - API mode: pulls from discovered endpoints automatically
@@ -63,14 +63,14 @@ class QuantDataClient:
         return {"status": "manual"}
 
     # ──────────────────────────────────────────────────────────
-    # API MODE (Path A) — discovered endpoints
+    # API MODE (Path A) -- discovered endpoints
     # ──────────────────────────────────────────────────────────
 
     async def fetch_gex(self, symbol: str = "SPY") -> dict:
         """Fetch gamma exposure by strike from QuantData API."""
         endpoint = self.config.get("endpoints", {}).get("gex")
         if not endpoint:
-            logger.warning("No GEX endpoint configured — returning defaults")
+            logger.warning("No GEX endpoint configured -- returning defaults")
             return self._default_gex()
 
         try:
@@ -203,7 +203,7 @@ class QuantDataClient:
         }
 
     # ──────────────────────────────────────────────────────────
-    # MANUAL MODE (Path B) — user-populated JSON
+    # MANUAL MODE (Path B) -- user-populated JSON
     # ──────────────────────────────────────────────────────────
 
     def load_manual_snapshot(self) -> dict:
@@ -213,7 +213,7 @@ class QuantDataClient:
         """
         path = self.MANUAL_INPUT_PATH
         if not path.exists():
-            logger.info("No manual input file at %s — using neutral defaults", path)
+            logger.info("No manual input file at %s -- using neutral defaults", path)
             return self._default_neutral_context()
 
         try:
@@ -232,7 +232,7 @@ class QuantDataClient:
 
         if age > self.STALE_THRESHOLD.total_seconds():
             logger.warning(
-                "QuantData manual snapshot is %.1f hours old — may be stale",
+                "QuantData manual snapshot is %.1f hours old -- may be stale",
                 age / 3600,
             )
 
@@ -264,7 +264,7 @@ class QuantDataClient:
         }
 
     # ──────────────────────────────────────────────────────────
-    # SHARED — both modes produce MarketContext
+    # SHARED -- both modes produce MarketContext
     # ──────────────────────────────────────────────────────────
 
     async def get_market_context(self, symbol: str = "SPY") -> MarketContext:
@@ -324,7 +324,7 @@ class QuantDataClient:
         return context
 
     # ──────────────────────────────────────────────────────────
-    # DEFAULTS — neutral context when no data available
+    # DEFAULTS -- neutral context when no data available
     # ──────────────────────────────────────────────────────────
 
     def _default_neutral_context(self) -> dict:
@@ -374,7 +374,7 @@ class QuantDataClient:
         }
 
     # ──────────────────────────────────────────────────────────
-    # CLASSIFIERS — raw values → regime labels
+    # CLASSIFIERS -- raw values → regime labels
     # ──────────────────────────────────────────────────────────
 
     @staticmethod

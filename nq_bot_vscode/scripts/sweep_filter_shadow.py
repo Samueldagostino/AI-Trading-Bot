@@ -181,11 +181,11 @@ class ConfigurableSweepDetector:
         if self._prior_week_low > 0:
             levels.append(SimpleLevel("PWL", self._prior_week_low, "prior_week"))
 
-        # VWAP — configurable
+        # VWAP -- configurable
         if self.include_vwap and vwap > 0:
             levels.append(SimpleLevel("VWAP", vwap, "vwap"))
 
-        # Round numbers — configurable interval
+        # Round numbers -- configurable interval
         if current_price > 0:
             base = int(current_price / self.round_interval) * self.round_interval
             for offset in range(-3, 4):
@@ -686,7 +686,7 @@ def main():
 
     # ── Summary comparison ──
     print("\n" + "=" * 80)
-    print("SWEEP FILTER SHADOW ANALYSIS — COMPARISON")
+    print("SWEEP FILTER SHADOW ANALYSIS -- COMPARISON")
     print("=" * 80)
     print(f"\nData: {data_path.name}")
     print(f"Period: {bars_1m[0].timestamp.strftime('%Y-%m-%d')} to {bars_1m[-1].timestamp.strftime('%Y-%m-%d')}")
@@ -709,7 +709,7 @@ def main():
 
     # Level breakdown for baseline
     if all_results[0]["by_level_type"]:
-        print("\nBASELINE — PnL by Level Type:")
+        print("\nBASELINE -- PnL by Level Type:")
         print(f"  {'Level':<15} {'Trades':>7} {'WR':>7} {'PnL':>10}")
         print("  " + "-" * 42)
         for lvl, stats in sorted(all_results[0]["by_level_type"].items(),

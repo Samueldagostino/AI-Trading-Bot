@@ -67,7 +67,7 @@ def _parse_tf_from_filename(filename: str) -> Optional[str]:
         minutes = int(m.group(1))
         return MINUTES_TO_LABEL.get(minutes)
 
-    # "60 1hr", "240 4hr" — leading number is the minute interval
+    # "60 1hr", "240 4hr" -- leading number is the minute interval
     m = re.match(r'^(\d+)\s', tf_part)
     if m:
         minutes = int(m.group(1))
@@ -319,7 +319,7 @@ class TradingViewImporter:
             except (ValueError, TypeError):
                 volume = 0
 
-        # NaN/Inf guard — reject corrupted price data
+        # NaN/Inf guard -- reject corrupted price data
         if not (math.isfinite(open_price) and math.isfinite(high) and
                 math.isfinite(low) and math.isfinite(close)):
             return None

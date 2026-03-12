@@ -1,5 +1,5 @@
 """
-FOMC Calendar — 2025 + 2026 Schedules & Helpers
+FOMC Calendar -- 2025 + 2026 Schedules & Helpers
 =================================================
 Single source of truth for FOMC meeting dates.
 All announcement times are 2:00 PM ET.
@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 
-# 2025 FOMC announcement dates — all at 2:00 PM ET
+# 2025 FOMC announcement dates -- all at 2:00 PM ET
 FOMC_2025_DATES: list = [
     datetime(2025, 1, 29, 14, 0, tzinfo=ET),
     datetime(2025, 3, 19, 14, 0, tzinfo=ET),
@@ -25,7 +25,7 @@ FOMC_2025_DATES: list = [
     datetime(2025, 12, 17, 14, 0, tzinfo=ET),
 ]
 
-# 2026 FOMC announcement dates — all at 2:00 PM ET
+# 2026 FOMC announcement dates -- all at 2:00 PM ET
 FOMC_2026_DATES: list = [
     datetime(2026, 1, 29, 14, 0, tzinfo=ET),
     datetime(2026, 3, 19, 14, 0, tzinfo=ET),
@@ -86,10 +86,10 @@ def get_fomc_window(current_datetime: datetime) -> str:
     """Determine the current FOMC proximity window.
 
     Returns one of:
-        "STAND_ASIDE"  — within 2 hours of announcement (no trading)
-        "DRIFT_STRONG" — 2-24 hours before announcement (strong pre-FOMC drift)
-        "DRIFT_MILD"   — 24-72 hours before announcement (mild positioning)
-        "NONE"         — no FOMC event within 72 hours
+        "STAND_ASIDE"  -- within 2 hours of announcement (no trading)
+        "DRIFT_STRONG" -- 2-24 hours before announcement (strong pre-FOMC drift)
+        "DRIFT_MILD"   -- 24-72 hours before announcement (mild positioning)
+        "NONE"         -- no FOMC event within 72 hours
     """
     hours = hours_until_next_fomc(current_datetime)
 

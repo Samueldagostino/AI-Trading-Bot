@@ -10,8 +10,8 @@ Two modes:
   2. --candles <csv> --trades <json> : Read raw CSV + separate trade log
 
 Output:
-  dashboard/viz_data.json     — { candles: [...], trades: [...] }
-  dashboard/data_anomalies.json — integrity issues found during processing
+  dashboard/viz_data.json     -- { candles: [...], trades: [...] }
+  dashboard/data_anomalies.json -- integrity issues found during processing
 
 Usage:
   python -m dashboard.data_adapter --backtest-json backtest_viz_data.json
@@ -45,7 +45,7 @@ MAINTENANCE_END = (18, 0)     # 6:00 PM ET
 POINT_VALUE = 2.0        # $2/point per contract
 TICK_SIZE = 0.25
 
-# NQ holidays 2025-2026 (CME closures — abbreviated list)
+# NQ holidays 2025-2026 (CME closures -- abbreviated list)
 NQ_HOLIDAYS = {
     "2025-01-01", "2025-01-20", "2025-02-17", "2025-04-18",
     "2025-05-26", "2025-06-19", "2025-07-04", "2025-09-01",
@@ -413,11 +413,11 @@ def pair_trade_events(trade_log: List[dict], tracker: AnomalyTracker) -> List[di
             if stop_price and c2_exit_reason == "stop":
                 slippage += abs(c2_exit_price - stop_price) * POINT_VALUE if c2_exit_price else 0
 
-            # MFE/MAE — not available from trade_log, set to 0 (would need bar-by-bar data)
+            # MFE/MAE -- not available from trade_log, set to 0 (would need bar-by-bar data)
             mfe = 0.0
             mae = 0.0
 
-            # Hold bars — compute from timestamps if available
+            # Hold bars -- compute from timestamps if available
             hold_bars = 0
             if entry_time_ms and exit_time_ms and exit_time_ms > entry_time_ms:
                 # Approximate: assume 2-minute bars
@@ -574,7 +574,7 @@ def load_trades_json(filepath: str, tracker: AnomalyTracker) -> List[dict]:
     Load trades from a standalone JSON file.
 
     Supports two formats:
-    1. trade_log format (list of entry/close events) — will be paired
+    1. trade_log format (list of entry/close events) -- will be paired
     2. Pre-paired format (list of trade objects with the viz schema fields)
     """
     filepath = Path(filepath)
@@ -706,7 +706,7 @@ def write_viz_json(candles: List[dict], trades: List[dict], output_path: str):
 
     # Also write a pretty-printed version for debugging
     size_kb = output.stat().st_size / 1024
-    logger.info(f"Wrote {output} ({size_kb:.1f} KB) — {len(candles)} candles, {len(trades)} trades")
+    logger.info(f"Wrote {output} ({size_kb:.1f} KB) -- {len(candles)} candles, {len(trades)} trades")
 
 
 def write_anomalies(tracker: AnomalyTracker, output_path: str):
@@ -724,14 +724,14 @@ def write_anomalies(tracker: AnomalyTracker, output_path: str):
             },
         }, f, indent=2)
 
-    logger.info(f"Wrote {output} — {tracker.error_count} errors, {tracker.warning_count} warnings")
+    logger.info(f"Wrote {output} -- {tracker.error_count} errors, {tracker.warning_count} warnings")
 
 
 # ── CLI ───────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description="NQ Dashboard Data Adapter — convert backtest data to viz format")
+        description="NQ Dashboard Data Adapter -- convert backtest data to viz format")
 
     parser.add_argument("--backtest-json", type=str,
                         help="Path to backtest_viz_data.json (from run_backtest.py)")
@@ -823,7 +823,7 @@ def main():
     if not candles and not trades:
         tracker.add("output", "error", "No data loaded. Check input paths.")
         write_anomalies(tracker, anomalies_path)
-        logger.error("No data loaded — nothing to write.")
+        logger.error("No data loaded -- nothing to write.")
         sys.exit(1)
 
     write_viz_json(candles, trades, output_path)

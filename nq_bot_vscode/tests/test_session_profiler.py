@@ -1,4 +1,4 @@
-"""Tests for signals/session_profiler.py — SessionProfiler."""
+"""Tests for signals/session_profiler.py -- SessionProfiler."""
 
 import pytest
 from datetime import datetime, timezone
@@ -90,7 +90,7 @@ class TestGetSessionPhase:
         assert self.profiler.get_session_phase(et_dt(12, 0)) == "LUNCH"
 
     def test_boundary_exact_end(self):
-        """Phase ends are exclusive — the next phase starts."""
+        """Phase ends are exclusive -- the next phase starts."""
         assert self.profiler.get_session_phase(et_dt(10, 0)) == "IB_PERIOD"
         assert self.profiler.get_session_phase(et_dt(10, 30)) == "MORNING"
 

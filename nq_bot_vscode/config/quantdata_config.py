@@ -14,16 +14,16 @@ QUANTDATA_ENDPOINTS = {
     "expirations": "/api/options/expirations",
 }
 
-# Auth token file (placeholder — never commit the real token)
+# Auth token file (placeholder -- never commit the real token)
 TOKEN_FILE = "config/quantdata_token.txt"
 
 # Instance ID file
 INSTANCE_ID_FILE = "config/quantdata_instance_id.txt"
 
 # Tiered refresh intervals based on trading state (respect rate limits)
-REFRESH_INTERVAL_IDLE = 300       # 5 min — no position, low confluence
-REFRESH_INTERVAL_ACTIVE = 120     # 2 min — position open
-REFRESH_INTERVAL_PREFLIGHT = 60   # 1 min — high confluence, entry imminent
+REFRESH_INTERVAL_IDLE = 300       # 5 min -- no position, low confluence
+REFRESH_INTERVAL_ACTIVE = 120     # 2 min -- position open
+REFRESH_INTERVAL_PREFLIGHT = 60   # 1 min -- high confluence, entry imminent
 
 # Tickers to monitor
 TICKERS = ["SPY", "QQQ"]

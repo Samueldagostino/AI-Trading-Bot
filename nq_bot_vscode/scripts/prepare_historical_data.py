@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Phase 1 — Historical Data Preparation & HTF Bar Builder
+Phase 1 -- Historical Data Preparation & HTF Bar Builder
 =========================================================
 Loads all 1-minute MNQ .txt files, cleans, deduplicates, performs gap
 analysis, builds higher-timeframe bars from the 1-min data (zero
@@ -321,7 +321,7 @@ def build_htf_bars(one_min_bars: List[Dict], tf_minutes: int) -> List[Dict]:
 
     result = []
     for i, key in enumerate(sorted_keys):
-        # Last bucket may be incomplete — skip it
+        # Last bucket may be incomplete -- skip it
         if i == len(sorted_keys) - 1:
             break
 
@@ -404,7 +404,7 @@ def resolve_input_dir(specified: Optional[str]) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Phase 1 — Historical data preparation and HTF bar builder"
+        description="Phase 1 -- Historical data preparation and HTF bar builder"
     )
     parser.add_argument(
         "--input-dir", type=str, default=None,
@@ -425,7 +425,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     print("=" * 70)
-    print("  PHASE 1 — HISTORICAL DATA PREPARATION")
+    print("  PHASE 1 -- HISTORICAL DATA PREPARATION")
     print("=" * 70)
     print(f"  Input:  {input_dir}")
     print(f"  Output: {output_dir}")
@@ -552,7 +552,7 @@ def main():
     # ══════════════════════════════════════════════════════════════════
     print("=" * 70)
     print("  BUILDING HTF BARS FROM 1-MIN DATA")
-    print("  (no pre-computed files — zero look-ahead bias)")
+    print("  (no pre-computed files -- zero look-ahead bias)")
     print("=" * 70)
 
     for tf_label, tf_minutes in HTF_CONFIGS:
@@ -576,7 +576,7 @@ def main():
     for tf_label, _ in HTF_CONFIGS:
         print(f"    htf_{tf_label}.csv")
     print()
-    print("  Next: Phase 2 — run scripts/full_backtest.py")
+    print("  Next: Phase 2 -- run scripts/full_backtest.py")
 
 
 if __name__ == "__main__":

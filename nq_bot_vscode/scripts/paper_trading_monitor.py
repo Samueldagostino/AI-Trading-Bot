@@ -1,8 +1,8 @@
 """
-Paper Trading Monitor — Real-Time Statistics Tracker
+Paper Trading Monitor -- Real-Time Statistics Tracker
 ======================================================
 Observes paper trades and maintains running statistics.
-READ-ONLY — it observes, never modifies trades.
+READ-ONLY -- it observes, never modifies trades.
 
 Features:
   - Real-time running statistics (PnL, win rate, drawdown, Sharpe, etc.)
@@ -90,7 +90,7 @@ class PaperTradingMonitor:
     """
     Tracks all paper trades in real-time and maintains running statistics.
 
-    READ-ONLY — observes trades, never modifies them.
+    READ-ONLY -- observes trades, never modifies them.
 
     Statistics maintained:
       trade_count, wins, losses, total_pnl, max_drawdown,
@@ -197,7 +197,7 @@ class PaperTradingMonitor:
         self._maybe_save_state()
 
     def update(self) -> None:
-        """Periodic update — call from main loop to trigger state saves."""
+        """Periodic update -- call from main loop to trigger state saves."""
         self._maybe_save_state()
 
     # ════════════════════════════════════════════════════════════
@@ -362,7 +362,7 @@ class PaperTradingMonitor:
                 tmp.flush()
                 os.fsync(tmp.fileno())
                 tmp_path = tmp.name
-            # Windows PermissionError retry — another process may hold the file briefly
+            # Windows PermissionError retry -- another process may hold the file briefly
             for attempt in range(3):
                 try:
                     os.replace(tmp_path, str(self._state_path))

@@ -4,8 +4,8 @@ SMS Notification System for NQ.BOT
 Sends SMS alerts to subscribers when the bot simulation goes live.
 
 Supports two subscriber sources:
-  1. Google Apps Script (recommended) — reads from Google Sheet via web app
-  2. Local subscribers.json file — manual fallback
+  1. Google Apps Script (recommended) -- reads from Google Sheet via web app
+  2. Local subscribers.json file -- manual fallback
 
 SMS is sent via Twilio.
 
@@ -170,7 +170,7 @@ def send_sms(to: str, message: str, dry_run: bool = False) -> bool:
             logger.info("SMS sent to %s (SID: %s)", to, resp.json().get("sid", "?"))
             return True
         else:
-            logger.error("Twilio error for %s: %d — %s", to, resp.status_code, resp.text[:200])
+            logger.error("Twilio error for %s: %d -- %s", to, resp.status_code, resp.text[:200])
             return False
     except Exception as e:
         logger.error("Failed to send SMS to %s: %s", to, e)
@@ -247,7 +247,7 @@ def main():
         "NQ.BOT is now LIVE and trading!\n\n"
         "The MNQ futures simulation is running.\n"
         "Watch live: www.makemoneymarkets.com\n\n"
-        "— NQ.BOT"
+        "-- NQ.BOT"
     )
     message = args.message or default_msg
 

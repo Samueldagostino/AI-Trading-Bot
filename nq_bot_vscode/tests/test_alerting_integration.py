@@ -334,7 +334,7 @@ class TestAlertManagerSingleton:
         """Modules should gracefully handle no alert manager."""
         set_alert_manager(None)
         mgr = get_alert_manager()
-        # Should not crash — modules guard with `if mgr:`
+        # Should not crash -- modules guard with `if mgr:`
         assert mgr is None
 
 

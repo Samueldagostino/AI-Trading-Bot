@@ -175,7 +175,7 @@ class TestSharpeEstimate:
         assert monitor.sharpe_estimate == 0.0
 
     def test_sharpe_with_one_day(self):
-        """Single day means only 1 daily return — can't compute std."""
+        """Single day means only 1 daily return -- can't compute std."""
         monitor = PaperTradingMonitor(log_dir=tempfile.mkdtemp())
         monitor.record_trade(pnl=100.0, direction="long")
         # Only 1 daily PnL entry, need at least 2

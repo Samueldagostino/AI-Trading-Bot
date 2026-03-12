@@ -5,7 +5,7 @@ Handles order placement, fill management, and position tracking.
 Supports both paper trading (simulated) and live execution.
 
 Design principles:
-1. Paper mode is the DEFAULT — live mode requires explicit activation
+1. Paper mode is the DEFAULT -- live mode requires explicit activation
 2. All orders include worst-case slippage in simulation
 3. Partial fills are handled
 4. Every order event is logged to database
@@ -313,7 +313,7 @@ class ExecutionEngine:
         # For limit orders, check if fill is possible
         if order.order_type == OrderType.LIMIT:
             if order.direction == "long" and fill_price > order.limit_price:
-                # Wouldn't fill at limit — simulate timeout
+                # Wouldn't fill at limit -- simulate timeout
                 order.status = OrderStatus.CANCELLED
                 order.error_message = "Limit not reached"
                 self._orders[order.order_id] = order
@@ -354,7 +354,7 @@ class ExecutionEngine:
         """
         raise NotImplementedError(
             "LIVE EXECUTION NOT YET IMPLEMENTED. "
-            "This is intentional — paper trading must be validated first. "
+            "This is intentional -- paper trading must be validated first. "
             "Supported brokers: tradovate, interactive_brokers, ninjatrader"
         )
 

@@ -99,7 +99,7 @@ def _limit_buy(price: float, contracts: int = 1, tag: str = "") -> OrderRequest:
 # ═══════════════════════════════════════════════════════════════
 
 class TestMaxContractsPerOrder:
-    """Max 2 contracts per order — HARD BLOCK."""
+    """Max 2 contracts per order -- HARD BLOCK."""
 
     @pytest.mark.asyncio
     async def test_reject_3_contracts(self, executor):
@@ -133,7 +133,7 @@ class TestMaxContractsPerOrder:
 # ═══════════════════════════════════════════════════════════════
 
 class TestMaxOpenPositions:
-    """Max 4 open positions at any time — HARD BLOCK."""
+    """Max 4 open positions at any time -- HARD BLOCK."""
 
     @pytest.mark.asyncio
     async def test_reject_at_limit(self, executor):
@@ -384,7 +384,7 @@ class TestNoBypassPath:
         executor._state.daily_pnl = -2000.0
 
         record = await executor.place_order(_market_buy(contracts=5))
-        # HALTED is check #1 — should be the rejection reason
+        # HALTED is check #1 -- should be the rejection reason
         assert "HALTED" in record.rejection_reason
 
     @pytest.mark.asyncio

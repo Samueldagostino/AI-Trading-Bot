@@ -1,14 +1,14 @@
 """
-Safety Rails — Hard Circuit Breakers for Paper/Live Trading
+Safety Rails -- Hard Circuit Breakers for Paper/Live Trading
 =============================================================
 Four independent safety mechanisms that HALT trading when limits are breached.
-These are HARD LIMITS — they cannot be overridden by modifiers or signals.
+These are HARD LIMITS -- they cannot be overridden by modifiers or signals.
 
 Circuit Breakers:
-  1. MaxDailyLossCircuitBreaker — halt if daily PnL drops below threshold
-  2. MaxConsecutiveLossesBreaker — halt after N consecutive losses
-  3. MaxPositionSizeGuard — hard cap on position size (absolute, no exceptions)
-  4. HeartbeatMonitor — halt if no data received within timeout
+  1. MaxDailyLossCircuitBreaker -- halt if daily PnL drops below threshold
+  2. MaxConsecutiveLossesBreaker -- halt after N consecutive losses
+  3. MaxPositionSizeGuard -- hard cap on position size (absolute, no exceptions)
+  4. HeartbeatMonitor -- halt if no data received within timeout
 
 All breakers log events to logs/safety_rail_events.json.
 All breakers support manual reset via reset_breaker().
@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SafetyRailsConfig:
     """Configuration for all safety rails."""
-    max_daily_loss: float = 500.0          # Dollars — HALT if daily PnL drops below -this
+    max_daily_loss: float = 500.0          # Dollars -- HALT if daily PnL drops below -this
     max_consecutive_losses: int = 5        # HALT after this many consecutive losses
-    max_position_size: int = 2             # ABSOLUTE cap — never exceed (MNQ contracts)
+    max_position_size: int = 2             # ABSOLUTE cap -- never exceed (MNQ contracts)
     heartbeat_alert_seconds: float = 60.0  # ALERT if no data for this long during market hours
     heartbeat_halt_seconds: float = 300.0  # HALT if no data for this long
     log_dir: str = ""                      # Directory for safety_rail_events.json
@@ -106,12 +106,12 @@ class MaxDailyLossCircuitBreaker:
         if self._tripped:
             return False  # Already tripped
 
-        # NaN guard — NaN comparisons return False, silently bypassing the gate
+        # NaN guard -- NaN comparisons return False, silently bypassing the gate
         if not math.isfinite(trade_pnl):
             self._tripped = True
             self._trip_time = datetime.now(timezone.utc).isoformat()
             logger.critical(
-                "CIRCUIT BREAKER: NaN/Inf PnL received — "
+                "CIRCUIT BREAKER: NaN/Inf PnL received -- "
                 "HALTING ALL TRADING (data integrity failure)"
             )
             if self._event_log:
@@ -127,8 +127,8 @@ class MaxDailyLossCircuitBreaker:
             self._tripped = True
             self._trip_time = datetime.now(timezone.utc).isoformat()
             logger.critical(
-                "CIRCUIT BREAKER: Max daily loss exceeded — "
-                "daily PnL $%.2f <= -$%.2f — HALTING ALL TRADING",
+                "CIRCUIT BREAKER: Max daily loss exceeded -- "
+                "daily PnL $%.2f <= -$%.2f -- HALTING ALL TRADING",
                 self._daily_pnl, self.max_daily_loss,
             )
             if self._event_log:
@@ -144,7 +144,7 @@ class MaxDailyLossCircuitBreaker:
         return not self._tripped
 
     def reset(self) -> None:
-        """Manual reset — requires human decision to resume trading."""
+        """Manual reset -- requires human decision to resume trading."""
         if self._tripped:
             logger.warning("MaxDailyLossCircuitBreaker RESET manually")
             if self._event_log:
@@ -214,7 +214,7 @@ class MaxConsecutiveLossesBreaker:
             self._tripped = True
             self._trip_time = datetime.now(timezone.utc).isoformat()
             logger.critical(
-                "CIRCUIT BREAKER: NaN/Inf PnL in consecutive-loss tracker — HALTING"
+                "CIRCUIT BREAKER: NaN/Inf PnL in consecutive-loss tracker -- HALTING"
             )
             if self._event_log:
                 self._event_log.log_event("MaxConsecutiveLosses", "TRIPPED", {
@@ -232,7 +232,7 @@ class MaxConsecutiveLossesBreaker:
             self._tripped = True
             self._trip_time = datetime.now(timezone.utc).isoformat()
             logger.critical(
-                "CIRCUIT BREAKER: %d consecutive losses — HALTING AND ALERTING",
+                "CIRCUIT BREAKER: %d consecutive losses -- HALTING AND ALERTING",
                 self._consecutive_losses,
             )
             if self._event_log:
@@ -278,8 +278,8 @@ class MaxPositionSizeGuard:
     ABSOLUTE hard cap on position size.
 
     Even if modifiers calculate higher, this guard caps at max_contracts.
-    This is NOT a circuit breaker — it silently clamps, never halts.
-    Max position of 2 contracts is ABSOLUTE — no exceptions.
+    This is NOT a circuit breaker -- it silently clamps, never halts.
+    Max position of 2 contracts is ABSOLUTE -- no exceptions.
     """
 
     def __init__(self, max_contracts: int = 2, event_log: Optional[SafetyRailEventLog] = None):
@@ -299,7 +299,7 @@ class MaxPositionSizeGuard:
         """
         if not isinstance(requested_contracts, int) or requested_contracts < 0:
             logger.error(
-                "POSITION SIZE GUARD: Invalid requested_contracts=%r — defaulting to 0",
+                "POSITION SIZE GUARD: Invalid requested_contracts=%r -- defaulting to 0",
                 requested_contracts,
             )
             return 0
@@ -397,7 +397,7 @@ class HeartbeatMonitor:
             self._tripped = True
             self._trip_time = datetime.now(timezone.utc).isoformat()
             logger.critical(
-                "HEARTBEAT HALT: No data for %.0fs (threshold: %.0fs) — HALTING",
+                "HEARTBEAT HALT: No data for %.0fs (threshold: %.0fs) -- HALTING",
                 elapsed, self.halt_seconds,
             )
             if self._event_log:

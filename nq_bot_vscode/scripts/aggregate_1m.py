@@ -13,7 +13,7 @@ Uses proper OHLCV aggregation:
 
 Bars are aligned to standard CME NQ market boundaries:
   - Intraday: aligned to midnight UTC (00:00)
-  - Daily:    full calendar day (00:00–23:59 UTC)
+  - Daily:    full calendar day (00:00-23:59 UTC)
   - 4H:      00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
 
 Usage:
@@ -143,7 +143,7 @@ def detect_csv_format(filepath: str) -> Dict:
                     col_map[std] = fields.index(c)
                     break
     else:
-        # Headerless: assume positional — datetime,open,high,low,close,volume
+        # Headerless: assume positional -- datetime,open,high,low,close,volume
         col_map["time"] = 0
         col_map["open"] = 1
         col_map["high"] = 2
@@ -250,7 +250,7 @@ def load_1m_bars(filepath: str) -> List[Dict]:
                 c = float(row[close_idx])
                 v = int(float(row[vol_idx])) if vol_idx < len(row) else 0
 
-                # NaN/Inf guard — reject corrupted price data
+                # NaN/Inf guard -- reject corrupted price data
                 if not (math.isfinite(o) and math.isfinite(h) and
                         math.isfinite(lo) and math.isfinite(c)):
                     continue
@@ -438,7 +438,7 @@ def main():
     print(f"  Rows:        {len(bars_1m):,}")
     print(f"  Date range:  {first_ts.strftime('%Y-%m-%d %H:%M')} -> {last_ts.strftime('%Y-%m-%d %H:%M')} UTC")
     print(f"  Span:        {days} days")
-    print(f"  Price range: {price_low:.2f} – {price_high:.2f}")
+    print(f"  Price range: {price_low:.2f} - {price_high:.2f}")
     print(f"  Total volume: {total_vol:,}")
     print()
 
@@ -474,7 +474,7 @@ def main():
     print(f"  {'1m':>4s}: {len(bars_1m):>7,} bars -> {outfile_1m} (standardized)")
 
     print(f"\n{'=' * 60}")
-    print(f"  DONE — {len(TIMEFRAMES) + 1} files written to {output_dir}/")
+    print(f"  DONE -- {len(TIMEFRAMES) + 1} files written to {output_dir}/")
     print(f"{'=' * 60}")
     print()
     print("Next step: run out-of-sample validation:")

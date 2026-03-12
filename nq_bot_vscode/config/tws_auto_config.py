@@ -131,7 +131,7 @@ class TWSAutoConfig:
         Returns path to generated file.
         """
         ini_content = f"""\
-# IBC Configuration — Auto-generated
+# IBC Configuration -- Auto-generated
 # DO NOT commit this file (contains no secrets, but path-specific)
 
 LogToConsole=yes

@@ -1,5 +1,5 @@
 """
-Tests for config_validator — v3 backtest replication guard.
+Tests for config_validator -- v3 backtest replication guard.
 
 Validates:
 1. Default config passes all checks (matches v3 baseline)

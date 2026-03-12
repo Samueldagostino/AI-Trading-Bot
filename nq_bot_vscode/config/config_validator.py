@@ -1,5 +1,5 @@
 """
-Startup Config Validator — v3 Backtest Replication Guard
+Startup Config Validator -- v3 Backtest Replication Guard
 ==========================================================
 Compares live runner configuration against the validated v3 backtest
 parameters. Refuses to trade if any critical parameter mismatches
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════
-# V3 BASELINE — the validated backtest config
+# V3 BASELINE -- the validated backtest config
 # 396 trades, PF 2.86, 70.5% WR, +$47,236, 1.60% max DD
 # ═══════════════════════════════════════════════════════════════
 
@@ -64,7 +64,7 @@ V3_BASELINE = {
     "commission":         1.29,
 }
 
-# Parameters that MUST match — mismatch = refuse to trade
+# Parameters that MUST match -- mismatch = refuse to trade
 CRITICAL_PARAMS = {
     "hc_max_stop_pts", "hc_min_score", "htf_gate_threshold",
     "htf_timeframes", "total_contracts", "c2_be_variant",
@@ -153,7 +153,7 @@ def print_config_table(bot_config, force: bool = False) -> bool:
     # Header
     print()
     print("=" * 72)
-    print("  CONFIG VALIDATION — v3 Backtest Replication Check")
+    print("  CONFIG VALIDATION -- v3 Backtest Replication Check")
     print("=" * 72)
     print(f"  {'Parameter':<30s} {'Expected':<15s} {'Actual':<15s} {'Status'}")
     print("-" * 72)
@@ -176,10 +176,10 @@ def print_config_table(bot_config, force: bool = False) -> bool:
             print(f"    {c.param}: expected {c.expected}, got {c.actual}")
         print()
         if not force:
-            print("  TRADING BLOCKED — config does not match v3 backtest.")
+            print("  TRADING BLOCKED -- config does not match v3 backtest.")
             print("  Use --force-config to override (NOT RECOMMENDED).")
         else:
-            print("  WARNING: --force-config active — trading allowed despite mismatches.")
+            print("  WARNING: --force-config active -- trading allowed despite mismatches.")
         print("=" * 72)
         logger.warning(
             "Config validation FAILED: %d critical mismatches",
@@ -187,7 +187,7 @@ def print_config_table(bot_config, force: bool = False) -> bool:
         )
         return force  # Only pass if force=True
     else:
-        print("  ALL CHECKS PASSED — config matches v3 backtest.")
+        print("  ALL CHECKS PASSED -- config matches v3 backtest.")
         print("=" * 72)
         logger.info("Config validation PASSED: all parameters match v3 baseline")
         return True

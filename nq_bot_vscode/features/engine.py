@@ -2,12 +2,12 @@
 NQ Feature Engine
 ==================
 Computes institutional-grade trading features from NQ price data.
-Every feature is computed strictly on past data — zero lookahead bias.
+Every feature is computed strictly on past data -- zero lookahead bias.
 
 Features implemented:
-- Order Blocks (OB) — bullish and bearish
-- Fair Value Gaps (FVG) — standard and inverse
-- Liquidity Sweeps — buy-side and sell-side
+- Order Blocks (OB) -- bullish and bearish
+- Fair Value Gaps (FVG) -- standard and inverse
+- Liquidity Sweeps -- buy-side and sell-side
 - VWAP + Standard Deviation Bands
 - Order Flow / Delta Analysis
 - ATR-based Volatility
@@ -47,13 +47,13 @@ class Bar:
         for fld in ("open", "high", "low", "close"):
             val = getattr(self, fld)
             if not math.isfinite(val):
-                logger.error("Bar has non-finite %s=%.4f at %s — clamping to close",
+                logger.error("Bar has non-finite %s=%.4f at %s -- clamping to close",
                              fld, val, self.timestamp)
                 object.__setattr__(self, fld, self.close if math.isfinite(self.close) else 0.0)
 
         # Fix invalid OHLC: high must be >= low, high >= open/close, low <= open/close
         if self.high < self.low:
-            logger.warning("Bar high (%.2f) < low (%.2f) at %s — swapping",
+            logger.warning("Bar high (%.2f) < low (%.2f) at %s -- swapping",
                            self.high, self.low, self.timestamp)
             object.__setattr__(self, "high", max(self.high, self.low))
             object.__setattr__(self, "low", min(self.high, self.low))
@@ -67,7 +67,7 @@ class Bar:
 
         # Guard against negative volume
         if self.volume < 0:
-            logger.warning("Bar has negative volume (%d) at %s — setting to 0",
+            logger.warning("Bar has negative volume (%d) at %s -- setting to 0",
                            self.volume, self.timestamp)
             object.__setattr__(self, "volume", 0)
 
@@ -249,7 +249,7 @@ class NQFeatureEngine:
         self._cumulative_delta = 0
 
     # ================================================================
-    # ATR — Average True Range
+    # ATR -- Average True Range
     # ================================================================
     def _compute_atr(self, snapshot: FeatureSnapshot) -> None:
         """ATR-14 for volatility-adjusted sizing."""
@@ -483,15 +483,15 @@ class NQFeatureEngine:
         """
         # CAUSALITY FIX (Mar 2026): Use bars[-4], [-3], [-2] instead of
         # [-3], [-2], [-1] so the FVG pattern is detected one bar AFTER
-        # it fully forms. bars[-1] is the current bar being processed —
+        # it fully forms. bars[-1] is the current bar being processed --
         # using it as bar_3 would be look-ahead bias (the candle hasn't
         # closed yet in live trading when features are computed mid-bar).
         if len(self._bars) < 5:
             return
 
         bar_1 = self._bars[-4]  # Candle 1 (fully completed)
-        bar_2 = self._bars[-3]  # Candle 2 — impulse (fully completed)
-        bar_3 = self._bars[-2]  # Candle 3 — confirmation (fully completed)
+        bar_2 = self._bars[-3]  # Candle 2 -- impulse (fully completed)
+        bar_3 = self._bars[-2]  # Candle 3 -- confirmation (fully completed)
 
         min_gap = self.config.fvg_min_gap_ticks * 0.25  # Convert ticks to NQ points
 

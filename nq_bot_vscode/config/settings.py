@@ -1,5 +1,5 @@
 """
-NQ Trading Bot — Master Configuration v1.3.1
+NQ Trading Bot -- Master Configuration v1.3.1
 =============================================
 CONFIGURED FOR:
 - Broker: Tradovate (paper -> live)
@@ -126,7 +126,7 @@ class TradovateConfig:
     def order_ws_url(self) -> str:
         return "wss://live.tradovate.com/v1/websocket" if self.environment == "live" else "wss://demo.tradovate.com/v1/websocket"
     
-    # Front-month MNQ — resolved dynamically at startup via ContractRoller.
+    # Front-month MNQ -- resolved dynamically at startup via ContractRoller.
     # Fallback value used only if ContractRoller import fails.
     symbol: str = "MNQM6"
 
@@ -148,11 +148,11 @@ class TradovateConfig:
 @dataclass
 class ScaleOutConfig:
     """
-    4-Contract Scale-Out v3 — Delayed C3 Runner Architecture.
+    4-Contract Scale-Out v3 -- Delayed C3 Runner Architecture.
 
-    C1 (1): 5-bar time exit — the "canary" that validates direction.
-    C2 (1): Structural target — exits at nearest swing point.
-    C3 (2): ATR trailing runner — DELAYED ENTRY (only stays open when
+    C1 (1): 5-bar time exit -- the "canary" that validates direction.
+    C2 (1): Structural target -- exits at nearest swing point.
+    C3 (2): ATR trailing runner -- DELAYED ENTRY (only stays open when
             C1 exits profitably. If C1 loses, C3 closed immediately).
 
     Win architecture:
@@ -163,7 +163,7 @@ class ScaleOutConfig:
     """
     total_contracts: int = 4              # Max contracts: C1=1, C2=1, C3=2
 
-    # Contract 1 — The Scalp (B:5 bars time exit, PF 1.81 validated)
+    # Contract 1 -- The Scalp (B:5 bars time exit, PF 1.81 validated)
     c1_contracts: int = 1
     c1_time_exit_bars: int = 5             # Exit C1 at market after N bars if profitable
     c1_max_bars_fallback: int = 12         # Fallback: exit at market if still profitable after N bars
@@ -172,7 +172,7 @@ class ScaleOutConfig:
     c1_profit_threshold_pts: float = 3.0   # Archived: trailing activation threshold
     c1_trail_distance_pts: float = 2.5     # Archived: trail distance from HWM
 
-    # Contract 2 — The Medium (15-bar time exit, captures follow-through)
+    # Contract 2 -- The Medium (15-bar time exit, captures follow-through)
     c2_contracts: int = 1
     c2_time_exit_bars: int = 15            # Exit C2 at market after N bars post-C1 exit
     c2_move_stop_to_breakeven: bool = True
@@ -184,7 +184,7 @@ class ScaleOutConfig:
     c2_max_target_points: float = 150.0
     c2_time_stop_minutes: int = 120
 
-    # C2 Breakeven Variant (optimized Feb 2026 — run scripts/c2_be_optimizer.py to validate)
+    # C2 Breakeven Variant (optimized Feb 2026 -- run scripts/c2_be_optimizer.py to validate)
     # "A" = No BE: C2 keeps initial stop; ATR trail provides sole protection
     # "B" = Delayed: BE moves only after C2 MFE >= c2_be_delay_multiplier × stop_distance
     # "C" = Partial: BE at midpoint between initial stop and entry (entry - stop/2)
@@ -201,7 +201,7 @@ class ScaleOutConfig:
 
     # Adaptive Exit Configuration (regime-aware parameters)
     # Requires walk-forward validation before enabling in production.
-    # Research: Kaminski & Lo (2014), Nystrup et al. (2017) — 2-param adaptation optimal
+    # Research: Kaminski & Lo (2014), Nystrup et al. (2017) -- 2-param adaptation optimal
     adaptive_exits_enabled: bool = False      # Enable regime-adaptive BE + trail (requires walk-forward validation)
 
 

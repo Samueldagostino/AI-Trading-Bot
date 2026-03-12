@@ -324,7 +324,7 @@ class TestFillAfterCancel:
         trade = make_active_trade()
         om._active_positions["T001"] = trade
 
-        # The fill happened — now check that stop is in place
+        # The fill happened -- now check that stop is in place
         assert trade["stop_order_id"] is not None or trade["stop_status"] == "WORKING"
 
 
@@ -384,7 +384,7 @@ class TestDuplicateExecDedup:
         om._on_execution(trade, MockFillObj())
         assert "EXEC_12345" in om._processed_exec_ids
 
-        # Duplicate — should not process again
+        # Duplicate -- should not process again
         initial_count = len(om._processed_exec_ids)
         om._on_execution(trade, MockFillObj())
         assert len(om._processed_exec_ids) == initial_count  # No new additions

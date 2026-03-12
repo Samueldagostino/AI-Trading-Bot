@@ -61,7 +61,7 @@ class VWAPTracker:
         et_time = et_dt.time()
         et_date = et_dt.date()
 
-        # New day — reset VWAP at RTH open
+        # New day -- reset VWAP at RTH open
         if self._current_date != et_date and et_time >= RTH_OPEN:
             self._reset()
             self._current_date = et_date

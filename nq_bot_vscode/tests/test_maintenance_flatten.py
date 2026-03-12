@@ -138,7 +138,7 @@ async def test_flatten_at_450pm():
 # ═══════════════════════════════════════════════════════════════
 
 def test_no_flatten_at_449pm():
-    """At 4:49 PM, the flatten should NOT fire — it fires at 4:50, not before."""
+    """At 4:49 PM, the flatten should NOT fire -- it fires at 4:50, not before."""
     t = _make_et_datetime(16, 49)
     current_time_et = t.time()
     should_flatten = current_time_et >= dt_time(16, 50)
@@ -319,7 +319,7 @@ async def test_flatten_noop_when_flat():
 
 
 # ═══════════════════════════════════════════════════════════════
-# TEST 11: UTC offset correctness — 4:50 PM ET != 4:50 PM UTC
+# TEST 11: UTC offset correctness -- 4:50 PM ET != 4:50 PM UTC
 # ═══════════════════════════════════════════════════════════════
 
 def test_utc_offset_not_hardcoded():
@@ -354,27 +354,27 @@ def test_session_classification():
     sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent.parent / "scripts"))
     from session_diagnostic import classify_session
 
-    # ETH_ASIA: 6:00 PM – 2:00 AM
+    # ETH_ASIA: 6:00 PM - 2:00 AM
     assert classify_session(_make_et_datetime(18, 0)) == "ETH_ASIA"
     assert classify_session(_make_et_datetime(23, 30)) == "ETH_ASIA"
     assert classify_session(_make_et_datetime(1, 59)) == "ETH_ASIA"
 
-    # ETH_LONDON: 2:00 AM – 9:30 AM
+    # ETH_LONDON: 2:00 AM - 9:30 AM
     assert classify_session(_make_et_datetime(2, 0)) == "ETH_LONDON"
     assert classify_session(_make_et_datetime(5, 0)) == "ETH_LONDON"
     assert classify_session(_make_et_datetime(9, 29)) == "ETH_LONDON"
 
-    # RTH_EARLY: 9:30 AM – 12:00 PM (boundary: 9:30 → RTH_EARLY)
+    # RTH_EARLY: 9:30 AM - 12:00 PM (boundary: 9:30 → RTH_EARLY)
     assert classify_session(_make_et_datetime(9, 30)) == "RTH_EARLY"
     assert classify_session(_make_et_datetime(10, 0)) == "RTH_EARLY"
     assert classify_session(_make_et_datetime(11, 59)) == "RTH_EARLY"
 
-    # RTH_LATE: 12:00 PM – 4:00 PM
+    # RTH_LATE: 12:00 PM - 4:00 PM
     assert classify_session(_make_et_datetime(12, 0)) == "RTH_LATE"
     assert classify_session(_make_et_datetime(14, 0)) == "RTH_LATE"
     assert classify_session(_make_et_datetime(15, 59)) == "RTH_LATE"
 
-    # POST_RTH: 4:00 PM – 5:00 PM
+    # POST_RTH: 4:00 PM - 5:00 PM
     assert classify_session(_make_et_datetime(16, 0)) == "POST_RTH"
     assert classify_session(_make_et_datetime(16, 30)) == "POST_RTH"
     assert classify_session(_make_et_datetime(16, 59)) == "POST_RTH"

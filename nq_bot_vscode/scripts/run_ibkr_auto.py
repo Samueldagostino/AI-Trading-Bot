@@ -105,7 +105,7 @@ class IBKRAuto:
         # Initial startup sequence
         success = await self._startup_sequence()
         if not success:
-            logger.critical("Initial startup failed — exiting")
+            logger.critical("Initial startup failed -- exiting")
             return
 
         # Start health monitor
@@ -113,7 +113,7 @@ class IBKRAuto:
 
         # Run trading loop (or idle in dry-run)
         if self._dry_run:
-            logger.info("[DRY-RUN] Startup successful — would start trading here")
+            logger.info("[DRY-RUN] Startup successful -- would start trading here")
             logger.info("[DRY-RUN] TWS is connected, health monitor running")
             logger.info("[DRY-RUN] Press Ctrl+C to stop")
             await self._idle_loop()
@@ -140,7 +140,7 @@ class IBKRAuto:
 
         # Step 1: Check if TWS is already running
         if self._launcher.is_running():
-            logger.info("Step 1: TWS is already running — skipping launch")
+            logger.info("Step 1: TWS is already running -- skipping launch")
         else:
             # Step 2: Launch TWS
             logger.info("Step 1: Launching TWS...")
@@ -179,7 +179,7 @@ class IBKRAuto:
             return False
 
         logger.info("=" * 60)
-        logger.info("  STARTUP COMPLETE — READY TO TRADE")
+        logger.info("  STARTUP COMPLETE -- READY TO TRADE")
         logger.info("=" * 60)
         return True
 
@@ -188,7 +188,7 @@ class IBKRAuto:
         try:
             summary = await self._client.get_account_summary()
             if not summary:
-                logger.warning("Empty account summary — may be paper account with no data")
+                logger.warning("Empty account summary -- may be paper account with no data")
                 return True  # Paper accounts may have empty summaries
 
             nlv = summary.get("NetLiquidation", 0)
@@ -222,7 +222,7 @@ class IBKRAuto:
 
         except ImportError:
             logger.warning(
-                "IBKRLivePipeline not available — running in monitor-only mode. "
+                "IBKRLivePipeline not available -- running in monitor-only mode. "
                 "The bot will stay connected but won't trade."
             )
             await self._idle_loop()
@@ -250,7 +250,7 @@ class IBKRAuto:
 
         if self._restart_count >= self._config.max_restart_attempts:
             logger.critical(
-                "Max restart attempts (%d) reached — giving up. "
+                "Max restart attempts (%d) reached -- giving up. "
                 "Manual intervention required.",
                 self._config.max_restart_attempts,
             )
@@ -297,21 +297,21 @@ class IBKRAuto:
         # Step 5: Relaunch
         success = await self._startup_sequence()
         if success:
-            logger.info("Restart successful — resuming health monitor")
+            logger.info("Restart successful -- resuming health monitor")
             self._health_monitor.start()
 
             if not self._dry_run:
                 # Re-enter trading loop in background
                 asyncio.ensure_future(self._trading_loop())
         else:
-            logger.error("Restart failed — will retry on next health check")
+            logger.error("Restart failed -- will retry on next health check")
             self._health_monitor.start()
 
     async def _try_flatten(self) -> None:
         """Try to flatten all positions before restart (best-effort)."""
         try:
             if not self._client.is_connected():
-                logger.warning("Cannot flatten — not connected")
+                logger.warning("Cannot flatten -- not connected")
                 return
 
             positions = await self._client.get_positions()

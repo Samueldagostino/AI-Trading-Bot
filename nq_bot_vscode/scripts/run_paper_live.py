@@ -257,7 +257,7 @@ class PaperLiveRunner:
         if not self._dry_run:
             connected = await self._connect_tws()
             if not connected:
-                logger.critical("TWS connection failed — exiting")
+                logger.critical("TWS connection failed -- exiting")
                 sys.exit(1)
 
             # b2. Initialize OrderManager after TWS connect
@@ -273,7 +273,7 @@ class PaperLiveRunner:
                 logger.warning("OrderManager initialization failed: %s (continuing without)", e)
                 self._order_manager = None
         else:
-            logger.info("DRY-RUN mode — using synthetic data (no TWS)")
+            logger.info("DRY-RUN mode -- using synthetic data (no TWS)")
 
         # c. Safety rails already initialized in __init__
         logger.info("Safety rails initialized:")
@@ -352,7 +352,7 @@ class PaperLiveRunner:
     # ──────────────────────────────────────────────────────────
 
     def _on_tws_bar(self, bar: Bar) -> None:
-        """Callback from TWS real-time bars — schedule async processing."""
+        """Callback from TWS real-time bars -- schedule async processing."""
         asyncio.get_event_loop().create_task(self._process_bar_safe(bar))
 
     async def _process_bar_safe(self, bar: Bar) -> None:
@@ -494,7 +494,7 @@ class PaperLiveRunner:
                 )
 
                 if tripped:
-                    logger.critical("SAFETY RAIL TRIPPED — trading halted")
+                    logger.critical("SAFETY RAIL TRIPPED -- trading halted")
 
         # Periodic monitor update
         self._monitor.update()
@@ -654,7 +654,7 @@ class PaperLiveRunner:
             return
 
         if not self._ibkr_client:
-            logger.warning("No IBKR client — skipping historical backfill")
+            logger.warning("No IBKR client -- skipping historical backfill")
             self._historical_loaded = True
             return
 
@@ -719,7 +719,7 @@ class PaperLiveRunner:
                     logger.warning("Failed to fetch historical %s: %s", tf_name, e)
 
         except ImportError:
-            logger.warning("ib_insync not available — skipping historical backfill")
+            logger.warning("ib_insync not available -- skipping historical backfill")
         except Exception as e:
             logger.warning("Historical backfill error: %s", e)
 
@@ -912,7 +912,7 @@ class PaperLiveRunner:
 
                     # Check heartbeat
                     if not self._safety_rails.heartbeat.check():
-                        logger.critical("Heartbeat HALT — no data received")
+                        logger.critical("Heartbeat HALT -- no data received")
                         break
 
                 # Dashboard refresh
@@ -924,9 +924,9 @@ class PaperLiveRunner:
                 # Check if any breaker tripped
                 if not self._safety_rails.check_all():
                     status = self._safety_rails.get_status()
-                    logger.critical("Safety rails HALTED — require manual reset")
+                    logger.critical("Safety rails HALTED -- require manual reset")
                     logger.info("Status: %s", json.dumps(status, indent=2))
-                    # Continue loop but don't trade — wait for shutdown
+                    # Continue loop but don't trade -- wait for shutdown
                     await asyncio.sleep(5.0)
 
         except asyncio.CancelledError:
@@ -1032,7 +1032,7 @@ class PaperLiveRunner:
             except Exception as e:
                 logger.warning("Error shutting down bot: %s", e)
 
-        logger.info("Shutdown complete — all state saved")
+        logger.info("Shutdown complete -- all state saved")
 
     def _print_safety_summary(self) -> None:
         """Print safety rail status summary."""
@@ -1054,7 +1054,7 @@ class PaperLiveRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IBKR Paper Trading Runner — MNQ with safety rails (TWS API)",
+        description="IBKR Paper Trading Runner -- MNQ with safety rails (TWS API)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
@@ -1099,7 +1099,7 @@ All circuit breakers require manual restart after tripping.
     )
     parser.add_argument(
         "--force-config", action="store_true",
-        help="Override config validation — trade even if config mismatches v3 baseline (NOT RECOMMENDED)",
+        help="Override config validation -- trade even if config mismatches v3 baseline (NOT RECOMMENDED)",
     )
     args = parser.parse_args()
 
@@ -1135,7 +1135,7 @@ All circuit breakers require manual restart after tripping.
     from config.config_validator import print_config_table
     config_ok = print_config_table(CONFIG, force=args.force_config)
     if not config_ok:
-        logger.error("Config validation FAILED — exiting. Use --force-config to override.")
+        logger.error("Config validation FAILED -- exiting. Use --force-config to override.")
         sys.exit(1)
     # ─────────────────────────────────────────────────────────────
 
@@ -1218,12 +1218,12 @@ All circuit breakers require manual restart after tripping.
             )
         except asyncio.TimeoutError:
             logger.critical(
-                "Shutdown timed out after %ds — MANUAL CHECK REQUIRED",
+                "Shutdown timed out after %ds -- MANUAL CHECK REQUIRED",
                 SHUTDOWN_TIMEOUT_SECONDS,
             )
     except Exception:
         logger.critical(
-            "UNHANDLED EXCEPTION — shutting down\n%s",
+            "UNHANDLED EXCEPTION -- shutting down\n%s",
             traceback.format_exc(),
         )
         try:
@@ -1232,7 +1232,7 @@ All circuit breakers require manual restart after tripping.
             )
         except asyncio.TimeoutError:
             logger.critical(
-                "Shutdown timed out after %ds — MANUAL CHECK REQUIRED",
+                "Shutdown timed out after %ds -- MANUAL CHECK REQUIRED",
                 SHUTDOWN_TIMEOUT_SECONDS,
             )
         sys.exit(1)

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Full Modifier Backtest — All 4 Institutional Modifiers Active
+Full Modifier Backtest -- All 4 Institutional Modifiers Active
 ==============================================================
 Runs one comprehensive backtest with ALL institutional modifiers
 enabled and compares against the provided baseline metrics.
 
 Modifiers:
-  1. Overnight Bias   — prev close vs current open alignment with HTF
-  2. FOMC Drift       — pre-FOMC position sizing / stand-aside
-  3. Gamma Regime     — VIX term structure (neutral without VIX data)
-  4. Volatility HAR-RV — realized vol regime from 5-min returns
+  1. Overnight Bias   -- prev close vs current open alignment with HTF
+  2. FOMC Drift       -- pre-FOMC position sizing / stand-aside
+  3. Gamma Regime     -- VIX term structure (neutral without VIX data)
+  4. Volatility HAR-RV -- realized vol regime from 5-min returns
 
 Output:
   - logs/full_modifier_backtest_results.json
@@ -59,7 +59,7 @@ def precompute_daily_rvs(data_dir: str) -> dict:
 
     csv_path = Path(data_dir) / "NQ_5m.csv"
     if not csv_path.exists():
-        print(f"  WARNING: No 5-min data at {csv_path} — vol modifier stays neutral")
+        print(f"  WARNING: No 5-min data at {csv_path} -- vol modifier stays neutral")
         return {}
 
     importer = TradingViewImporter(CONFIG)
@@ -112,14 +112,14 @@ async def main():
             p.unlink()
 
     print("=" * 75)
-    print("  FULL MODIFIER BACKTEST — All 4 Institutional Modifiers ACTIVE")
+    print("  FULL MODIFIER BACKTEST -- All 4 Institutional Modifiers ACTIVE")
     print("=" * 75)
     print()
     print("  Modifiers:")
-    print("    1. Overnight Bias   — tracks prev close vs current open")
-    print("    2. FOMC Drift       — uses 2025-2026 FOMC calendar")
-    print("    3. Gamma Regime     — returns 1.0x (no VIX data in CSVs)")
-    print("    4. Volatility HAR-RV — fed from 5-min RV; activates after 22 days")
+    print("    1. Overnight Bias   -- tracks prev close vs current open")
+    print("    2. FOMC Drift       -- uses 2025-2026 FOMC calendar")
+    print("    3. Gamma Regime     -- returns 1.0x (no VIX data in CSVs)")
+    print("    4. Volatility HAR-RV -- fed from 5-min RV; activates after 22 days")
     print()
 
     # ── Pre-compute daily RVs for vol forecaster ──
@@ -231,7 +231,7 @@ async def main():
     sim._record_trade_result = _patched_record
 
     # ── Run simulation ──
-    print("  Running full backtest (Sep 2025 – Feb 2026)...")
+    print("  Running full backtest (Sep 2025 - Feb 2026)...")
     print()
     results = await sim.run()
     print()
@@ -342,7 +342,7 @@ async def main():
     print(f"  Overnight modifier != 1.0:   {on_active:>5} / {total} ({pct(on_active)})")
     print(f"  FOMC modifier != 1.0:        {fomc_active:>5} / {total} ({pct(fomc_active)})")
     print(f"  Gamma modifier != 1.0:       {gamma_active:>5} / {total} ({pct(gamma_active)})  "
-          f"[expected 0 — no VIX data]")
+          f"[expected 0 -- no VIX data]")
     print(f"  Vol modifier != 1.0:         {vol_active:>5} / {total} ({pct(vol_active)})")
     print(f"  FOMC stand-aside blocks:     {stand_asides:>5}")
     print()

@@ -8,7 +8,7 @@ Handles:
   - Session type detection (RTH vs ETH)
   - Validation of each bar before passing to process_bar()
 
-The Bar dataclass interface is SACRED — we adapt data TO it, never change it.
+The Bar dataclass interface is SACRED -- we adapt data TO it, never change it.
 """
 
 import logging
@@ -53,7 +53,7 @@ def adapt_tws_bar(ib_bar) -> Optional[Bar]:
         Bar instance, or None if validation fails.
     """
     try:
-        # Extract timestamp — handle both RealTimeBar and BarData
+        # Extract timestamp -- handle both RealTimeBar and BarData
         if hasattr(ib_bar, "time"):
             raw_ts = ib_bar.time
         elif hasattr(ib_bar, "date"):
@@ -78,7 +78,7 @@ def adapt_tws_bar(ib_bar) -> Optional[Bar]:
             logger.warning("adapt_tws_bar: unrecognized timestamp type: %s", type(raw_ts))
             return None
 
-        # Extract OHLCV — handle both field name conventions
+        # Extract OHLCV -- handle both field name conventions
         open_price = getattr(ib_bar, "open_", None) or getattr(ib_bar, "open", None)
         high_price = getattr(ib_bar, "high", None)
         low_price = getattr(ib_bar, "low", None)

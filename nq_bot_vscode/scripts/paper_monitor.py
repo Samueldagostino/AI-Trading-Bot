@@ -34,7 +34,7 @@ LOGS_DIR = project_dir / "logs"
 TRADES_LOG = LOGS_DIR / "paper_trades.json"
 DECISIONS_LOG = LOGS_DIR / "paper_decisions.json"
 
-# OOS baseline (Config D + C1 Time Exit, Sep 2025 – Feb 2026)
+# OOS baseline (Config D + C1 Time Exit, Sep 2025 - Feb 2026)
 OOS_EXPECTANCY = 15.34
 OOS_WIN_RATE = 68.1
 OOS_PF = 1.59
@@ -222,7 +222,7 @@ def render_dashboard(state: MonitorState) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines.append("")
-    lines.append(f"  PAPER TRADING MONITOR — Config D")
+    lines.append(f"  PAPER TRADING MONITOR -- Config D")
     lines.append(f"  {now}")
     lines.append(f"  {'=' * 56}")
 
@@ -250,7 +250,7 @@ def render_dashboard(state: MonitorState) -> str:
         lines.append(f"  Regime:     {state.position_regime}")
         lines.append(f"  Since:      {state.position_entry_time[:19]}")
     else:
-        lines.append(f"  FLAT — no open position")
+        lines.append(f"  FLAT -- no open position")
     lines.append("")
 
     # Today's stats
@@ -277,7 +277,7 @@ def render_dashboard(state: MonitorState) -> str:
         # Use C1+C2 split
         pf_str = f"~{abs(state.c1_pnl + state.c2_pnl) / max(abs(state.total_pnl - (state.c1_pnl + state.c2_pnl)), 0.01):.2f}" if state.total_losses > 0 else "inf"
     else:
-        pf_str = "—"
+        pf_str = "--"
 
     lines.append(f"  Total Trades: {state.total_trades}")
     lines.append(f"  Total PnL:    ${state.total_pnl:+.2f}")
@@ -294,7 +294,7 @@ def render_dashboard(state: MonitorState) -> str:
     if recent_anomalies:
         for a in recent_anomalies:
             t = a["time"][:19] if a.get("time") else "?"
-            lines.append(f"  [{a['category']:>12}] {t} — {a['message']}")
+            lines.append(f"  [{a['category']:>12}] {t} -- {a['message']}")
     else:
         lines.append(f"  None")
     lines.append("")
@@ -317,8 +317,8 @@ def run_snapshot():
 
 
 def run_live():
-    """Live tail mode — refreshes every 2 seconds."""
-    print("Paper Trading Monitor — Live Mode (Ctrl+C to exit)")
+    """Live tail mode -- refreshes every 2 seconds."""
+    print("Paper Trading Monitor -- Live Mode (Ctrl+C to exit)")
     print(f"Watching: {TRADES_LOG}")
     print(f"          {DECISIONS_LOG}")
 

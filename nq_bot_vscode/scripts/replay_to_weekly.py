@@ -10,7 +10,7 @@ expected by ibkr_monitor.py's weekly report pipeline, then runs:
   4. compute_4_week_trend()    -> trend analysis
   5. update_viz_data()         -> docs/viz_data.json
 
-Does NOT modify the weekly report or viz pipeline — only adapts the
+Does NOT modify the weekly report or viz pipeline -- only adapts the
 replay output to match the expected input format (TradeRecord).
 
 Usage:
@@ -71,7 +71,7 @@ def convert_replay_to_trade_records(raw_trades: list) -> list:
         event == "fill", pnl (not total_pnl), source (not signal_source)
 
     We skip parse_trades() entirely and build TradeRecord objects
-    directly — this is the correct adaptation layer.
+    directly -- this is the correct adaptation layer.
     """
     records = []
     for entry in raw_trades:

@@ -2,16 +2,16 @@
 """
 Session-Tagged Trade Diagnostic
 ================================
-Runs the ReplaySimulator for the validated backtest periods (Mar 2025 – Mar 2026),
+Runs the ReplaySimulator for the validated backtest periods (Mar 2025 - Mar 2026),
 extracts per-trade entry timestamps, classifies each trade by trading session,
 and generates a comprehensive session performance breakdown.
 
 Session Taxonomy (all times Eastern Time, DST-aware via ZoneInfo):
-  ETH_ASIA    : 6:00 PM – 2:00 AM  (Post-maintenance through Tokyo/Hong Kong)
-  ETH_LONDON  : 2:00 AM – 9:30 AM  (European institutional flow through US pre-market)
-  RTH_EARLY   : 9:30 AM – 12:00 PM (Opening drive, IB break, morning momentum)
-  RTH_LATE    : 12:00 PM – 4:00 PM (Midday lull into closing flow)
-  POST_RTH    : 4:00 PM – 5:00 PM  (Post-RTH wind-down, pre-maintenance)
+  ETH_ASIA    : 6:00 PM - 2:00 AM  (Post-maintenance through Tokyo/Hong Kong)
+  ETH_LONDON  : 2:00 AM - 9:30 AM  (European institutional flow through US pre-market)
+  RTH_EARLY   : 9:30 AM - 12:00 PM (Opening drive, IB break, morning momentum)
+  RTH_LATE    : 12:00 PM - 4:00 PM (Midday lull into closing flow)
+  POST_RTH    : 4:00 PM - 5:00 PM  (Post-RTH wind-down, pre-maintenance)
 
 Usage:
     python scripts/session_diagnostic.py
@@ -41,25 +41,25 @@ ET = ZoneInfo("America/New_York")
 
 # ── Session definitions ──
 SESSIONS = {
-    "ETH_ASIA":   (time(18, 0), time(2, 0)),    # 6:00 PM – 2:00 AM (crosses midnight)
-    "ETH_LONDON": (time(2, 0),  time(9, 30)),    # 2:00 AM – 9:30 AM
-    "RTH_EARLY":  (time(9, 30), time(12, 0)),    # 9:30 AM – 12:00 PM
-    "RTH_LATE":   (time(12, 0), time(16, 0)),    # 12:00 PM – 4:00 PM
-    "POST_RTH":   (time(16, 0), time(17, 0)),    # 4:00 PM – 5:00 PM
+    "ETH_ASIA":   (time(18, 0), time(2, 0)),    # 6:00 PM - 2:00 AM (crosses midnight)
+    "ETH_LONDON": (time(2, 0),  time(9, 30)),    # 2:00 AM - 9:30 AM
+    "RTH_EARLY":  (time(9, 30), time(12, 0)),    # 9:30 AM - 12:00 PM
+    "RTH_LATE":   (time(12, 0), time(16, 0)),    # 12:00 PM - 4:00 PM
+    "POST_RTH":   (time(16, 0), time(17, 0)),    # 4:00 PM - 5:00 PM
 }
 
-# Period definitions for Mar 2025 – Mar 2026
+# Period definitions for Mar 2025 - Mar 2026
 PERIODS = [
     {
         "id": "period_5b",
-        "label": "Sep 2024 – Aug 2025",
+        "label": "Sep 2024 - Aug 2025",
         "data_dir": str(REPO_ROOT / "data" / "firstrate" / "historical" / "aggregated" / "period_5b_2024-09_to_2025-08"),
         "start": "2025-03-01",
         "end": "2025-09-01",
     },
     {
         "id": "period_6",
-        "label": "Sep 2025 – Feb 2026",
+        "label": "Sep 2025 - Feb 2026",
         "data_dir": str(PROJECT_DIR / "data" / "firstrate"),
         "start": "2025-09-01",
         "end": "2026-04-01",
@@ -76,27 +76,27 @@ def classify_session(entry_ts: datetime) -> str:
     et = entry_ts.astimezone(ET)
     t = et.time()
 
-    # POST_RTH: 4:00 PM – 5:00 PM (>= 16:00 and < 17:00)
+    # POST_RTH: 4:00 PM - 5:00 PM (>= 16:00 and < 17:00)
     if t >= time(16, 0) and t < time(17, 0):
         return "POST_RTH"
 
-    # RTH_LATE: 12:00 PM – 4:00 PM (>= 12:00 and < 16:00)
+    # RTH_LATE: 12:00 PM - 4:00 PM (>= 12:00 and < 16:00)
     if t >= time(12, 0) and t < time(16, 0):
         return "RTH_LATE"
 
-    # RTH_EARLY: 9:30 AM – 12:00 PM (>= 9:30 and < 12:00)
+    # RTH_EARLY: 9:30 AM - 12:00 PM (>= 9:30 and < 12:00)
     if t >= time(9, 30) and t < time(12, 0):
         return "RTH_EARLY"
 
-    # ETH_LONDON: 2:00 AM – 9:30 AM (>= 2:00 and < 9:30)
+    # ETH_LONDON: 2:00 AM - 9:30 AM (>= 2:00 and < 9:30)
     if t >= time(2, 0) and t < time(9, 30):
         return "ETH_LONDON"
 
-    # ETH_ASIA: 6:00 PM – 2:00 AM (>= 18:00 OR < 2:00) — crosses midnight
+    # ETH_ASIA: 6:00 PM - 2:00 AM (>= 18:00 OR < 2:00) -- crosses midnight
     if t >= time(18, 0) or t < time(2, 0):
         return "ETH_ASIA"
 
-    # Maintenance window (5:00 PM – 6:00 PM) — shouldn't happen but handle it
+    # Maintenance window (5:00 PM - 6:00 PM) -- shouldn't happen but handle it
     return "POST_RTH"
 
 
@@ -307,7 +307,7 @@ def print_comparison_table(diagnostic: dict) -> None:
 
     print()
     print("=" * 100)
-    print("  SESSION PERFORMANCE COMPARISON — 396 Trades (Mar 2025 – Mar 2026)")
+    print("  SESSION PERFORMANCE COMPARISON -- 396 Trades (Mar 2025 - Mar 2026)")
     print("=" * 100)
 
     # Header
@@ -361,14 +361,14 @@ def print_key_findings(diagnostic: dict) -> None:
         print("=" * 80)
         print("  KEY FINDINGS")
         print("=" * 80)
-        print(f"  Highest PF:    {best_pf_session} — PF {session_pfs[best_pf_session]:.2f}")
-        print(f"  Lowest PF:     {worst_pf_session} — PF {session_pfs[worst_pf_session]:.2f}")
+        print(f"  Highest PF:    {best_pf_session} -- PF {session_pfs[best_pf_session]:.2f}")
+        print(f"  Lowest PF:     {worst_pf_session} -- PF {session_pfs[worst_pf_session]:.2f}")
         print()
 
         # Where does the edge concentrate?
         session_pnls = {s: sb[s]["total_pnl"] for s in sessions if sb[s]["trades"] > 0}
         best_pnl_session = max(session_pnls, key=session_pnls.get)
-        print(f"  Edge concentrates in: {best_pnl_session} — ${session_pnls[best_pnl_session]:+,.2f} "
+        print(f"  Edge concentrates in: {best_pnl_session} -- ${session_pnls[best_pnl_session]:+,.2f} "
               f"({sb[best_pnl_session]['pct_of_total_pnl']:.1f}% of total PnL)")
         print()
 
@@ -399,7 +399,7 @@ async def main():
     print()
     print("#" * 70)
     print("  SESSION-TAGGED TRADE DIAGNOSTIC")
-    print("  Re-running backtest for Mar 2025 – Mar 2026")
+    print("  Re-running backtest for Mar 2025 - Mar 2026")
     print("#" * 70)
     print()
 

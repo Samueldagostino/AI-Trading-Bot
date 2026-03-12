@@ -1,5 +1,5 @@
 """
-GEX Monitor — IBKR Options Chain + Quant Data API Fallback
+GEX Monitor -- IBKR Options Chain + Quant Data API Fallback
 ============================================================
 Computes Gamma Exposure (GEX) from IBKR SPX options chain data.
 Falls back to Quant Data API when IBKR is unavailable.
@@ -176,7 +176,7 @@ class GEXMonitor:
         try:
             ib = self._ibkr_client._ib
             if not ib.isConnected():
-                logger.warning("IBKR not connected — skipping GEX from options chain")
+                logger.warning("IBKR not connected -- skipping GEX from options chain")
                 return None
 
             from ib_insync import Index, Option
@@ -256,7 +256,7 @@ class GEXMonitor:
                 greeks = t.modelGreeks or t.lastGreeks
                 if greeks:
                     gamma = greeks.gamma
-                    oi = greeks.undPrice  # Not OI — we need OI from summary
+                    oi = greeks.undPrice  # Not OI -- we need OI from summary
 
                 # Try to get open interest from the ticker summary
                 if hasattr(t, 'openInterest') and t.openInterest:
@@ -339,7 +339,7 @@ class GEXMonitor:
         # Exponential backoff: skip fetch if in cooldown
         now = time.time()
         if now < self._backoff_until:
-            return None  # Silently skip — already logged when backoff started
+            return None  # Silently skip -- already logged when backoff started
 
         try:
             import requests
@@ -358,13 +358,13 @@ class GEXMonitor:
                     self._backoff_until = now + self._BACKOFF_SECONDS
                     logger.warning(
                         "GEX API unavailable (HTTP %d, %d consecutive errors) "
-                        "— retrying in %d min",
+                        "-- retrying in %d min",
                         resp.status_code, self._consecutive_errors,
                         self._BACKOFF_SECONDS // 60,
                     )
                 else:
                     logger.warning(
-                        "GEX API failed (HTTP %d) for %s — %d/%d before backoff",
+                        "GEX API failed (HTTP %d) for %s -- %d/%d before backoff",
                         resp.status_code, ticker,
                         self._consecutive_errors, self._BACKOFF_THRESHOLD,
                     )
@@ -381,7 +381,7 @@ class GEXMonitor:
             if self._consecutive_errors >= self._BACKOFF_THRESHOLD:
                 self._backoff_until = now + self._BACKOFF_SECONDS
                 logger.warning(
-                    "GEX fetch failed (%s) — %d consecutive errors, "
+                    "GEX fetch failed (%s) -- %d consecutive errors, "
                     "retrying in %d min",
                     e, self._consecutive_errors, self._BACKOFF_SECONDS // 60,
                 )
@@ -439,7 +439,7 @@ class GEXMonitor:
                         })
 
             if not math.isfinite(total_net_gex):
-                logger.warning("GEX total_net_gex is NaN/Inf for %s — returning None", ticker)
+                logger.warning("GEX total_net_gex is NaN/Inf for %s -- returning None", ticker)
                 return None
 
             display = _format_gex_display(total_net_gex)
@@ -470,7 +470,7 @@ class GEXMonitor:
     def classify_regime(net_gex: float) -> str:
         """Classify GEX regime based on net gamma exposure."""
         if not math.isfinite(net_gex):
-            logger.warning("GEX net_gex is NaN/Inf — defaulting to UNKNOWN")
+            logger.warning("GEX net_gex is NaN/Inf -- defaulting to UNKNOWN")
             return "UNKNOWN"
         if net_gex > 5e9:
             return "STRONG_POSITIVE"
@@ -560,9 +560,9 @@ class GEXMonitor:
         Fetch fresh GEX data if refresh interval has elapsed.
 
         Priority:
-          1. IBKR options chain (SPX) — primary
-          2. Quant Data API (SPY/QQQ) — fallback
-          3. Mock data — dry-run
+          1. IBKR options chain (SPX) -- primary
+          2. Quant Data API (SPY/QQQ) -- fallback
+          3. Mock data -- dry-run
 
         Returns cached result if too soon. Caches and logs result.
 
@@ -621,12 +621,12 @@ class GEXMonitor:
         """
         Return neutral GEX data when API is unavailable.
 
-        No fake data — returns UNKNOWN regime with 1.0x modifier so
+        No fake data -- returns UNKNOWN regime with 1.0x modifier so
         GEX never influences trade decisions without real market data.
         """
         if self._mock_cycle == 0:
             logger.warning(
-                "GEX API token not configured — modifier disabled (1.0x neutral)"
+                "GEX API token not configured -- modifier disabled (1.0x neutral)"
             )
         self._mock_cycle += 1
 

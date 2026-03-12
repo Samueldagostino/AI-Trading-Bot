@@ -1,5 +1,5 @@
 """
-Replay Simulator — Real-Time Paper Trading Validation
+Replay Simulator -- Real-Time Paper Trading Validation
 =======================================================
 Replays historical FirstRate 1m data through the EXACT same pipeline
 as the backtester and paper trading runner. Validates that the
@@ -19,11 +19,11 @@ Pipeline (identical to run_paper.py):
 Session rules enforced:
   - No entries before 6:01 PM ET
   - Flat by 4:30 PM ET
-  - No trading during maintenance (5:00–6:00 PM ET)
+  - No trading during maintenance (5:00-6:00 PM ET)
   - Daily loss limit: $500 -> halt for the day
   - Max position: 2 contracts
 
-Fill simulation (calibrated slippage — permanent model):
+Fill simulation (calibrated slippage -- permanent model):
   - RTH (9:30-16:00 ET): 0.50pt base, +0.50 vol spike, cap 1.50pt
   - ETH (18:01-9:29 ET): 1.00pt base, +0.75 vol spike, cap 2.50pt
   - News window (FOMC/CPI/NFP): +1.00pt, cap 3.00pt
@@ -42,7 +42,7 @@ Usage:
     # Max speed with dashboard
     python scripts/replay_simulator.py --speed max --start-date 2025-09-01
 
-    # Validate mode — compare to OOS baseline (uses Variant C by default)
+    # Validate mode -- compare to OOS baseline (uses Variant C by default)
     python scripts/replay_simulator.py --validate
 
     # Test old baseline C1 (Time 10) for comparison
@@ -92,7 +92,7 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 TRADES_LOG = LOGS_DIR / "paper_trades.json"
 DECISIONS_LOG = LOGS_DIR / "paper_decisions.json"
 
-# ── OOS Baseline (Config D + C1 Variant C + Calibrated Slippage, Sep 2025 – Feb 2026) ──
+# ── OOS Baseline (Config D + C1 Variant C + Calibrated Slippage, Sep 2025 - Feb 2026) ──
 OOS_BASELINE = {
     "total_trades": 1161,
     "trades_per_month": 194,
@@ -186,15 +186,15 @@ def filter_by_date(
 # SESSION RULES (same logic as TradovatePaperConnector)
 # ================================================================
 def bar_to_et(bar_time: datetime) -> datetime:
-    """Convert a UTC bar timestamp to ET — DST-aware via ZoneInfo."""
+    """Convert a UTC bar timestamp to ET -- DST-aware via ZoneInfo."""
     return bar_time.astimezone(ZoneInfo("America/New_York"))
 
 
 def is_within_session(et_time: datetime) -> bool:
-    """Check if ET time is within trading session (6:01 PM – 4:30 PM next day)."""
+    """Check if ET time is within trading session (6:01 PM - 4:30 PM next day)."""
     h, m = et_time.hour, et_time.minute
 
-    # Maintenance window 5:00–6:00 PM ET
+    # Maintenance window 5:00-6:00 PM ET
     if h == MAINTENANCE_START:
         return False
     # Before session open (6:01 PM)
@@ -225,7 +225,7 @@ def should_be_flat(et_time: datetime) -> bool:
 # DYNAMIC SLIPPAGE ENGINE
 # ================================================================
 # News windows: FOMC meetings, CPI, PPI, NFP, GDP, PCE, ISM
-# These are approximate dates for the OOS window (Sep 2025–Feb 2026)
+# These are approximate dates for the OOS window (Sep 2025-Feb 2026)
 NEWS_WINDOWS_UTC = [
     # FOMC decisions (2:00 PM ET = 19:00 UTC, ±2 hours)
     ("2025-09-17 17:00", "2025-09-17 21:00"),
@@ -307,7 +307,7 @@ class DynamicSlippageEngine:
         """Determine slippage tier based on ET time of day."""
         h, m = et_time.hour, et_time.minute
         t = h + m / 60.0
-        # RTH: 9:30 – 16:00 ET
+        # RTH: 9:30 - 16:00 ET
         if 9.5 <= t < 16.0:
             return "rth"
         # ETH: everything else (18:01-9:29 next day)
@@ -562,9 +562,9 @@ def render_dashboard(state: ReplayState, speed: str, elapsed_secs: float) -> str
     lines = []
 
     lines.append("")
-    lines.append(f"  REPLAY SIMULATOR — Config D + C1 Trail from Profit")
+    lines.append(f"  REPLAY SIMULATOR -- Config D + C1 Trail from Profit")
     lines.append(f"  Speed: {speed} | Elapsed: {elapsed_secs:.0f}s | "
-                 f"Bar: {state.current_time[:19] if state.current_time else '—'}")
+                 f"Bar: {state.current_time[:19] if state.current_time else '--'}")
     lines.append(f"  {'=' * 60}")
 
     # Current position
@@ -712,7 +712,7 @@ class ReplaySimulator:
             return 0.0
 
     async def run(self) -> Dict:
-        """Main entry point — load data, replay, return results."""
+        """Main entry point -- load data, replay, return results."""
         t0 = time.time()
 
         # Clear shadow state (safe for reuse across periods)
@@ -723,8 +723,8 @@ class ReplaySimulator:
         sweep_str = "ENABLED" if self.sweep_enabled else "DISABLED"
         if not self.quiet:
             print(f"\n{'=' * 62}")
-            print(f"  REPLAY SIMULATOR — Config D")
-            print(f"  C1 variant: {self.c1_variant} — {variant_desc}")
+            print(f"  REPLAY SIMULATOR -- Config D")
+            print(f"  C1 variant: {self.c1_variant} -- {variant_desc}")
             print(f"  Sweep detector: {sweep_str}")
             print(f"  Speed: {self.speed} | Validate: {self.validate}")
             if self.start_date:
@@ -1094,7 +1094,7 @@ class ReplaySimulator:
             return None
 
         async def phase1_variant_a(trade, price, time):
-            """VARIANT A: Minimum Profit Gate — exit only if profit >= 4.0pts."""
+            """VARIANT A: Minimum Profit Gate -- exit only if profit >= 4.0pts."""
             from execution.scale_out_executor import ScaleOutPhase
             direction = trade.direction
 
@@ -1110,7 +1110,7 @@ class ReplaySimulator:
 
             if trade.c1_bars_elapsed >= c1_exit_bars:
                 if unrealized >= 4.0:
-                    # Enough profit to absorb slippage — exit C1
+                    # Enough profit to absorb slippage -- exit C1
                     bar_time, et_time, volume = _slip_ctx(time)
                     adj, slip = sim.slippage_engine.apply_adverse_slippage(
                         price, direction, "exit", bar_time, et_time, volume)
@@ -1173,7 +1173,7 @@ class ReplaySimulator:
                 tp_hit = price <= tp_price
 
             if tp_hit:
-                # Limit order fill at TP price — ZERO slippage
+                # Limit order fill at TP price -- ZERO slippage
                 return _close_c1_and_run(trade, tp_price, time,
                                          "limit_tp_6pt", 0.0)
 
@@ -1327,7 +1327,7 @@ class ReplaySimulator:
             print(f"    ETH (18:01-9:29 ET): 1.00pt base, cap 2.50pt")
             print(f"    Volume spike (>2x 20-bar avg): +0.50-0.75pt")
             print(f"    News window: +1.00pt, cap 3.00pt")
-            print(f"  C1 variant: {variant} — {self.C1_VARIANTS.get(variant, variant)}")
+            print(f"  C1 variant: {variant} -- {self.C1_VARIANTS.get(variant, variant)}")
 
     def _handle_result(self, result: Dict, timestamp: datetime) -> None:
         """Handle a trade action from process_bar()."""
@@ -1686,7 +1686,7 @@ class ReplaySimulator:
                 shadow_pnl = (target_dist * self._SHADOW_POINT_VALUE * num_contracts) - commission_rt
             elif outcome == "LOSS":
                 shadow_pnl = -(stop_dist * self._SHADOW_POINT_VALUE * num_contracts) - commission_rt
-            else:  # TIMEOUT — mark-to-market at bar 120
+            else:  # TIMEOUT -- mark-to-market at bar 120
                 if shadow["direction"] == "LONG":
                     mtm_points = final_price - entry_price
                 else:
@@ -1804,7 +1804,7 @@ class ReplaySimulator:
             return
 
         print(f"\n{'=' * 62}")
-        print(f"  SHADOW-TRADE ANALYSIS — {total:,} rejected signals")
+        print(f"  SHADOW-TRADE ANALYSIS -- {total:,} rejected signals")
         print(f"{'=' * 62}")
         print(f"  {'Gate':<25} {'Count':>6} {'Shadow PnL':>12} {'Verdict':>12}")
         print(f"  {'─' * 58}")
@@ -1836,7 +1836,7 @@ class ReplaySimulator:
     def _run_validation(self, results: Dict) -> None:
         """Compare replay results to OOS baseline."""
         print(f"\n{'=' * 62}")
-        print(f"  VALIDATION — Replay vs OOS Baseline")
+        print(f"  VALIDATION -- Replay vs OOS Baseline")
         print(f"{'=' * 62}\n")
 
         # Compute months in replay window
@@ -1874,10 +1874,10 @@ class ReplaySimulator:
             checks.append(passed)
             return passed
 
-        # Trade count — 15% tolerance (session rules may cause minor differences)
+        # Trade count -- 15% tolerance (session rules may cause minor differences)
         check("Trades", results["total_trades"], baseline_trades, 15)
 
-        # Win rate — 5% absolute tolerance
+        # Win rate -- 5% absolute tolerance
         wr_diff = abs(results["win_rate"] - OOS_BASELINE["win_rate"])
         wr_pass = wr_diff <= 5.0
         status = "PASS" if wr_pass else "FAIL"
@@ -1888,14 +1888,14 @@ class ReplaySimulator:
               f"(tol: 5.0pp)")
         checks.append(wr_pass)
 
-        # Profit factor — 20% tolerance
+        # Profit factor -- 20% tolerance
         check("Profit Factor", results["profit_factor"],
               OOS_BASELINE["profit_factor"], 20)
 
-        # Total PnL — 25% tolerance (slippage model differences)
+        # Total PnL -- 25% tolerance (slippage model differences)
         check("Total PnL", results["total_pnl"], baseline_pnl, 25, "$")
 
-        # Max drawdown — should not exceed 2x OOS baseline
+        # Max drawdown -- should not exceed 2x OOS baseline
         dd_pass = results["max_drawdown_pct"] <= OOS_BASELINE["max_drawdown_pct"] * 2
         status = "PASS" if dd_pass else "FAIL"
         print(f"  [{status:>4}] {'Max Drawdown':<25} "
@@ -1904,14 +1904,14 @@ class ReplaySimulator:
               f"Limit: {OOS_BASELINE['max_drawdown_pct'] * 2:.1f}%")
         checks.append(dd_pass)
 
-        # C1 PnL — must be positive (key invariant)
+        # C1 PnL -- must be positive (key invariant)
         c1_pass = results["c1_pnl"] > 0
         status = "PASS" if c1_pass else "FAIL"
         print(f"  [{status:>4}] {'C1 PnL Positive':<25} "
               f"Replay: ${results['c1_pnl']:>+10,.2f}")
         checks.append(c1_pass)
 
-        # Expectancy — 25% tolerance
+        # Expectancy -- 25% tolerance
         check("Expectancy/Trade", results["expectancy"],
               OOS_BASELINE["expectancy"], 25, "$")
 
@@ -2047,7 +2047,7 @@ async def run_compare_all(args):
     for v in variants:
         desc = ReplaySimulator.C1_VARIANTS.get(v, v)
         print(f"\n{'#' * 62}")
-        print(f"  RUNNING VARIANT: {v} — {desc}")
+        print(f"  RUNNING VARIANT: {v} -- {desc}")
         print(f"{'#' * 62}")
 
         sim = ReplaySimulator(
@@ -2093,7 +2093,7 @@ async def run_compare_all(args):
 
     # ── Comparison Table ──
     print(f"\n\n{'=' * 80}")
-    print(f"  C1 VARIANT COMPARISON — Calibrated Slippage v2")
+    print(f"  C1 VARIANT COMPARISON -- Calibrated Slippage v2")
     print(f"{'=' * 80}")
     print(f"  {'Variant':<12} {'Trades':>6} {'WR':>6} {'PF':>6} "
           f"{'PnL':>10} {'C1 PnL':>9} {'C2 PnL':>9} "
@@ -2133,7 +2133,7 @@ async def run_compare_all(args):
     best = ranked[0]
     r_best = all_results[best]
     print(f"\n{'=' * 80}")
-    print(f"  MONTHLY BREAKDOWN — Best: {best} "
+    print(f"  MONTHLY BREAKDOWN -- Best: {best} "
           f"({ReplaySimulator.C1_VARIANTS.get(best, best)})")
     print(f"{'=' * 80}")
     print(f"  {'Month':<10} {'Trades':>6} {'WR':>6} {'PF':>6} "
@@ -2167,8 +2167,8 @@ SWEEP_ANALYSIS_LOG = LOGS_DIR / "sweep_analysis.json"
 async def run_sweep_compare(args):
     """Run BASELINE (no sweeps) vs TEST (with sweeps), print comparison."""
     print(f"\n{'=' * 70}")
-    print(f"  SWEEP DETECTOR A/B TEST — BASELINE vs BASELINE+SWEEPS")
-    print(f"  C1 variant: {args.c1_variant} | OOS window: Sep 2025 – Feb 2026")
+    print(f"  SWEEP DETECTOR A/B TEST -- BASELINE vs BASELINE+SWEEPS")
+    print(f"  C1 variant: {args.c1_variant} | OOS window: Sep 2025 - Feb 2026")
     print(f"{'=' * 70}\n")
 
     runs = {}
@@ -2240,7 +2240,7 @@ async def run_sweep_compare(args):
     test = runs["TEST"]
 
     print(f"\n\n{'=' * 70}")
-    print(f"  SWEEP DETECTOR COMPARISON — BASELINE vs TEST")
+    print(f"  SWEEP DETECTOR COMPARISON -- BASELINE vs TEST")
     print(f"{'=' * 70}")
     print(f"  {'Metric':<25} {'BASELINE':>12} {'TEST':>12} {'Delta':>12}")
     print(f"  {'─' * 65}")
@@ -2288,7 +2288,7 @@ async def run_sweep_compare(args):
     monthly = test.get("monthly", {})
     if monthly:
         print(f"\n{'=' * 70}")
-        print(f"  MONTHLY BREAKDOWN — TEST (with sweeps)")
+        print(f"  MONTHLY BREAKDOWN -- TEST (with sweeps)")
         print(f"{'=' * 70}")
         print(f"  {'Month':<10} {'Trades':>6} {'WR':>6} {'PF':>6} "
               f"{'PnL':>10} {'SwpTrd':>6} {'SwpPnL':>9} {'ConfTrd':>7}")
@@ -2315,7 +2315,7 @@ async def run_sweep_compare(args):
     feb27_sweeps = [s for s in sweep_log if s.get("timestamp", "").startswith("2026-02-27")]
     if feb27_sweeps:
         print(f"\n{'=' * 70}")
-        print(f"  FEB 27, 2026 — SWEEP ACTIVITY (330pt MNQ reversal)")
+        print(f"  FEB 27, 2026 -- SWEEP ACTIVITY (330pt MNQ reversal)")
         print(f"{'=' * 70}")
         for s in feb27_sweeps:
             print(f"  {s['timestamp'][:19]} | {s['direction']} | "
@@ -2389,7 +2389,7 @@ async def run_sweep_compare(args):
 # ================================================================
 async def async_main():
     parser = argparse.ArgumentParser(
-        description="Replay Simulator — Paper Trading Validation"
+        description="Replay Simulator -- Paper Trading Validation"
     )
     parser.add_argument(
         "--speed", type=str, default="max",
@@ -2405,7 +2405,7 @@ async def async_main():
     )
     parser.add_argument(
         "--validate", action="store_true",
-        help="Validation mode — max speed, compare to OOS baseline"
+        help="Validation mode -- max speed, compare to OOS baseline"
     )
     parser.add_argument(
         "--data-dir", type=str, default=None,
@@ -2414,7 +2414,7 @@ async def async_main():
     parser.add_argument(
         "--c1-variant", type=str, default="C",
         choices=["baseline", "A", "B", "C", "D"],
-        help="C1 exit strategy variant (default: C — trail from profit)"
+        help="C1 exit strategy variant (default: C -- trail from profit)"
     )
     parser.add_argument(
         "--compare-all", action="store_true",

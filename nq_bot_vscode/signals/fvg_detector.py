@@ -1,10 +1,10 @@
 """
-FVG Detector — Fair Value Gap Detection & Lifecycle
+FVG Detector -- Fair Value Gap Detection & Lifecycle
 =====================================================
 Real-time detection of Fair Value Gaps (FVG) and Inverse Fair Value Gaps
 (IFVG) for the Universal Confirmation Layer.
 
-Uses only completed candles — zero look-ahead bias.
+Uses only completed candles -- zero look-ahead bias.
 
 FVG Lifecycle:
   UNFILLED -> price enters zone -> PARTIALLY_FILLED
@@ -42,7 +42,7 @@ class FVGDetector:
     for new FVGs, then updates the lifecycle of all active FVGs.
     """
 
-    MIN_FVG_SIZE: float = 2.0          # points — ignore micro-gaps
+    MIN_FVG_SIZE: float = 2.0          # points -- ignore micro-gaps
     MAX_ACTIVE_PER_DIRECTION: int = 20
     EXPIRY_BARS: int = 500             # remove if never revisited
 
@@ -201,7 +201,7 @@ class FVGDetector:
         target_list = self._bullish_fvgs if direction == "bullish" else self._bearish_fvgs
         active = [f for f in target_list if f.status != "VIOLATED"]
         if len(active) > self.MAX_ACTIVE_PER_DIRECTION:
-            # Sort by formation_bar ascending — oldest first
+            # Sort by formation_bar ascending -- oldest first
             active.sort(key=lambda f: f.formation_bar)
             to_remove = len(active) - self.MAX_ACTIVE_PER_DIRECTION
             for fvg in active[:to_remove]:
@@ -217,7 +217,7 @@ class FVGDetector:
             if fvg.status == "VIOLATED":
                 continue
 
-            # Skip lifecycle check on the formation bar — the bar that
+            # Skip lifecycle check on the formation bar -- the bar that
             # forms the FVG naturally overlaps it
             if fvg.formation_bar == bar_index:
                 continue

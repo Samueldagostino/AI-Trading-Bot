@@ -74,7 +74,7 @@ class TestKillSwitchNoRetriggerAfterDrawdownCooldown:
         # Advance past cooldown
         after_cooldown = now + timedelta(minutes=61)
 
-        # Evaluate again — should NOT re-trigger kill switch
+        # Evaluate again -- should NOT re-trigger kill switch
         result2 = engine.evaluate_trade("long", 20000, 10.0, current_time=after_cooldown)
         assert result2.decision != RiskDecision.KILL_SWITCH, (
             "Kill switch re-triggered immediately after drawdown cooldown!"
@@ -122,7 +122,7 @@ class TestC2TrailingStopShortDirection:
         trade._set_phase(ScaleOutPhase.RUNNING)
         executor._active_trade = trade
 
-        # Price drops to 19950 — best price should update, trail should drop
+        # Price drops to 19950 -- best price should update, trail should drop
         loop = asyncio.new_event_loop()
         now = datetime.now(timezone.utc)
 
@@ -141,7 +141,7 @@ class TestC2TrailingStopShortDirection:
         # Stop should have moved down further
         assert trade.c2.stop_price < 19970.0
 
-        # Price bounces up — stop should NOT move up
+        # Price bounces up -- stop should NOT move up
         old_stop = trade.c2.stop_price
         loop.run_until_complete(executor.update(19950.0, now + timedelta(minutes=2)))
         assert trade.c2.stop_price == old_stop, "Short trailing stop moved UP on bounce!"
@@ -150,7 +150,7 @@ class TestC2TrailingStopShortDirection:
 
 
 # =====================================================================
-#  BUG 3: Broker stop modification failure — no local update
+#  BUG 3: Broker stop modification failure -- no local update
 # =====================================================================
 class TestBrokerStopModificationFailureNoLocalUpdate:
     """If broker API call fails, local stop_price must NOT be updated."""
@@ -184,7 +184,7 @@ class TestBrokerStopModificationFailureNoLocalUpdate:
         # Price goes up, trailing stop should try to update
         loop.run_until_complete(executor.update(20050.0, now))
 
-        # Broker call failed — local state should be unchanged
+        # Broker call failed -- local state should be unchanged
         assert trade.c2.stop_price == original_stop, (
             f"Local stop updated to {trade.c2.stop_price} despite broker failure!"
         )
@@ -245,7 +245,7 @@ class TestWarmupSuppressesTrades:
 # =====================================================================
 class TestBestPriceInitializationConsistent:
     """Both c1_best_price and c2_best_price should be initialized to
-    entry_price — no == 0 dead code checks."""
+    entry_price -- no == 0 dead code checks."""
 
     def test_paper_enter_initializes_best_prices(self):
         config = _make_config()
@@ -278,7 +278,7 @@ class TestBestPriceInitializationConsistent:
         assert trade.c1_best_price == trade.entry_price
         assert trade.c2_best_price == trade.entry_price
 
-        # Price drops — min() should work without == 0 check
+        # Price drops -- min() should work without == 0 check
         now = datetime.now(timezone.utc)
         loop.run_until_complete(executor.update(19990.0, now))
         assert trade.c1_best_price <= trade.entry_price
@@ -445,7 +445,7 @@ class TestSizeMultiplierNotZero:
 
         # With min(factors), worst single factor is 0.25
         assert mult >= 0.25, (
-            f"Size multiplier {mult} is too low — would round to 0 contracts"
+            f"Size multiplier {mult} is too low -- would round to 0 contracts"
         )
 
     def test_single_adverse_factor(self):

@@ -64,7 +64,7 @@ class InitialBalanceTracker:
         et_time = et_dt.time()
         et_date = et_dt.date()
 
-        # New trading day — reset
+        # New trading day -- reset
         if self._current_date != et_date:
             self._finalize_day()
             self._current_date = et_date

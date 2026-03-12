@@ -56,7 +56,7 @@ def analyze_capture_ratios(trades):
         else:
             capture_ratio = captured_move / available_move
 
-        # Clamp to [0, 1] — exit can be worse than entry (negative capture)
+        # Clamp to [0, 1] -- exit can be worse than entry (negative capture)
         # but we keep raw for analysis
         results.append({
             "trade_id": t["trade_id"],
@@ -255,7 +255,7 @@ def main():
     median_capture = statistics.median(ratios)
     print(f"\n  DIAGNOSIS: Median capture ratio = {median_capture:.2%}")
     if median_capture < 0.50:
-        print("  ⚠ CONFIRMED: Trail is too tight — median capture < 50%")
+        print("  ⚠ CONFIRMED: Trail is too tight -- median capture < 50%")
         print("  → C2 is giving back >50% of available favorable movement")
     else:
         print("  ✓ Trail width appears adequate (median capture ≥ 50%)")
@@ -287,9 +287,9 @@ def main():
         "diagnosis": {
             "median_capture_below_50pct": median_capture < 0.50,
             "recommendation": (
-                "Widen C2 trail — median capture ratio indicates premature exits"
+                "Widen C2 trail -- median capture ratio indicates premature exits"
                 if median_capture < 0.50
-                else "Trail width adequate — look elsewhere for PnL improvement"
+                else "Trail width adequate -- look elsewhere for PnL improvement"
             ),
         },
         "trade_details": c2_analysis[:20],  # First 20 for reference

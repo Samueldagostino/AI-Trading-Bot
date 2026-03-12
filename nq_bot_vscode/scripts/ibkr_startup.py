@@ -1,5 +1,5 @@
 """
-IBKR Startup Automation — One-Command Paper Trading Launch
+IBKR Startup Automation -- One-Command Paper Trading Launch
 ============================================================
 Single entry point that handles the entire IBKR paper trading setup:
 
@@ -239,7 +239,7 @@ class IBKRStartupRunner:
         self._checklist.print_checklist()
 
         if not self._checklist.all_ok:
-            print("  Startup checks FAILED — cannot proceed.")
+            print("  Startup checks FAILED -- cannot proceed.")
             return
 
         print("  --- Ready to trade. Waiting for market data... ---")
@@ -435,7 +435,7 @@ class IBKRStartupRunner:
     def _print_banner(self) -> None:
         print()
         print("=" * 60)
-        print("  IBKR PAPER TRADING — AUTOMATED STARTUP (TWS API)")
+        print("  IBKR PAPER TRADING -- AUTOMATED STARTUP (TWS API)")
         print(f"  Mode:       {'DRY-RUN (synthetic data)' if self._dry_run else 'LIVE DATA'}")
         print(f"  TWS:        {self._tws_host}:{self._tws_port}")
         print(f"  Max Loss:   ${self._max_daily_loss:.0f}/day")
@@ -450,7 +450,7 @@ class IBKRStartupRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IBKR Paper Trading — One-Command Startup (TWS API)",
+        description="IBKR Paper Trading -- One-Command Startup (TWS API)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:

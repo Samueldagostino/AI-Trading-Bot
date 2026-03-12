@@ -85,7 +85,7 @@ def validate_bar(bar: Any) -> Tuple[bool, List[str]]:
         bar: A features.engine.Bar instance (or any object with matching attrs).
 
     Returns:
-        (is_valid, list_of_errors) — True and empty list if valid.
+        (is_valid, list_of_errors) -- True and empty list if valid.
     """
     errors: List[str] = []
 
@@ -213,7 +213,7 @@ def validate_candle_dict(candle: dict) -> Tuple[bool, List[str]]:
         candle: dict with OHLCV data.
 
     Returns:
-        (is_valid, list_of_errors) — True and empty list if valid.
+        (is_valid, list_of_errors) -- True and empty list if valid.
     """
     errors: List[str] = []
 
@@ -267,20 +267,20 @@ def get_bar_schema_doc() -> str:
 process_bar() Expected Input Format (Bar dataclass)
 =====================================================
 REQUIRED FIELDS:
-  timestamp    : datetime (UTC with tzinfo)  — bar open time
-  open         : float (> 0, finite)         — opening price
-  high         : float (>= open & close)     — high price
-  low          : float (<= open & close)     — low price
-  close        : float (> 0, finite)         — closing price
-  volume       : int (> 0)                   — trade volume
+  timestamp    : datetime (UTC with tzinfo)  -- bar open time
+  open         : float (> 0, finite)         -- opening price
+  high         : float (>= open & close)     -- high price
+  low          : float (<= open & close)     -- low price
+  close        : float (> 0, finite)         -- closing price
+  volume       : int (> 0)                   -- trade volume
 
 OPTIONAL FIELDS (defaults shown):
-  bid_volume   : int = 0                     — bid-side volume
-  ask_volume   : int = 0                     — ask-side volume
-  delta        : int = 0                     — ask_volume - bid_volume
-  tick_count   : int = 0                     — ticks in this bar
-  vwap         : float = 0.0                 — volume-weighted avg price
-  session_type : str | None = None           — "RTH" or "ETH"
+  bid_volume   : int = 0                     -- bid-side volume
+  ask_volume   : int = 0                     -- ask-side volume
+  delta        : int = 0                     -- ask_volume - bid_volume
+  tick_count   : int = 0                     -- ticks in this bar
+  vwap         : float = 0.0                 -- volume-weighted avg price
+  session_type : str | None = None           -- "RTH" or "ETH"
 
 CONSTRAINTS:
   - high >= max(open, close)

@@ -1,5 +1,5 @@
 """
-Tests for Safety Rails — Circuit Breakers
+Tests for Safety Rails -- Circuit Breakers
 ============================================
 Covers:
   - MaxDailyLossCircuitBreaker: trip threshold, check, reset
@@ -105,7 +105,7 @@ class TestMaxDailyLossCircuitBreaker:
         assert breaker.is_tripped
 
         breaker.reset_daily()
-        # Still tripped — requires manual reset
+        # Still tripped -- requires manual reset
         assert breaker.is_tripped
 
     def test_reset_daily_when_not_tripped(self):
@@ -235,7 +235,7 @@ class TestMaxPositionSizeGuard:
         assert guard.clamp(2) == 2
 
     def test_caps_at_max(self):
-        """Position size > 2 is clamped to 2. ABSOLUTE — no exceptions."""
+        """Position size > 2 is clamped to 2. ABSOLUTE -- no exceptions."""
         guard = MaxPositionSizeGuard(max_contracts=2)
         assert guard.clamp(3) == 2
         assert guard.clamp(5) == 2

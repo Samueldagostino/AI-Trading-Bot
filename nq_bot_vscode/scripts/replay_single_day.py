@@ -8,7 +8,7 @@ validated pipeline:
   -> SignalAggregator -> HC Filter (≥0.75) -> HTF Gate (≥0.3)
   -> RiskEngine (stop ≤30pts) -> ScaleOutExecutor (2-contract, Variant C)
 
-Uses the REAL modules from the codebase — no stubs, no reimplementation.
+Uses the REAL modules from the codebase -- no stubs, no reimplementation.
 
 Data:
   Source: data/firstrate/ (aggregated NQ_*.csv files)
@@ -16,8 +16,8 @@ Data:
   Filtered to Feb 23-27, 2026 window
 
 Output:
-  logs/replay_feb23-27.json        — trade-by-trade JSON
-  logs/replay_feb23-27_summary.txt — human-readable summary
+  logs/replay_feb23-27.json        -- trade-by-trade JSON
+  logs/replay_feb23-27_summary.txt -- human-readable summary
 """
 
 import asyncio

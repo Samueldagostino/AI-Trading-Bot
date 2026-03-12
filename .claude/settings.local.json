@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find c:UsersdagosOneDriveDesktopAI-Trading-Bot -name *test*executor* -o -name *executor*test*)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''execution/scale_out_executor.py''\\).read\\(\\)\\); print\\(''scale_out_executor.py: OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''execution/orchestrator.py''\\).read\\(\\)\\); print\\(''orchestrator.py: OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''tests/test_variant_b_delayed_be.py''\\).read\\(\\)\\); print\\(''test_variant_b_delayed_be.py: OK''\\)\")",
+      "Bash(xargs wc:*)"
+    ]
+  }
+}

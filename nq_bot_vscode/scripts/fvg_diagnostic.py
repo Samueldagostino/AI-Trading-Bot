@@ -1,5 +1,5 @@
 """
-FVG Diagnostic — Understand why FVG confluence never fires.
+FVG Diagnostic -- Understand why FVG confluence never fires.
 
 Runs a partial replay (first 10K 2m bars) and counts:
 1. How many FVGs are detected by feature engine
@@ -21,7 +21,7 @@ FVG_PROXIMITY_ATR_FACTOR = 0.5
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 print("=" * 60)
-print("  FVG DIAGNOSTIC — Phase 3 Confluence Analysis")
+print("  FVG DIAGNOSTIC -- Phase 3 Confluence Analysis")
 print("=" * 60)
 
 config = BotConfig()
@@ -173,7 +173,7 @@ elif bars_with_active_fvgs < total_bars * 0.01:
     print("  FIX: Increase fvg_max_age_bars or use HTF FVGs.")
 elif bars_inside_bullish_fvg + bars_inside_bearish_fvg == 0:
     print(f"  ROOT CAUSE: {bars_with_active_fvgs} bars have active FVGs but price is NEVER inside one.")
-    print("  2m FVGs are too small — price passes through instantly.")
+    print("  2m FVGs are too small -- price passes through instantly.")
     print("  FIX: Widen proximity threshold or detect FVGs on higher timeframes.")
 else:
     inside_pct = 100 * (bars_inside_bullish_fvg + bars_inside_bearish_fvg) / total_bars

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Sequential Backtest Runner — Single-Pass with Full HTF Context
+Sequential Backtest Runner -- Single-Pass with Full HTF Context
 ================================================================
 Combines TradingView .txt files, optionally filters by start date,
 builds HTF bars, then runs full_backtest.py in a single sequential pass.
 
-This ensures the HTF gate accumulates full history — no cold-start problem.
+This ensures the HTF gate accumulates full history -- no cold-start problem.
 
 Usage:
     python scripts/run_sequential_backtest.py --start-date 2022-07-01 --run
@@ -140,7 +140,7 @@ def build_htf_bars(bars_1m: List[Dict], tf_minutes: int) -> List[Dict]:
     """Build higher-timeframe bars from 1-minute data.
 
     Uses simple time-bucketing: group 1m bars into tf_minutes windows,
-    compute OHLCV for each window. No look-ahead — only completed bars.
+    compute OHLCV for each window. No look-ahead -- only completed bars.
 
     For daily bars (tf_minutes=1440), uses CME session boundary (6 PM ET).
     """
@@ -208,7 +208,7 @@ def build_htf_bars(bars_1m: List[Dict], tf_minutes: int) -> List[Dict]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sequential Backtest — Single-Pass with Full HTF Context"
+        description="Sequential Backtest -- Single-Pass with Full HTF Context"
     )
     parser.add_argument(
         "--start-date", type=str, default=None,
@@ -245,7 +245,7 @@ def main():
     summary_path = str(LOGS_DIR / f"sequential_backtest{tag}_summary.txt")
 
     print("=" * 72)
-    print("  SEQUENTIAL BACKTEST — DATA PREPARATION")
+    print("  SEQUENTIAL BACKTEST -- DATA PREPARATION")
     print("=" * 72)
     print(f"  TradingView dir: {TV_DIR}")
     print(f"  Start filter:    {args.start_date or 'None (full dataset)'}")
@@ -327,7 +327,7 @@ def main():
     print()
 
     if not args.run:
-        print("  Dry run — data prepared but backtest NOT executed.")
+        print("  Dry run -- data prepared but backtest NOT executed.")
         print(f"  To run: python scripts/run_sequential_backtest.py --start-date {args.start_date or '2022-07-01'} --run")
         print("=" * 72)
         return

@@ -87,15 +87,15 @@ async def test_all_strategies():
     authenticated = auth_data.get("authenticated", False)
     print(f"  Gateway auth status: {'AUTHENTICATED' if authenticated else 'NOT AUTHENTICATED'}")
     if not authenticated:
-        print("  WARNING: Gateway session not authenticated — strategies may fail.")
+        print("  WARNING: Gateway session not authenticated -- strategies may fail.")
     print()
 
     # Test each strategy
     strategies = [
-        ("Strategy 1 — Minimal Search (POST /iserver/secdef/search)", client._resolve_strategy_search),
-        ("Strategy 2 — Direct Lookup (GET /iserver/secdef/info)", client._resolve_strategy_secdef_info),
-        ("Strategy 3 — Futures Endpoint (GET /trsrv/futures)", client._resolve_strategy_trsrv_futures),
-        ("Strategy 4 — Hardcoded Fallback", client._resolve_strategy_hardcoded),
+        ("Strategy 1 -- Minimal Search (POST /iserver/secdef/search)", client._resolve_strategy_search),
+        ("Strategy 2 -- Direct Lookup (GET /iserver/secdef/info)", client._resolve_strategy_secdef_info),
+        ("Strategy 3 -- Futures Endpoint (GET /trsrv/futures)", client._resolve_strategy_trsrv_futures),
+        ("Strategy 4 -- Hardcoded Fallback", client._resolve_strategy_hardcoded),
     ]
 
     results = []
@@ -106,16 +106,16 @@ async def test_all_strategies():
         try:
             result = await fn(symbol)
             if result:
-                print(f"         PASS — conid={result.conid}, symbol={result.symbol}, "
+                print(f"         PASS -- conid={result.conid}, symbol={result.symbol}, "
                       f"expiry={result.expiry}, exchange={result.exchange}")
                 results.append((i, "PASS", result))
                 if winner is None:
                     winner = (i, result)
             else:
-                print(f"         FAIL — returned None")
+                print(f"         FAIL -- returned None")
                 results.append((i, "FAIL", None))
         except Exception as e:
-            print(f"         ERROR — {e}")
+            print(f"         ERROR -- {e}")
             results.append((i, "ERROR", str(e)))
         print()
 
@@ -143,7 +143,7 @@ async def test_all_strategies():
         print(f"  [PASS]")
     else:
         print("  Strategy that works: NONE")
-        print("  CONTRACT RESOLUTION BLOCKED — likely CME data subscription issue")
+        print("  CONTRACT RESOLUTION BLOCKED -- likely CME data subscription issue")
         print()
         print("  Required actions:")
         print("    1. IBKR Account Management -> Market Data Subscriptions")

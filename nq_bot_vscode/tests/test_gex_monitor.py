@@ -1,5 +1,5 @@
 """
-Tests for GEXMonitor — Quant Data GEX integration.
+Tests for GEXMonitor -- Quant Data GEX integration.
 =====================================================
 Covers:
   - Mock mode returns default when no token
@@ -154,7 +154,7 @@ class TestFindGammaFlip:
         assert flip == 584.0
 
     def test_no_flip(self):
-        """All negative — no flip point."""
+        """All negative -- no flip point."""
         data = [
             {"strike": 580.0, "net": -5e9},
             {"strike": 582.0, "net": -3e9},
@@ -267,7 +267,7 @@ class TestCaching:
         result1 = mon.update()
         assert result1 is not None
 
-        # Second update immediately — should return cached
+        # Second update immediately -- should return cached
         result2 = mon.update()
         assert result2 is result1  # Same object (cached)
 

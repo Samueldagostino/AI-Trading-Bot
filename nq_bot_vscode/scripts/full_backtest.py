@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Full Historical Backtest — Causal Replay Engine (Phase 2)
+Full Historical Backtest -- Causal Replay Engine (Phase 2)
 ==========================================================
 Definitive 4-year backtest: Sep 2021 -> Aug 2025.
 
@@ -29,7 +29,7 @@ POST-RUN ANALYSIS:
   - Regime performance (bull/bear/range/high vol)
   - Verification checks (causality, warmup, commission, PnL sum, slippage)
 
-Imports and uses the REAL modules — does NOT reimplement signal logic.
+Imports and uses the REAL modules -- does NOT reimplement signal logic.
 
 Usage:
     python scripts/full_backtest.py --run
@@ -92,7 +92,7 @@ POINT_VALUE = 2.00         # MNQ $2/point
 # ── Phase 3 Additive: Post-Sweep FVG Tracking (data collection) ──
 # ICT model: Sweep → Displacement → FVG → Retracement
 # Entries are IMMEDIATE (Phase 1 behavior). FVG detection runs in
-# background for data collection — no entry delay, no score changes.
+# background for data collection -- no entry delay, no score changes.
 SWEEP_FVG_TRACKING = True                  # Track post-sweep FVG formation (data only)
 SWEEP_FVG_DISPLACEMENT_WINDOW = 5          # Bars after sweep to find displacement candle
 SWEEP_FVG_DISPLACEMENT_MIN_ATR = 0.8       # Displacement candle body >= 0.8× ATR
@@ -232,7 +232,7 @@ def aggregate_to_2m(bars_1m: List[Dict]) -> List[Dict]:
 def _floor_to_tf(ts: datetime, tf_minutes: int) -> datetime:
     """Floor a timestamp to the nearest timeframe boundary.
 
-    For intraday (5m–4H): floors within each day.
+    For intraday (5m-4H): floors within each day.
     For daily (1440): floors to midnight of the same day.
     """
     if tf_minutes >= 1440:
@@ -333,7 +333,7 @@ def find_structural_target(bars: list, direction: str, entry_price: float,
     if len(bars) < 7:
         return 0.0
 
-    # Use up to `lookback` recent bars (all confirmed — exclude last 2 for pivot detection)
+    # Use up to `lookback` recent bars (all confirmed -- exclude last 2 for pivot detection)
     recent = bars[-(lookback + 4):-2] if len(bars) > lookback + 4 else bars[:-2]
     if len(recent) < 5:
         return 0.0
@@ -957,16 +957,16 @@ class CausalReplayEngine:
 
         NOTE: Cumulative kill switch is disabled in backtest mode to allow
         full dataset evaluation.  The daily loss limit ($500) still applies
-        and resets each session — this is the realistic constraint.
+        and resets each session -- this is the realistic constraint.
         In live trading, the cumulative kill switch remains active via
         RiskEngine.
         """
-        # Daily loss limit — resets each session (realistic constraint)
+        # Daily loss limit -- resets each session (realistic constraint)
         if self._daily_pnl <= -DAILY_LOSS_LIMIT:
             logger.debug(f"Daily loss limit hit: ${self._daily_pnl:.2f}")
             return True
 
-        # Cumulative kill switch — DISABLED for backtest.
+        # Cumulative kill switch -- DISABLED for backtest.
         # In live trading this is handled by RiskEngine separately.
         # Keeping the code for reference:
         # if self._cumulative_pnl <= -KILL_SWITCH_LIMIT:
@@ -1097,7 +1097,7 @@ class CausalReplayEngine:
 
             # NaN guard on PnL
             if not math.isfinite(adjusted_pnl):
-                logger.warning(f"NaN PnL detected — zeroing: raw={raw_pnl}")
+                logger.warning(f"NaN PnL detected -- zeroing: raw={raw_pnl}")
                 adjusted_pnl = 0.0
 
             self._daily_pnl += adjusted_pnl
@@ -1170,10 +1170,10 @@ class CausalReplayEngine:
             return
         if self._check_daily_limits():
             return
-        # Maintenance window entry cutoff — no new entries after 4:30 PM ET
+        # Maintenance window entry cutoff -- no new entries after 4:30 PM ET
         if getattr(self, '_maintenance_entry_blocked', False):
             logger.debug(
-                "BLOCKED: New entry rejected — past 4:30 PM ET cutoff "
+                "BLOCKED: New entry rejected -- past 4:30 PM ET cutoff "
                 "(maintenance window protection)"
             )
             return
@@ -1282,7 +1282,7 @@ class CausalReplayEngine:
         self._signals_with_direction += 1
 
         # ── HTF DIRECTIONAL GATE (softened: score penalty instead of hard block) ──
-        # A sweep IS a reversal signal — the HTF bias being "against" the sweep
+        # A sweep IS a reversal signal -- the HTF bias being "against" the sweep
         # direction is expected at the moment of reversal.  Instead of blocking,
         # we penalize the score by 0.10 so the HC gate can still filter.
         # Only block when there's NO HTF data at all (fail-safe).
@@ -1298,18 +1298,18 @@ class CausalReplayEngine:
                 self._record_shadow_signal(
                     bar, features, entry_direction, entry_score, None,
                     "HTF bias disagrees (score penalized -0.10)", 1)
-                # Don't return — let it continue through remaining gates
+                # Don't return -- let it continue through remaining gates
         elif htf_bias is None:
             # Fail-safe: no HTF data → block all trades
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, None,
-                "No HTF data — fail-safe block", 1)
+                "No HTF data -- fail-safe block", 1)
             self._rejection_count += 1
             return
 
         # ── NaN Guard ──
         if not math.isfinite(entry_score):
-            logger.debug("NaN entry_score — blocking")
+            logger.debug("NaN entry_score -- blocking")
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, None,
                 "NaN score guard", 2)
@@ -1339,7 +1339,7 @@ class CausalReplayEngine:
 
         # ── NaN Guard on stop ──
         if not math.isfinite(raw_stop):
-            logger.debug("NaN stop distance — blocking")
+            logger.debug("NaN stop distance -- blocking")
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, None,
                 "NaN stop distance", 4)
@@ -1354,7 +1354,7 @@ class CausalReplayEngine:
             self._rejection_count += 1
             return
 
-        # ── HC Gate 2b: Stop Distance (min — C1 needs room for 5-bar exit) ──
+        # ── HC Gate 2b: Stop Distance (min -- C1 needs room for 5-bar exit) ──
         # Data: 30-50pt stops = profitable, <30pt stops = net negative
         if raw_stop < 30.0:
             self._record_shadow_signal(
@@ -1363,7 +1363,7 @@ class CausalReplayEngine:
             self._rejection_count += 1
             return
 
-        # ── Prime Hours Gate (9-10AM ET only — data-driven) ──
+        # ── Prime Hours Gate (9-10AM ET only -- data-driven) ──
         # 9-10AM: 77.4% WR, PF 1.28 | All other hours: net negative
         if not is_prime_hours(bar["timestamp"]):
             self._record_shadow_signal(
@@ -1447,7 +1447,7 @@ class CausalReplayEngine:
         """Phase 3 additive: background FVG tracking (data collection only).
 
         Tracks displacement → FVG → retracement after each sweep.
-        Does NOT affect entries — all entries happen immediately (Phase 1).
+        Does NOT affect entries -- all entries happen immediately (Phase 1).
         Data is collected for future analysis and potential live-trading use.
         """
         if self._sweep_event is None:
@@ -1480,7 +1480,7 @@ class CausalReplayEngine:
                     event["displacement_found"] = True
                     self._sweep_fvg_stats["displacement_found"] += 1
         elif not event["displacement_found"]:
-            # Past displacement window with no displacement — collect bar anyway
+            # Past displacement window with no displacement -- collect bar anyway
             event["recent_bars"].append({
                 "high": bar["high"], "low": bar["low"],
                 "open": bar["open"], "close": bar["close"],
@@ -1623,11 +1623,11 @@ class CausalReplayEngine:
                     outcome = "STOP"
                     break
 
-            # Compute shadow PnL — C1-only, 1 contract
+            # Compute shadow PnL -- C1-only, 1 contract
             exit_slippage = get_slippage(bars_2m[min(entry_idx + bars_held, total_bars - 1)]["timestamp"])
             if outcome == "STOP":
                 shadow_pnl = -(stop_dist * POINT_VALUE * num_contracts) - commission_rt - (exit_slippage * POINT_VALUE)
-            else:  # TIME_EXIT — mark-to-market at 5th bar close
+            else:  # TIME_EXIT -- mark-to-market at 5th bar close
                 if shadow["direction"] == "LONG":
                     mtm_points = final_price - entry_price
                 else:
@@ -1747,7 +1747,7 @@ class CausalReplayEngine:
         self._bars_processed += 1
         ts = bar["timestamp"]
 
-        # ── MAINTENANCE WINDOW CHECKS (must be FIRST — before any signal processing) ──
+        # ── MAINTENANCE WINDOW CHECKS (must be FIRST -- before any signal processing) ──
         current_et = ts.astimezone(ET)
         current_time_et = current_et.time()
 
@@ -1824,7 +1824,7 @@ class CausalReplayEngine:
                     self.trades.append(exit_record)
             return  # No further processing after 4:50 PM ET
 
-        # Entry cutoff at 4:30 PM ET — block new entries but continue managing positions
+        # Entry cutoff at 4:30 PM ET -- block new entries but continue managing positions
         self._maintenance_entry_blocked = (
             time(16, 30) <= current_time_et < time(16, 50)
         )
@@ -2278,7 +2278,7 @@ def run_verification_checks(
     }
 
     # 2. Warmup: no entries during first 30 bars of session
-    # Engine enforces this by design — we verify by checking
+    # Engine enforces this by design -- we verify by checking
     # that _is_warmup() blocks entries. Since we can't retroactively
     # check session bar counts, we trust the engine's enforcement.
     results["warmup"] = {
@@ -2377,7 +2377,7 @@ def generate_summary_report(
             lines.append(f"  {label:.<42} {value}")
 
     # ── Header ──
-    heading("FULL 4-YEAR BACKTEST — CAUSAL REPLAY RESULTS")
+    heading("FULL 4-YEAR BACKTEST -- CAUSAL REPLAY RESULTS")
     lines.append(f"  Generated:  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"  Engine:     CausalReplayEngine (zero look-ahead, 2m execution bars)")
     lines.append("")
@@ -2539,7 +2539,7 @@ def generate_summary_report(
     if all_passed:
         lines.append("  ALL VERIFICATION CHECKS PASSED")
     else:
-        lines.append("  *** SOME VERIFICATION CHECKS FAILED — REVIEW ABOVE ***")
+        lines.append("  *** SOME VERIFICATION CHECKS FAILED -- REVIEW ABOVE ***")
     lines.append("")
 
     # ── Footer ──
@@ -2603,7 +2603,7 @@ async def run_backtest(
     wall_start = time_module.time()
 
     print("=" * 72)
-    print("  FULL HISTORICAL BACKTEST — CAUSAL REPLAY ENGINE (Phase 2)")
+    print("  FULL HISTORICAL BACKTEST -- CAUSAL REPLAY ENGINE (Phase 2)")
     print("=" * 72)
     print(f"  Data:    {data_path}")
     print(f"  HTF:     {htf_dir}")
@@ -2729,7 +2729,7 @@ async def run_backtest(
     # ── Print summary to console ──
     print()
     print("=" * 72)
-    print("  BACKTEST RESULTS — AGGREGATE")
+    print("  BACKTEST RESULTS -- AGGREGATE")
     print("=" * 72)
     for k, v in aggregate.items():
         if k not in ("signal_sources",):
@@ -2864,7 +2864,7 @@ async def run_backtest(
     wall_elapsed = time_module.time() - wall_start
     print()
     print("=" * 72)
-    print(f"  DONE — Total wall time: {wall_elapsed:.1f}s")
+    print(f"  DONE -- Total wall time: {wall_elapsed:.1f}s")
     print("=" * 72)
 
     return aggregate
@@ -2872,7 +2872,7 @@ async def run_backtest(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Full Historical Backtest — Causal Replay Engine (Phase 2)"
+        description="Full Historical Backtest -- Causal Replay Engine (Phase 2)"
     )
     parser.add_argument(
         "--data", type=str, default=None,
@@ -2924,7 +2924,7 @@ def main():
 
     if not args.run:
         print("=" * 72)
-        print("  CAUSAL REPLAY ENGINE — COMPILE CHECK (Phase 2)")
+        print("  CAUSAL REPLAY ENGINE -- COMPILE CHECK (Phase 2)")
         print("=" * 72)
         print()
         print("  All imports successful:")
@@ -2990,7 +2990,7 @@ def main():
                 )
                 do_resume = response.strip().lower() in ("y", "yes")
             except EOFError:
-                # Non-interactive — treat as fresh start
+                # Non-interactive -- treat as fresh start
                 do_resume = False
             if not do_resume:
                 print("  Starting fresh (checkpoint will be overwritten).")

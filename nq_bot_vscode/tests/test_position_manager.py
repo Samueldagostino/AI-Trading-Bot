@@ -324,7 +324,7 @@ class TestPartialFills:
 
 
 # ═══════════════════════════════════════════════════════════════
-# RECONCILIATION — MISMATCH DETECTION
+# RECONCILIATION -- MISMATCH DETECTION
 # ═══════════════════════════════════════════════════════════════
 
 class TestReconciliationMismatch:
@@ -495,7 +495,7 @@ class TestReconciliationMismatch:
 
 
 # ═══════════════════════════════════════════════════════════════
-# RECONCILIATION — FETCH BROKER POSITIONS
+# RECONCILIATION -- FETCH BROKER POSITIONS
 # ═══════════════════════════════════════════════════════════════
 
 class TestFetchBrokerPositions:

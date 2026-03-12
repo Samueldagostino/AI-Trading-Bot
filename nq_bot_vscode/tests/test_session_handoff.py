@@ -63,7 +63,7 @@ def _generate_flat_session_csv(
             for minute in range(60):
                 bar_time = current_date.replace(hour=hour, minute=minute)
                 ts = bar_time.strftime("%Y-%m-%d %H:%M:%S-0500")
-                # Flat bars — all OHLC the same
+                # Flat bars -- all OHLC the same
                 rows.append(_make_bar(ts, price, price + 0.25, price - 0.25, price))
 
     df = pd.DataFrame(rows)
@@ -101,11 +101,11 @@ def _generate_trending_session_csv(
                 ts = bar_time.strftime("%Y-%m-%d %H:%M:%S-0500")
 
                 t = bar_time.time()
-                # Asia: 18:00–02:00 — trend up
+                # Asia: 18:00-02:00 -- trend up
                 if t >= time(18, 0) or t < time(2, 0):
                     drift = asia_trend / (8 * 60)  # spread over 8 hours
                     price *= (1 + drift)
-                # London: 02:00–08:00 — same direction
+                # London: 02:00-08:00 -- same direction
                 elif time(2, 0) <= t < time(8, 0):
                     drift = london_trend / (6 * 60)
                     price *= (1 + drift)
@@ -129,7 +129,7 @@ def _generate_trending_session_csv(
 def _generate_simple_test_csv(n_days: int = 100) -> str:
     """
     Generate a simple test CSV with enough data for statistical tests.
-    Asia trends up, London reverses — creates known REVERSAL pattern.
+    Asia trends up, London reverses -- creates known REVERSAL pattern.
     """
     rows = []
     dt = datetime(2023, 1, 2)
@@ -559,7 +559,7 @@ class TestEdgeCases:
     def test_missing_bars(self):
         """Analyzer should handle days with very few bars gracefully."""
         rows = []
-        # Only 3 bars — should be skipped (< 5 bar threshold)
+        # Only 3 bars -- should be skipped (< 5 bar threshold)
         for i in range(3):
             ts = f"2023-01-02 18:{i:02d}:00-0500"
             rows.append(_make_bar(ts, 15000.0, 15001.0, 14999.0, 15000.0))
@@ -642,7 +642,7 @@ class TestFullPipeline:
                     for b in SessionBehavior
                 )
                 # Some pairs may have zero if no matching date pairs exist
-                # This is OK — just check no crashes
+                # This is OK -- just check no crashes
                 assert total_obs >= 0
         finally:
             os.unlink(csv_path)

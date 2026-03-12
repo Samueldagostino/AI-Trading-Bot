@@ -1,23 +1,23 @@
 """
-C1 Exit Strategy Experiments — Optimized Split-Phase Runner
+C1 Exit Strategy Experiments -- Optimized Split-Phase Runner
 =============================================================
-Research script — does NOT modify production code.
+Research script -- does NOT modify production code.
 
 Tests 5 alternate C1 exit strategies across the full 6-month FirstRate
-dataset (Sep 2025 – Feb 2026) using Config D (HC ON, HTF gate=0.3).
+dataset (Sep 2025 - Feb 2026) using Config D (HC ON, HTF gate=0.3).
 
 Architecture:
-  Phase 1 — Run the full backtest ONCE, intercepting every trade entry
+  Phase 1 -- Run the full backtest ONCE, intercepting every trade entry
             and caching all 2m bar data from entry forward.
-  Phase 2 — For each experiment config, replay exits using cached data.
+  Phase 2 -- For each experiment config, replay exits using cached data.
             No feature computation needed -> ~1000x faster.
 
 Experiments:
-  A — Vary C1 target ratio: 1.0x, 1.25x, 1.5x (current), 1.75x, 2.0x, 2.5x stop
-  B — Time-based C1 exit: 5, 10, 15, 20, 30 bars after entry
-  C — No C1 target: both contracts trail as runners
-  D — Aggressive C1 scalp: 0.5x stop
-  E — Breakeven C1: move stop to BE at 1.0x, exit at 2.0x
+  A -- Vary C1 target ratio: 1.0x, 1.25x, 1.5x (current), 1.75x, 2.0x, 2.5x stop
+  B -- Time-based C1 exit: 5, 10, 15, 20, 30 bars after entry
+  C -- No C1 target: both contracts trail as runners
+  D -- Aggressive C1 scalp: 0.5x stop
+  E -- Breakeven C1: move stop to BE at 1.0x, exit at 2.0x
 
 Output: docs/c1_exit_research.md
 """
@@ -51,7 +51,7 @@ DOCS_DIR = str(project_dir / "docs")
 POINT_VALUE = 2.0          # $2 per point per contract
 COMMISSION = 1.29          # Per contract (Tradovate MNQ)
 
-# C2 trailing config (from settings.py — do NOT change)
+# C2 trailing config (from settings.py -- do NOT change)
 C2_TRAILING_TYPE = "atr"
 C2_TRAILING_ATR_MULT = 2.0
 C2_TRAILING_FIXED_PTS = 30.0
@@ -148,7 +148,7 @@ def load_data() -> Dict[str, List[BarData]]:
 
 
 def filter_to_months(tf_bars: Dict[str, List[BarData]], target_months: set) -> Dict[str, List[BarData]]:
-    """Filter bar data to only target months (e.g., Sep 2025 – Feb 2026)."""
+    """Filter bar data to only target months (e.g., Sep 2025 - Feb 2026)."""
     filtered = {}
     for tf, bars in tf_bars.items():
         filtered[tf] = [b for b in bars if b.timestamp.strftime("%Y-%m") in target_months]
@@ -332,7 +332,7 @@ def replay_trade_standard(cap: TradeCapture, c1_ratio: float) -> Optional[Replay
         price = bar.close
 
         if phase == "phase_1":
-            # Check stop (both contracts) — exit at bar close (may gap past stop)
+            # Check stop (both contracts) -- exit at bar close (may gap past stop)
             if direction == "long" and price <= initial_stop:
                 c1_exit_price = price
                 c2_exit_price = price
@@ -424,7 +424,7 @@ def replay_trade_standard(cap: TradeCapture, c1_ratio: float) -> Optional[Replay
                     break
 
     if not c2_exit_reason:
-        # Trade didn't close within captured bars — close at last bar
+        # Trade didn't close within captured bars -- close at last bar
         last_bar = cap.bars_after_entry[-1] if cap.bars_after_entry else None
         if last_bar:
             if c1_open:
@@ -700,7 +700,7 @@ def replay_trade_pure_runner(cap: TradeCapture) -> Optional[ReplayResult]:
                     c1_stop = c2_stop
                     c2_trailing = c2_stop
 
-            # Check trailing stop — closes both
+            # Check trailing stop -- closes both
             if direction == "long" and price <= c2_stop:
                 c1_exit_price = c2_stop
                 c2_exit_price = c2_stop
@@ -799,7 +799,7 @@ def replay_trade_be_step(cap: TradeCapture) -> Optional[ReplayResult]:
                     phase = "running"
                     continue
                 else:
-                    # Initial stop — both out at bar close
+                    # Initial stop -- both out at bar close
                     c1_exit_price = price
                     c2_exit_price = price
                     c1_exit_reason = c2_exit_reason = "stop"
@@ -1021,7 +1021,7 @@ def generate_report(
     lines.append("# C1 Exit Strategy Research")
     lines.append("")
     lines.append(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    lines.append(f"**Data:** FirstRate 1m absolute-adjusted NQ, Sep 2025 – Feb 2026")
+    lines.append(f"**Data:** FirstRate 1m absolute-adjusted NQ, Sep 2025 - Feb 2026")
     lines.append(f"**Config:** D (HC ON, HTF gate=0.3, 2m exec)")
     lines.append(f"**Baseline C1:** TP1 = 1.5× stop (current production)")
     lines.append(f"**Total Entries Captured:** {captures_count} trades (from full pipeline run)")
@@ -1029,9 +1029,9 @@ def generate_report(
     lines.append("## Methodology")
     lines.append("")
     lines.append("Split-phase backtest:")
-    lines.append("1. **Phase 1** — Full Config D pipeline (features + signals + HC gates + risk) "
+    lines.append("1. **Phase 1** -- Full Config D pipeline (features + signals + HC gates + risk) "
                   "run once to capture all trade entries and 2m bar data.")
-    lines.append("2. **Phase 2** — For each experiment, exit logic replayed on captured trades. "
+    lines.append("2. **Phase 2** -- For each experiment, exit logic replayed on captured trades. "
                   "Entry signals identical across all experiments. Only C1 exit strategy varies.")
     lines.append("")
     lines.append("> **Note:** C1 exit timing affects C2 breakeven placement, so C2 PnL may vary "
@@ -1061,17 +1061,17 @@ def generate_report(
     # Baseline row
     b = FEB_BASELINE
     lines.append(
-        f"| — | *Baseline (current prod)* | {b['trades']} | {b['wr']:.1f} | "
+        f"| -- | *Baseline (current prod)* | {b['trades']} | {b['wr']:.1f} | "
         f"**{b['pf']:.2f}** | ${b['c1_pnl']:+,.0f} | "
         f"${b['c2_pnl']:+,.0f} | ${b['total_pnl']:+,.0f} | "
-        f"${b['exp']:.2f} | — |"
+        f"${b['exp']:.2f} | -- |"
     )
     lines.append("")
 
     # ─────────── Experiment A Detail ───────────
     lines.append("---")
     lines.append("")
-    lines.append("## Experiment A — Vary C1 Target Ratio")
+    lines.append("## Experiment A -- Vary C1 Target Ratio")
     lines.append("")
     lines.append("C1 TP1 = {ratio} × stop distance. C2 runner unchanged.")
     lines.append("")
@@ -1089,7 +1089,7 @@ def generate_report(
     lines.append("")
 
     # ─────────── Experiment B Detail ───────────
-    lines.append("## Experiment B — Time-Based C1 Exit")
+    lines.append("## Experiment B -- Time-Based C1 Exit")
     lines.append("")
     lines.append("Exit C1 at market after N bars if profitable. Fallback: 1.5× target or stop.")
     lines.append("")
@@ -1106,7 +1106,7 @@ def generate_report(
     lines.append("")
 
     # ─────────── Experiment C Detail ───────────
-    lines.append("## Experiment C — No C1 Target (Pure Runner)")
+    lines.append("## Experiment C -- No C1 Target (Pure Runner)")
     lines.append("")
     lines.append("Both contracts trail with ATR-based trailing stop. Move to BE at 1× stop profit.")
     lines.append("Both legs close on the same trailing stop.")
@@ -1128,7 +1128,7 @@ def generate_report(
     lines.append("")
 
     # ─────────── Experiment D Detail ───────────
-    lines.append("## Experiment D — Aggressive C1 Scalp (0.5× stop)")
+    lines.append("## Experiment D -- Aggressive C1 Scalp (0.5× stop)")
     lines.append("")
     lines.append("C1 target = 0.5× stop. Quick lock-in, then C2 trails.")
     lines.append("")
@@ -1149,7 +1149,7 @@ def generate_report(
     lines.append("")
 
     # ─────────── Experiment E Detail ───────────
-    lines.append("## Experiment E — Breakeven C1 (Step Exit)")
+    lines.append("## Experiment E -- Breakeven C1 (Step Exit)")
     lines.append("")
     lines.append("At 1.0× stop in profit: move C1 to BE. At 2.0× stop in profit: exit C1 at market.")
     lines.append("")
@@ -1172,7 +1172,7 @@ def generate_report(
     # ─────────── Monthly Breakdown for Top 3 ───────────
     lines.append("---")
     lines.append("")
-    lines.append("## Monthly Breakdown — Top 3 Configurations")
+    lines.append("## Monthly Breakdown -- Top 3 Configurations")
     lines.append("")
     lines.append("Verifying consistency across all market regimes.")
     lines.append("")
@@ -1186,8 +1186,8 @@ def generate_report(
         profitable_months = 0
         for mr in monthly:
             month = mr.get("month", "?")
-            pf_str = f"{mr['pf']:.2f}" if mr['trades'] > 0 else "—"
-            wr_str = f"{mr['wr']:.1f}" if mr['trades'] > 0 else "—"
+            pf_str = f"{mr['pf']:.2f}" if mr['trades'] > 0 else "--"
+            wr_str = f"{mr['wr']:.1f}" if mr['trades'] > 0 else "--"
             agg_pnl += mr['total_pnl']
             if mr['total_pnl'] > 0:
                 profitable_months += 1
@@ -1212,11 +1212,11 @@ def generate_report(
     best_pf = max(all_results.values(), key=lambda x: x.get("pf", 0))
 
     lines.append(f"### Best by Total PnL")
-    lines.append(f"**{best_pnl['label']}** — ${best_pnl['total_pnl']:+,.0f} "
+    lines.append(f"**{best_pnl['label']}** -- ${best_pnl['total_pnl']:+,.0f} "
                  f"(PF {best_pnl['pf']:.2f}, {best_pnl['wr']:.1f}% WR)")
     lines.append("")
     lines.append(f"### Best by Profit Factor")
-    lines.append(f"**{best_pf['label']}** — PF {best_pf['pf']:.2f} "
+    lines.append(f"**{best_pf['label']}** -- PF {best_pf['pf']:.2f} "
                  f"(${best_pf['total_pnl']:+,.0f})")
     lines.append("")
 
@@ -1257,7 +1257,7 @@ def generate_report(
 
     lines.append("---")
     lines.append("")
-    lines.append(f"*Generated by `scripts/c1_exit_experiments.py` (split-phase optimized) — "
+    lines.append(f"*Generated by `scripts/c1_exit_experiments.py` (split-phase optimized) -- "
                  f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}*")
 
     return "\n".join(lines)
@@ -1277,8 +1277,8 @@ async def main():
         logging.getLogger(name).setLevel(logging.WARNING)
 
     print(f"\n{'=' * 70}")
-    print(f"  C1 EXIT STRATEGY EXPERIMENTS — Split-Phase Optimized")
-    print(f"  Config D | Sep 2025 – Feb 2026 | FirstRate 1m")
+    print(f"  C1 EXIT STRATEGY EXPERIMENTS -- Split-Phase Optimized")
+    print(f"  Config D | Sep 2025 - Feb 2026 | FirstRate 1m")
     print(f"{'=' * 70}\n")
 
     # ─── Load data ───
@@ -1288,7 +1288,7 @@ async def main():
         print("ERROR: No 2m data found. Run aggregate_1m.py first.")
         sys.exit(1)
 
-    # Target months (Sep 2025 – Feb 2026)
+    # Target months (Sep 2025 - Feb 2026)
     target_months = {"2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02"}
     month_keys = sorted(target_months)
 
@@ -1298,7 +1298,7 @@ async def main():
     print()
 
     # ═══════════════════════════════════════════════════════════════
-    # PHASE 1: Full pipeline run — capture all trade entries
+    # PHASE 1: Full pipeline run -- capture all trade entries
     # Each month runs with fresh risk state (matching OOS validation)
     # ═══════════════════════════════════════════════════════════════
     print(f"{'─' * 70}")
@@ -1316,7 +1316,7 @@ async def main():
     print()
 
     # ═══════════════════════════════════════════════════════════════
-    # PHASE 2: Replay all experiments (fast — no feature computation)
+    # PHASE 2: Replay all experiments (fast -- no feature computation)
     # ═══════════════════════════════════════════════════════════════
     print(f"{'─' * 70}")
     print(f"PHASE 2: Replaying exit strategies ({len(captures)} trades × 14 configs)")
@@ -1326,7 +1326,7 @@ async def main():
     all_results = {}
 
     # ── Experiment A: Vary C1 target ratio ──
-    print("EXPERIMENT A — Vary C1 Target Ratio")
+    print("EXPERIMENT A -- Vary C1 Target Ratio")
     print("─" * 45)
     for ratio in [1.0, 1.25, 1.5, 1.75, 2.0, 2.5]:
         label = f"A: {ratio}x stop"
@@ -1339,7 +1339,7 @@ async def main():
     print()
 
     # ── Experiment B: Time-based C1 exit ──
-    print("EXPERIMENT B — Time-Based C1 Exit")
+    print("EXPERIMENT B -- Time-Based C1 Exit")
     print("─" * 45)
     for bars in [5, 10, 15, 20, 30]:
         label = f"B: {bars} bars"
@@ -1352,7 +1352,7 @@ async def main():
     print()
 
     # ── Experiment C: Pure runner (no C1 target) ──
-    print("EXPERIMENT C — No C1 Target (Pure Runner)")
+    print("EXPERIMENT C -- No C1 Target (Pure Runner)")
     print("─" * 45)
     fn = lambda cap: replay_trade_pure_runner(cap)
     r = run_experiment(captures, fn, "C: Pure Runner")
@@ -1363,7 +1363,7 @@ async def main():
     print()
 
     # ── Experiment D: Aggressive scalp (0.5x) ──
-    print("EXPERIMENT D — Aggressive C1 Scalp (0.5x stop)")
+    print("EXPERIMENT D -- Aggressive C1 Scalp (0.5x stop)")
     print("─" * 45)
     fn = lambda cap: replay_trade_standard(cap, 0.5)
     r = run_experiment(captures, fn, "D: 0.5x scalp")
@@ -1374,7 +1374,7 @@ async def main():
     print()
 
     # ── Experiment E: Breakeven step ──
-    print("EXPERIMENT E — Breakeven C1 (Step Exit)")
+    print("EXPERIMENT E -- Breakeven C1 (Step Exit)")
     print("─" * 45)
     fn = lambda cap: replay_trade_be_step(cap)
     r = run_experiment(captures, fn, "E: BE Step")
@@ -1385,10 +1385,10 @@ async def main():
     print()
 
     # ═══════════════════════════════════════════════════════════════
-    # TOP 3 — Monthly Breakdown
+    # TOP 3 -- Monthly Breakdown
     # ═══════════════════════════════════════════════════════════════
     print(f"{'─' * 70}")
-    print(f"TOP 3 — Monthly Breakdown")
+    print(f"TOP 3 -- Monthly Breakdown")
     print(f"{'─' * 70}")
 
     sorted_configs = sorted(all_results.items(), key=lambda x: x[1]["total_pnl"], reverse=True)
@@ -1420,7 +1420,7 @@ async def main():
 
         for mr in monthly_results:
             mk = mr["month"]
-            pf_str = f"{mr['pf']:.2f}" if mr['trades'] > 0 else "  — "
+            pf_str = f"{mr['pf']:.2f}" if mr['trades'] > 0 else "  -- "
             print(f"    {mk}: {mr['trades']:>3}t  PF {pf_str}  ${mr['total_pnl']:+,.0f}")
 
     # ═══════════════════════════════════════════════════════════════
@@ -1435,7 +1435,7 @@ async def main():
 
     # ─── Final Summary ───
     print(f"\n{'=' * 70}")
-    print(f"  SUMMARY — All Configurations Ranked by Total PnL")
+    print(f"  SUMMARY -- All Configurations Ranked by Total PnL")
     print(f"{'=' * 70}")
     print(f"  {'#':<3} {'Config':<25} {'Trades':>7} {'PF':>7} {'C1 PnL':>10} {'C2 PnL':>10} {'Total':>10}")
     print(f"  {'─' * 73}")
@@ -1443,7 +1443,7 @@ async def main():
         print(f"  {i:<3} {r['label']:<25} {r['trades']:>7} {r['pf']:>7.2f} "
               f"${r['c1_pnl']:>9,.0f} ${r['c2_pnl']:>9,.0f} ${r['total_pnl']:>9,.0f}")
     print(f"  {'─' * 73}")
-    print(f"  {'—':<3} {'Baseline (current prod)':<25} {FEB_BASELINE['trades']:>7} {FEB_BASELINE['pf']:>7.2f} "
+    print(f"  {'--':<3} {'Baseline (current prod)':<25} {FEB_BASELINE['trades']:>7} {FEB_BASELINE['pf']:>7.2f} "
           f"${FEB_BASELINE['c1_pnl']:>9,.0f} ${FEB_BASELINE['c2_pnl']:>9,.0f} "
           f"${FEB_BASELINE['total_pnl']:>9,.0f}")
     print(f"{'=' * 70}")

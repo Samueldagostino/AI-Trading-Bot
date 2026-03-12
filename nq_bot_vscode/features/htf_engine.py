@@ -50,7 +50,7 @@ class HTFBiasEngine:
     """
 
     WINDOW = 20  # bars per timeframe to retain
-    STRENGTH_GATE = HTF_STRENGTH_GATE  # Imported from config/constants.py — single source of truth
+    STRENGTH_GATE = HTF_STRENGTH_GATE  # Imported from config/constants.py -- single source of truth
     _STALENESS_LIMITS = HTF_STALENESS_LIMITS  # Imported from config/constants.py
 
     def __init__(self, config=None, timeframes: List[str] = None):
@@ -97,7 +97,7 @@ class HTFBiasEngine:
             if self._total_updates > 0:
                 raise ValueError(
                     "get_bias() called without timestamp after bars have been "
-                    "ingested — staleness check would be silently skipped.  "
+                    "ingested -- staleness check would be silently skipped.  "
                     "Pass the current bar timestamp."
                 )
             stale_tfs = set()
@@ -147,7 +147,7 @@ class HTFBiasEngine:
         for tf in self.timeframes:
             last = self._last_update_time.get(tf)
             if last is None:
-                continue  # Never received data — handled by "no bars" path
+                continue  # Never received data -- handled by "no bars" path
             limit_minutes = self._STALENESS_LIMITS.get(tf, 180)
             # Make both timestamps offset-aware for comparison
             if now.tzinfo is None:
@@ -163,7 +163,7 @@ class HTFBiasEngine:
                 if tf not in self._stale_warned:
                     logger.warning(
                         "HTF staleness: %s last bar is %.1f min old "
-                        "(limit %d min) — bias downgraded to neutral",
+                        "(limit %d min) -- bias downgraded to neutral",
                         tf, age.total_seconds() / 60, limit_minutes,
                     )
                     self._stale_warned.add(tf)

@@ -422,7 +422,7 @@ class TestSignificance:
 
 
 # ═══════════════════════════════════════════════════════════════
-# ALERT THRESHOLDS — RED
+# ALERT THRESHOLDS -- RED
 # ═══════════════════════════════════════════════════════════════
 
 class TestRedAlerts:
@@ -488,7 +488,7 @@ class TestRedAlerts:
 
 
 # ═══════════════════════════════════════════════════════════════
-# ALERT THRESHOLDS — YELLOW
+# ALERT THRESHOLDS -- YELLOW
 # ═══════════════════════════════════════════════════════════════
 
 class TestYellowAlerts:
@@ -548,7 +548,7 @@ class TestYellowAlerts:
 
 
 # ═══════════════════════════════════════════════════════════════
-# ALERT THRESHOLDS — GREEN
+# ALERT THRESHOLDS -- GREEN
 # ═══════════════════════════════════════════════════════════════
 
 class TestGreenStatus:
@@ -1226,7 +1226,7 @@ class TestFridayRTHClose:
         with patch("scripts.ibkr_monitor.datetime") as mock_dt:
             mock_dt.now.return_value = friday_1630_et
             mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
-            # Can't easily mock timezone arithmetic — test the logic directly
+            # Can't easily mock timezone arithmetic -- test the logic directly
             # Instead, test the component logic
         # Just test the weekday check on a known Friday
         from datetime import timedelta as td

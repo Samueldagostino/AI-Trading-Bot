@@ -3,7 +3,7 @@ IBKR Live Trading Runner
 ==========================
 Entry point for IBKR Client Portal Gateway paper/live trading.
 
-Pipeline (uses IBKRLivePipeline — no logic duplicated):
+Pipeline (uses IBKRLivePipeline -- no logic duplicated):
   IBKRClient -> CandleAggregator -> candle_to_bar() -> Bar
     -> Feature Engine -> Signal Aggregator -> HC Filter -> Risk Engine
       -> SignalBridge -> IBKROrderExecutor -> PositionManager
@@ -11,9 +11,9 @@ Pipeline (uses IBKRLivePipeline — no logic duplicated):
 
 Startup sequence:
   1. Load .env, validate required IBKR env vars
-  2. IBKRLivePipeline.start() — connection, contract, data feed, recon
+  2. IBKRLivePipeline.start() -- connection, contract, data feed, recon
   3. Historical bar warmup (2h backfill primes indicators)
-  4. WARMUP COMPLETE — TRADING ACTIVE
+  4. WARMUP COMPLETE -- TRADING ACTIVE
 
 Shutdown (SIGINT, SIGTERM, unhandled exception):
   1. Stop accepting new bars
@@ -23,9 +23,9 @@ Shutdown (SIGINT, SIGTERM, unhandled exception):
   5. Disconnect from IBKR Gateway
 
 Structured logging:
-  logs/ibkr_trades.json    — every fill
-  logs/ibkr_decisions.json — every bar's decision
-  logs/ibkr_errors.log     — connection issues, API errors
+  logs/ibkr_trades.json    -- every fill
+  logs/ibkr_decisions.json -- every bar's decision
+  logs/ibkr_errors.log     -- connection issues, API errors
 
 Usage:
     python scripts/run_ibkr.py
@@ -269,7 +269,7 @@ class IBKRLiveRunner:
         # Start the pipeline (connect, resolve contract, data feed, recon)
         started = await self._pipeline.start()
         if not started:
-            logger.critical("Pipeline failed to start — exiting")
+            logger.critical("Pipeline failed to start -- exiting")
             mgr = get_alert_manager()
             if mgr:
                 mgr.enqueue(AlertTemplates.connection_loss("IBKRPipeline", "Failed to start"))
@@ -292,7 +292,7 @@ class IBKRLiveRunner:
 
             if not roll_ok:
                 logger.critical(
-                    "CONTRACT ROLL FAILED — trading halted. "
+                    "CONTRACT ROLL FAILED -- trading halted. "
                     "Will retry on next startup."
                 )
                 self._log_decision("roll_failed", {
@@ -325,7 +325,7 @@ class IBKRLiveRunner:
             "dry_run": self._dry_run,
         })
 
-        logger.info("Pipeline started — waiting for bars")
+        logger.info("Pipeline started -- waiting for bars")
 
         # Fire startup complete alert
         mgr = get_alert_manager()
@@ -356,13 +356,13 @@ class IBKRLiveRunner:
         logger.info("=" * 60)
 
     # ──────────────────────────────────────────────────────────
-    # BAR WRAPPER — warmup gating + logging
+    # BAR WRAPPER -- warmup gating + logging
     # ──────────────────────────────────────────────────────────
 
     def _on_bar_wrapper(self, bar, original_on_bar) -> None:
         """
         Intercepts every bar for:
-          1. Warmup tracking — count bars, suppress trading until primed
+          1. Warmup tracking -- count bars, suppress trading until primed
           2. Session transition detection
           3. Decision logging
           4. Dry-run mode (log only, no trading)
@@ -375,10 +375,10 @@ class IBKRLiveRunner:
             self._on_session_transition(self._last_session, current_session)
         self._last_session = current_session
 
-        # Warmup phase — feed bars to feature engine only, do NOT trade
+        # Warmup phase -- feed bars to feature engine only, do NOT trade
         if not self._warmup_complete:
             if self._warmup_bar_count < self.WARMUP_BARS:
-                # Feed to feature engine only — do NOT call original_on_bar
+                # Feed to feature engine only -- do NOT call original_on_bar
                 # or process_bar, which would allow trades during warmup
                 self._pipeline._feature_engine.update(bar)
                 if self._warmup_bar_count % 10 == 0:
@@ -392,14 +392,14 @@ class IBKRLiveRunner:
             # Warmup complete
             self._warmup_complete = True
             logger.info("=" * 60)
-            logger.info("  WARMUP COMPLETE — TRADING ACTIVE")
+            logger.info("  WARMUP COMPLETE -- TRADING ACTIVE")
             logger.info("  Indicators primed with %d bars", self.WARMUP_BARS)
             logger.info("=" * 60)
             self._log_decision("warmup_complete", {
                 "bars_used": self.WARMUP_BARS,
             })
 
-        # Dry run — log the bar but don't execute
+        # Dry run -- log the bar but don't execute
         if self._dry_run:
             self._log_decision("bar_dry_run", {
                 "close": bar.close,
@@ -449,11 +449,11 @@ class IBKRLiveRunner:
         })
 
         if new == SessionType.RTH and old == SessionType.ETH:
-            # RTH open — daily contract rollover check
+            # RTH open -- daily contract rollover check
             self._check_daily_roll()
 
         if new == SessionType.ETH and old == SessionType.RTH:
-            # RTH ended — reset daily counters for new session
+            # RTH ended -- reset daily counters for new session
             self._daily_roll_checked = False
             self._on_daily_reset()
 
@@ -470,14 +470,14 @@ class IBKRLiveRunner:
             next_contract = self._roller.get_next_contract(self._ibkr_config.symbol)
             logger.critical(
                 "DAILY ROLL CHECK: Roll needed %s -> %s. "
-                "Halting trading — manual intervention or restart required.",
+                "Halting trading -- manual intervention or restart required.",
                 self._ibkr_config.symbol, next_contract,
             )
             self._log_decision("daily_roll_needed", {
                 "current": self._ibkr_config.symbol,
                 "target": next_contract,
             })
-            # Halt the executor — do not attempt automatic roll mid-session
+            # Halt the executor -- do not attempt automatic roll mid-session
             self._pipeline._executor._state.is_halted = True
             self._pipeline._executor._state.halt_reason = (
                 f"Contract roll needed: {self._ibkr_config.symbol} -> {next_contract}"
@@ -531,7 +531,7 @@ class IBKRLiveRunner:
 
         self._pipeline._executor.reset_daily()
         self._pipeline._position_manager.reset_daily()
-        logger.info("Daily reset complete — new session: %s", self._session_date)
+        logger.info("Daily reset complete -- new session: %s", self._session_date)
 
     # ──────────────────────────────────────────────────────────
     # TERMINAL DASHBOARD
@@ -540,7 +540,7 @@ class IBKRLiveRunner:
     def _print_dashboard(self) -> None:
         """
         Print a status dashboard to terminal.
-        Display only — no trading logic.
+        Display only -- no trading logic.
         """
         if not self._pipeline:
             return
@@ -582,7 +582,7 @@ class IBKRLiveRunner:
         unrealized = pm.get_unrealized_pnl(current_price)
         net_pnl = realized + unrealized
 
-        # ── Trades today — wins / losses ──
+        # ── Trades today -- wins / losses ──
         trade_count = pm_status["trade_count"]
         wins = 0
         losses = 0
@@ -639,7 +639,7 @@ class IBKRLiveRunner:
             f"  Feed: {feed_mode}"
             f"  Recon: {'OK' if recon_ok else 'OFF'}",
             f"              Halted: "
-            + (f"YES — {halt_reason}" if halted else "No"),
+            + (f"YES -- {halt_reason}" if halted else "No"),
             "",
             f"  NEXT        {boundary_label} in {boundary_delta}",
             "",
@@ -753,7 +753,7 @@ class IBKRLiveRunner:
         })
 
     # ──────────────────────────────────────────────────────────
-    # SHUTDOWN — NEVER leave positions open
+    # SHUTDOWN -- NEVER leave positions open
     # ──────────────────────────────────────────────────────────
 
     async def shutdown(self) -> None:
@@ -822,7 +822,7 @@ class IBKRLiveRunner:
         if hasattr(self, '_alert_manager') and self._alert_manager:
             await self._alert_manager.stop()
 
-        logger.info("Shutdown complete — all positions flat, logs flushed")
+        logger.info("Shutdown complete -- all positions flat, logs flushed")
         self._pipeline = None
 
     def request_shutdown(self) -> None:
@@ -836,7 +836,7 @@ class IBKRLiveRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IBKR Live Trading Runner — MNQ via Client Portal Gateway"
+        description="IBKR Live Trading Runner -- MNQ via Client Portal Gateway"
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -858,7 +858,7 @@ def main():
     # Create log directory
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Configure logging — console + file + error file
+    # Configure logging -- console + file + error file
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
@@ -946,7 +946,7 @@ def main():
             loop.add_signal_handler(sig, _signal_handler)
     else:
         logger.info(
-            "Windows detected — using KeyboardInterrupt for Ctrl+C shutdown"
+            "Windows detected -- using KeyboardInterrupt for Ctrl+C shutdown"
         )
 
     # Shutdown timeout: if flatten/cancel hangs, force exit after 30s
@@ -961,14 +961,14 @@ def main():
             )
         except asyncio.TimeoutError:
             logger.critical(
-                "Shutdown timed out after %ds — "
+                "Shutdown timed out after %ds -- "
                 "MANUAL POSITION CHECK REQUIRED",
                 SHUTDOWN_TIMEOUT_SECONDS,
             )
     except Exception:
         # NEVER leave positions open on crash
         logger.critical(
-            "UNHANDLED EXCEPTION — flattening all positions\n%s",
+            "UNHANDLED EXCEPTION -- flattening all positions\n%s",
             traceback.format_exc(),
         )
         try:
@@ -977,7 +977,7 @@ def main():
             )
         except asyncio.TimeoutError:
             logger.critical(
-                "Shutdown timed out after %ds — "
+                "Shutdown timed out after %ds -- "
                 "MANUAL POSITION CHECK REQUIRED",
                 SHUTDOWN_TIMEOUT_SECONDS,
             )

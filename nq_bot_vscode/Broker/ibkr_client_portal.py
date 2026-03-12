@@ -112,7 +112,7 @@ class ContractInfo:
 # SESSION TYPE
 # ================================================================
 
-# US Eastern timezone — DST-aware via IANA database.
+# US Eastern timezone -- DST-aware via IANA database.
 # ZoneInfo automatically handles EST (UTC-5) / EDT (UTC-4) transitions.
 ET_TZ = ZoneInfo("America/New_York")
 # Back-compat alias (existing code imports ET_OFFSET)
@@ -120,14 +120,14 @@ ET_OFFSET = ET_TZ
 
 
 class SessionType(Enum):
-    RTH = "RTH"    # Regular Trading Hours: 9:30–16:00 ET
-    ETH = "ETH"    # Extended Trading Hours: 18:00–9:29 ET
+    RTH = "RTH"    # Regular Trading Hours: 9:30-16:00 ET
+    ETH = "ETH"    # Extended Trading Hours: 18:00-9:29 ET
 
 
 def get_session_type(ts: datetime) -> SessionType:
     """
     Determine RTH vs ETH for a given timestamp.
-    RTH = 9:30–16:00 ET (same logic as main.py process_bar).
+    RTH = 9:30-16:00 ET (same logic as main.py process_bar).
     Everything else is ETH.
     """
     et_time = ts.astimezone(ET_TZ)
@@ -232,17 +232,17 @@ class CandleAggregator:
 
         window_start = self._get_window_start(timestamp)
 
-        # First tick ever — start the first window
+        # First tick ever -- start the first window
         if self._current_window_start is None:
             self._start_new_window(price, volume, window_start)
             return None
 
-        # Same window — update running OHLCV
+        # Same window -- update running OHLCV
         if window_start == self._current_window_start:
             self._update_current(price, volume)
             return None
 
-        # New window — close the current candle and start a new one
+        # New window -- close the current candle and start a new one
         completed = self._close_current_candle()
         self._start_new_window(price, volume, window_start)
         return completed
@@ -394,7 +394,7 @@ class CandleAggregator:
             )
             if self._consecutive_gaps >= CONSECUTIVE_GAP_ALERT_THRESHOLD:
                 logger.error(
-                    "ALERT: %d consecutive candle windows missed — "
+                    "ALERT: %d consecutive candle windows missed -- "
                     "possible data feed issue",
                     self._consecutive_gaps,
                 )
@@ -421,7 +421,7 @@ class IBKRWebSocket:
     market data fields for a given conid. Parses incoming JSON
     messages and forwards ticks to a callback.
 
-    Falls back gracefully — the caller (IBKRDataFeed) handles
+    Falls back gracefully -- the caller (IBKRDataFeed) handles
     switching to HTTP polling when this fails.
     """
 
@@ -528,7 +528,7 @@ class IBKRWebSocket:
                     break
 
             except asyncio.TimeoutError:
-                # No data in 30s — still connected, just quiet market
+                # No data in 30s -- still connected, just quiet market
                 continue
             except asyncio.CancelledError:
                 break
@@ -583,7 +583,7 @@ class IBKRWebSocket:
 
 
 # ================================================================
-# IBKR DATA FEED — HIGH-LEVEL ORCHESTRATOR
+# IBKR DATA FEED -- HIGH-LEVEL ORCHESTRATOR
 # ================================================================
 
 # Historical backfill: 2 hours of 2-minute bars = 60 bars.
@@ -685,12 +685,12 @@ class IBKRDataFeed:
         ws_ok = await self._start_websocket()
         if ws_ok:
             self._data_mode = "websocket"
-            logger.info("Data feed started — mode: WebSocket")
+            logger.info("Data feed started -- mode: WebSocket")
         else:
             # Step 3: Fallback to HTTP polling
             await self._start_polling()
             self._data_mode = "polling"
-            logger.info("Data feed started — mode: HTTP polling (WebSocket unavailable)")
+            logger.info("Data feed started -- mode: HTTP polling (WebSocket unavailable)")
 
         # Step 4: Health monitor
         self._monitor_task = asyncio.create_task(self._health_monitor())
@@ -738,7 +738,7 @@ class IBKRDataFeed:
         )
 
         if not raw_bars:
-            logger.warning("Backfill returned no data — indicators will cold-start")
+            logger.warning("Backfill returned no data -- indicators will cold-start")
             return
 
         self._backfill_bars = raw_bars
@@ -803,12 +803,12 @@ class IBKRDataFeed:
 
                 if self._data_mode == "websocket":
                     if self._ws and not self._ws.is_connected:
-                        logger.warning("WebSocket lost — attempting reconnect...")
+                        logger.warning("WebSocket lost -- attempting reconnect...")
                         reconnected = await self._ws.connect()
                         if not reconnected:
                             if self._ws._consecutive_failures >= WS_FALLBACK_THRESHOLD:
                                 logger.warning(
-                                    "WebSocket failed %d times — falling back to HTTP polling",
+                                    "WebSocket failed %d times -- falling back to HTTP polling",
                                     self._ws._consecutive_failures,
                                 )
                                 await self._start_polling()
@@ -819,7 +819,7 @@ class IBKRDataFeed:
                     if self._ws and not self._ws.is_connected:
                         reconnected = await self._ws.connect()
                         if reconnected:
-                            logger.info("WebSocket reconnected — switching back from polling")
+                            logger.info("WebSocket reconnected -- switching back from polling")
                             await self._client.stop_polling()
                             self._data_mode = "websocket"
 
@@ -847,7 +847,7 @@ class IBKRDataFeed:
         3. Attach session_type after construction
         4. Log warning for any missing expected field
         """
-        # 1. Extract session_type — may be SessionType enum or string
+        # 1. Extract session_type -- may be SessionType enum or string
         raw_session = candle.get("session_type")
         if raw_session is not None:
             session_str = raw_session.value if isinstance(raw_session, SessionType) else str(raw_session)
@@ -857,19 +857,19 @@ class IBKRDataFeed:
         # 4. Check for missing required fields
         for f in IBKRDataFeed._BAR_REQUIRED_FIELDS:
             if f not in candle:
-                logger.warning("candle_to_bar: missing required field '%s' — skipping bar", f)
+                logger.warning("candle_to_bar: missing required field '%s' -- skipping bar", f)
                 return None
 
         # 5. Validate OHLC prices are finite and positive
         for f in ("open", "high", "low", "close"):
             val = candle[f]
             if not isinstance(val, (int, float)) or not math.isfinite(val) or val <= 0:
-                logger.warning("candle_to_bar: invalid %s=%.4f — skipping bar", f, val if isinstance(val, (int, float)) else 0)
+                logger.warning("candle_to_bar: invalid %s=%.4f -- skipping bar", f, val if isinstance(val, (int, float)) else 0)
                 return None
 
         for f in IBKRDataFeed._BAR_OPTIONAL_FIELDS:
             if f not in candle:
-                logger.warning("candle_to_bar: missing optional field '%s' — using default", f)
+                logger.warning("candle_to_bar: missing optional field '%s' -- using default", f)
 
         # 2. Build Bar with explicit field mapping
         bar = Bar(
@@ -1065,7 +1065,7 @@ class IBKRClient:
         competing = data.get("competing", False)
 
         if competing:
-            logger.warning("Competing session detected — calling /iserver/auth/compete")
+            logger.warning("Competing session detected -- calling /iserver/auth/compete")
             await self._post("/iserver/auth/compete")
             # Re-check
             data = await self._get("/iserver/auth/status")
@@ -1099,7 +1099,7 @@ class IBKRClient:
             try:
                 success = await self._tickle()
                 if not success:
-                    logger.warning("Keepalive tickle failed — session may have expired")
+                    logger.warning("Keepalive tickle failed -- session may have expired")
                     # Try to re-validate
                     if not await self._check_auth_status():
                         logger.error("Session expired. Re-authentication required.")
@@ -1167,7 +1167,7 @@ class IBKRClient:
                 result = await strategy_fn(symbol)
                 if result:
                     logger.info(
-                        "CONTRACT RESOLUTION: Strategy %d SUCCEEDED — "
+                        "CONTRACT RESOLUTION: Strategy %d SUCCEEDED -- "
                         "conid=%s, symbol=%s, expiry=%s, exchange=%s",
                         strategy_num, result.conid, result.symbol,
                         result.expiry, result.exchange,
@@ -1180,7 +1180,7 @@ class IBKRClient:
                 )
             except Exception as e:
                 logger.error(
-                    "CONTRACT RESOLUTION: Strategy %d FAILED for %s — %s",
+                    "CONTRACT RESOLUTION: Strategy %d FAILED for %s -- %s",
                     strategy_num, symbol, e,
                 )
 
@@ -1202,8 +1202,8 @@ class IBKRClient:
 
     async def _resolve_strategy_search(self, symbol: str) -> Optional[ContractInfo]:
         """
-        Strategy 1 — Minimal search: POST /iserver/secdef/search
-        Body: {"symbol": "MNQ"} — NO extra fields (secType, exchange, etc.)
+        Strategy 1 -- Minimal search: POST /iserver/secdef/search
+        Body: {"symbol": "MNQ"} -- NO extra fields (secType, exchange, etc.)
         Extra fields cause 500 errors on the Client Portal Gateway.
         """
         search_data = await self._post(
@@ -1271,7 +1271,7 @@ class IBKRClient:
 
     async def _resolve_strategy_secdef_info(self, symbol: str) -> Optional[ContractInfo]:
         """
-        Strategy 2 — Direct contract lookup via secdef info endpoint.
+        Strategy 2 -- Direct contract lookup via secdef info endpoint.
         GET /iserver/secdef/info?conid=0&secType=FUT&symbol=MNQ&exchange=CME
         """
         data = await self._get(
@@ -1310,7 +1310,7 @@ class IBKRClient:
 
     async def _resolve_strategy_trsrv_futures(self, symbol: str) -> Optional[ContractInfo]:
         """
-        Strategy 3 — Futures lookup via /trsrv/futures endpoint.
+        Strategy 3 -- Futures lookup via /trsrv/futures endpoint.
         GET /trsrv/futures?symbols=MNQ
         Returns all available contracts with expiry dates.
         """
@@ -1363,7 +1363,7 @@ class IBKRClient:
 
     async def _resolve_strategy_hardcoded(self, symbol: str) -> Optional[ContractInfo]:
         """
-        Strategy 4 — Hardcoded fallback for known 2026 MNQ contracts.
+        Strategy 4 -- Hardcoded fallback for known 2026 MNQ contracts.
         LAST RESORT: uses known expiry dates and attempts to find conid
         via /iserver/contract/rules. If that fails too, returns None
         (we need a valid conid for order placement).
@@ -1381,7 +1381,7 @@ class IBKRClient:
         expiry_str = f"{month_names[month_code]}{str(full_year)[2:]}"
 
         logger.info(
-            "Strategy 4: Hardcoded lookup for %s — front-month %s, "
+            "Strategy 4: Hardcoded lookup for %s -- front-month %s, "
             "expiry %s (%s)",
             symbol, front_month_symbol, expiry, expiry_str,
         )
@@ -1408,10 +1408,10 @@ class IBKRClient:
                     description=f"{symbol} {expiry_str} (hardcoded fallback)",
                 )
 
-        # Cannot resolve without a valid conid — do not fabricate one
+        # Cannot resolve without a valid conid -- do not fabricate one
         logger.error(
             "Strategy 4: Could not obtain conid for %s via any endpoint. "
-            "CONTRACT RESOLUTION BLOCKED — likely CME data subscription issue.",
+            "CONTRACT RESOLUTION BLOCKED -- likely CME data subscription issue.",
             symbol,
         )
         return None
@@ -1441,7 +1441,7 @@ class IBKRClient:
         return None
 
     # ================================================================
-    # MARKET DATA — HTTP SNAPSHOT POLLING
+    # MARKET DATA -- HTTP SNAPSHOT POLLING
     # ================================================================
 
     async def get_market_snapshot(self) -> Optional[MarketSnapshot]:

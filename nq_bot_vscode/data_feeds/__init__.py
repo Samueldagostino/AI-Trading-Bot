@@ -1,1 +1,1 @@
-# data_feeds — External market data integrations (QuantData, etc.)
+# data_feeds -- External market data integrations (QuantData, etc.)

@@ -1,5 +1,5 @@
 """
-IBKR Order Execution Adapter — v1.3.1 (5-Contract Scale-Out)
+IBKR Order Execution Adapter -- v1.3.1 (5-Contract Scale-Out)
 ================================================================
 Places MNQ orders through the IBKR Client Portal Gateway REST API.
 
@@ -8,8 +8,8 @@ Supports:
   - 5-contract scale-out: C1 (1, canary) + C2 (1, structural) + C3 (3, delayed runner)
   - Paper trading mode only (live raises NotImplementedError)
 
-Safety rails — HARD BLOCKS that cannot be overridden:
-  1. Max 5 contracts per order (MNQ) — matches validated backtest architecture
+Safety rails -- HARD BLOCKS that cannot be overridden:
+  1. Max 5 contracts per order (MNQ) -- matches validated backtest architecture
   2. Max 8 open positions at any time (supports full 5-contract group + partial second)
   3. No orders outside RTH unless config explicitly allows ETH
   4. Daily loss limit check before every order ($500 default)
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════
-# SAFETY CONSTANTS — DO NOT CHANGE
+# SAFETY CONSTANTS -- DO NOT CHANGE
 # ═══════════════════════════════════════════════════════════════
 MAX_CONTRACTS_PER_ORDER = 5      # v1.3.1: C1(1) + C2(1) + C3(3) = 5
 MAX_OPEN_POSITIONS = 8           # Full 5-contract group + room for partial second
@@ -114,7 +114,7 @@ class OpenPosition:
 
 @dataclass
 class ExecutorConfig:
-    """Tunable knobs — safety limits are NOT here (they are constants)."""
+    """Tunable knobs -- safety limits are NOT here (they are constants)."""
     allow_eth: bool = False
     paper_mode: bool = True
 
@@ -169,7 +169,7 @@ class IBKROrderExecutor:
         """
         Place a single order after passing ALL safety checks.
 
-        Returns an ``OrderRecord`` — always.  If the order was
+        Returns an ``OrderRecord`` -- always.  If the order was
         blocked, ``record.accepted`` is False and
         ``record.rejection_reason`` explains why.
         """
@@ -226,9 +226,9 @@ class IBKROrderExecutor:
         """
         Place the 5-contract scale-out entry (v1.3.1).
 
-        C1: 1 contract — canary with 5-bar time exit.
-        C2: 1 contract — structural target (swing point exit).
-        C3: 3 contracts — delayed runner (ATR trailing stop).
+        C1: 1 contract -- canary with 5-bar time exit.
+        C2: 1 contract -- structural target (swing point exit).
+        C3: 3 contracts -- delayed runner (ATR trailing stop).
              C3 enters with the group but is closed immediately
              by the orchestrator if C1 exits at a loss.
 
@@ -326,7 +326,7 @@ class IBKROrderExecutor:
             )
             return True
         raise NotImplementedError(
-            "LIVE modify_stop NOT IMPLEMENTED — paper trading only."
+            "LIVE modify_stop NOT IMPLEMENTED -- paper trading only."
         )
 
     async def cancel_order(self, broker_order_id: str, reason: str = "manual") -> bool:
@@ -343,7 +343,7 @@ class IBKROrderExecutor:
             return True
 
         raise NotImplementedError(
-            "LIVE cancel_order NOT IMPLEMENTED — paper trading only."
+            "LIVE cancel_order NOT IMPLEMENTED -- paper trading only."
         )
 
     async def cancel_all_open_orders(self) -> int:
@@ -355,7 +355,7 @@ class IBKROrderExecutor:
             return count
 
         raise NotImplementedError(
-            "LIVE cancel_all NOT IMPLEMENTED — paper trading only."
+            "LIVE cancel_all NOT IMPLEMENTED -- paper trading only."
         )
 
     async def emergency_flatten(self, reason: str) -> None:
@@ -389,12 +389,12 @@ class IBKROrderExecutor:
         Called by the higher-level scale-out executor when a
         leg closes.
         """
-        # NaN guard — if PnL is NaN, the kill switch comparison will
+        # NaN guard -- if PnL is NaN, the kill switch comparison will
         # silently return False, allowing unlimited losses.
         if not math.isfinite(pnl):
-            logger.critical("NaN/Inf PnL received — activating kill switch")
+            logger.critical("NaN/Inf PnL received -- activating kill switch")
             self._state.is_halted = True
-            self._state.halt_reason = "KILL SWITCH: NaN/Inf PnL — data integrity failure"
+            self._state.halt_reason = "KILL SWITCH: NaN/Inf PnL -- data integrity failure"
             self._schedule_cancel_all()
             return
 
@@ -466,7 +466,7 @@ class IBKROrderExecutor:
         }
 
     # ──────────────────────────────────────────────────────────
-    # SAFETY CHECKS — THE ONLY GATE
+    # SAFETY CHECKS -- THE ONLY GATE
     # ──────────────────────────────────────────────────────────
 
     def _run_safety_checks(self, request: OrderRequest) -> Optional[str]:
@@ -474,13 +474,13 @@ class IBKROrderExecutor:
         Run every safety rail.  Returns None if clear, or a
         rejection reason string.
 
-        HARD BLOCKS — these cannot be bypassed, overridden, or
+        HARD BLOCKS -- these cannot be bypassed, overridden, or
         disabled.  Every order passes through this single gate.
         """
-        # 0. NaN/Inf guard — NaN comparisons return False, bypassing gates
+        # 0. NaN/Inf guard -- NaN comparisons return False, bypassing gates
         if not math.isfinite(self._state.daily_pnl):
             self._state.is_halted = True
-            self._state.halt_reason = "KILL SWITCH: daily P&L is NaN/Inf — data integrity failure"
+            self._state.halt_reason = "KILL SWITCH: daily P&L is NaN/Inf -- data integrity failure"
             logger.critical(self._state.halt_reason)
             return f"KILL_SWITCH: daily P&L is NaN/Inf"
 
@@ -604,14 +604,14 @@ class IBKROrderExecutor:
         """
         Live broker execution via IBKR Client Portal Gateway.
 
-        NOT IMPLEMENTED — paper trading must be validated first.
+        NOT IMPLEMENTED -- paper trading must be validated first.
         Phase 3 will implement:
           POST /iserver/account/{accountId}/orders
           with confirmation reply handling.
         """
         raise NotImplementedError(
             "LIVE EXECUTION NOT YET IMPLEMENTED. "
-            "This is intentional — paper trading must be validated first. "
+            "This is intentional -- paper trading must be validated first. "
             "See Phase 3 of the IBKR integration roadmap."
         )
 
@@ -666,7 +666,7 @@ class IBKROrderExecutor:
             loop = asyncio.get_running_loop()
             loop.create_task(self.cancel_all_open_orders())
         except RuntimeError:
-            # No running event loop — the is_halted flag will block
+            # No running event loop -- the is_halted flag will block
             # the next place_order call.
             pass
 
@@ -700,8 +700,8 @@ class IBKROrderExecutor:
             record.order_type,
             record.price,
             record.tag,
-            record.rejection_reason or "—",
-            record.broker_order_id or "—",
+            record.rejection_reason or "--",
+            record.broker_order_id or "--",
         )
         self._state.order_log.append(record)
         # Persist to JSONL file

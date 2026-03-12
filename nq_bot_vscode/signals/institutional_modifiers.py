@@ -1,5 +1,5 @@
 """
-Institutional Modifier Layer — Phase 2
+Institutional Modifier Layer -- Phase 2
 ========================================
 Overnight Bias + Pre-FOMC Drift + Gamma Regime + Volatility modifiers
 as position sizing multipliers.
@@ -46,7 +46,7 @@ class ModifierResult:
     details: Dict = field(default_factory=dict)
 
 
-# ── Constants — from V3 Integration Execution Plan ──────────────────
+# ── Constants -- from V3 Integration Execution Plan ──────────────────
 MAX_TOTAL_MULTIPLIER = 2.0
 MIN_TOTAL_MULTIPLIER = 0.3
 
@@ -100,13 +100,13 @@ class OvernightBiasModifier:
         h, m = et_time.hour, et_time.minute
         t = h + m / 60.0
 
-        # Capture session close — last bar in the 15:58–16:02 window
+        # Capture session close -- last bar in the 15:58-16:02 window
         if 15 + 58 / 60 <= t <= 16 + 2 / 60:
             self._prev_day_close = bar.close
             self._prev_close_date = current_date
 
-        # Capture RTH open — first bar at 9:30 AM ET (new day only)
-        if 9.5 <= t < 9.5 + 4 / 60:  # 9:30–9:34 window (covers 2m bar)
+        # Capture RTH open -- first bar at 9:30 AM ET (new day only)
+        if 9.5 <= t < 9.5 + 4 / 60:  # 9:30-9:34 window (covers 2m bar)
             if self._current_open_date != current_date:
                 self._current_day_open = bar.open
                 self._current_open_date = current_date
@@ -122,7 +122,7 @@ class OvernightBiasModifier:
                     if math.isfinite(raw_bps):
                         self._overnight_bps = raw_bps
                     else:
-                        logger.warning("Overnight BPS is NaN/Inf — defaulting to 0")
+                        logger.warning("Overnight BPS is NaN/Inf -- defaulting to 0")
                         self._overnight_bps = 0.0
                     self._last_compute_date = current_date
 
@@ -202,8 +202,8 @@ class FOMCDriftModifier:
     Checks hours until next FOMC announcement and returns multipliers
     per window:
       - No FOMC within 24h: 1.0x all
-      - 24–4h before FOMC: position 1.1x, stop 0.9x
-      - 4–0.5h before FOMC: position 1.15x, stop 0.85x
+      - 24-4h before FOMC: position 1.1x, stop 0.9x
+      - 4-0.5h before FOMC: position 1.15x, stop 0.85x
       - <0.5h before FOMC: STAND ASIDE (block trade)
     """
 
@@ -228,18 +228,18 @@ class FOMCDriftModifier:
         if hours <= 0.5:
             return ModifierResult(
                 stand_aside=True,
-                stand_aside_reason=f"FOMC in {hours:.2f}h — stand aside",
+                stand_aside_reason=f"FOMC in {hours:.2f}h -- stand aside",
                 details={
                     "hours_until_fomc": round(hours, 2),
                     "window": "stand_aside",
                 },
             )
 
-        # 4h–0.5h window
+        # 4h-0.5h window
         if hours <= 4.0:
             mults = FOMC_WINDOWS["4h_to_0.5h"]
             window = "4h_to_0.5h"
-        # 24h–4h window
+        # 24h-4h window
         else:
             mults = FOMC_WINDOWS["24h_to_4h"]
             window = "24h_to_4h"
@@ -299,7 +299,7 @@ class GammaRegimeModifier:
         """Return position/stop multipliers based on VIX term structure."""
         # Fallback: if VIX data unavailable, return neutral
         if vix_spot is None or vix_front_month is None or vix_second_month is None:
-            logger.debug("VIX data unavailable — gamma modifier defaults to 1.0")
+            logger.debug("VIX data unavailable -- gamma modifier defaults to 1.0")
             return ModifierResult(
                 position_multiplier=1.0,
                 stop_multiplier=1.0,
@@ -312,7 +312,7 @@ class GammaRegimeModifier:
             )
 
         if vix_front_month == 0.0:
-            logger.warning("VIX front month is zero — gamma modifier defaults to 1.0")
+            logger.warning("VIX front month is zero -- gamma modifier defaults to 1.0")
             return ModifierResult(
                 position_multiplier=1.0,
                 stop_multiplier=1.0,
@@ -479,7 +479,7 @@ class InstitutionalModifierEngine:
         # produce the gamma modifier value (overrides VIX-proxy when available)
         gex_mod = self.gex_monitor.get_modifier_value()
         if gex_mod["value"] != 1.0 or "unavailable" not in gex_mod.get("reason", "unavailable"):
-            # GEX data available — use it for gamma position multiplier
+            # GEX data available -- use it for gamma position multiplier
             gex_result = self.gex_monitor.get_cached()
             gamma_result = ModifierResult(
                 position_multiplier=gex_mod["value"],
@@ -508,7 +508,7 @@ class InstitutionalModifierEngine:
             },
         )
 
-        # Check stand-aside — if ANY modifier signals stand_aside
+        # Check stand-aside -- if ANY modifier signals stand_aside
         all_results = [overnight_result, fomc_result, gamma_result, vol_result]
         for r in all_results:
             if r.stand_aside:

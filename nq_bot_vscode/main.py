@@ -107,31 +107,31 @@ class TradingOrchestrator:
         self.monitoring = MonitoringEngine(config)
         self.data_pipeline = DataPipeline(config, self.db)
 
-        # HTF Bias Engine — multi-timeframe directional consensus
+        # HTF Bias Engine -- multi-timeframe directional consensus
         self.htf_engine = HTFBiasEngine(
             config=config,
             timeframes=list(HTF_TIMEFRAMES),
         )
         self._htf_bias: Optional[HTFBiasResult] = None
 
-        # Liquidity Sweep Detector — additive signal source
+        # Liquidity Sweep Detector -- additive signal source
         self.sweep_detector = LiquiditySweepDetector()
         self._sweep_enabled = True  # Can be toggled for A/B testing
 
-        # UCL — Universal Confirmation Layer (Phase 1)
+        # UCL -- Universal Confirmation Layer (Phase 1)
         self._fvg_detector = FVGDetector()
         self._watch_manager = WatchStateManager()
         self._ucl_enabled = True  # Can be toggled for A/B testing
 
-        # Session Volatility Scaler — U-shaped intraday ATR adjustment
+        # Session Volatility Scaler -- U-shaped intraday ATR adjustment
         # Enabled via SESSION_VOLATILITY_SCALING env var (default: OFF)
         self._session_scaler = SessionVolatilityScaler()
 
-        # Institutional Modifier Layer — Phase 1
+        # Institutional Modifier Layer -- Phase 1
         self._institutional_engine = InstitutionalModifierEngine()
         self._modifiers_enabled = True  # Can be toggled for A/B testing
 
-        # Trade Decision Logger — records every approval and rejection
+        # Trade Decision Logger -- records every approval and rejection
         self.decision_logger = TradeDecisionLogger(
             str(Path(__file__).resolve().parent / "logs")
         )
@@ -139,7 +139,7 @@ class TradingOrchestrator:
         # Execution - scale-out is the primary executor
         self.executor = ScaleOutExecutor(config)
 
-        # Alerting — real-time notifications via console/Discord/Telegram
+        # Alerting -- real-time notifications via console/Discord/Telegram
         self._alert_manager = AlertManager(
             config.alerting,
             rate_limit_seconds=config.alerting.rate_limit_seconds,
@@ -160,7 +160,7 @@ class TradingOrchestrator:
         # Shadow-trade rejection capture (set by ReplaySimulator)
         self._last_rejection = None   # Populated at each rejection point
 
-        # Consecutive executor failure counter — escalates to emergency flatten
+        # Consecutive executor failure counter -- escalates to emergency flatten
         self._executor_fail_count = 0
         self._EXECUTOR_FAIL_LIMIT = 5
 
@@ -172,7 +172,7 @@ class TradingOrchestrator:
     # ================================================================
     async def initialize(self, skip_db: bool = False) -> None:
         """Initialize all components."""
-        # ── Config validation — refuse to start with bad config ──
+        # ── Config validation -- refuse to start with bad config ──
         config_errors = validate_config(self.config)
         if config_errors:
             raise SystemExit(
@@ -282,7 +282,7 @@ class TradingOrchestrator:
         self._last_rejection = None  # Clear previous rejection
         action_result = None
 
-        # === MAINTENANCE WINDOW CHECKS (must be FIRST — Axiom 2: Survival Precedes Profit) ===
+        # === MAINTENANCE WINDOW CHECKS (must be FIRST -- Axiom 2: Survival Precedes Profit) ===
         from datetime import time as dt_time
         bar_et = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
         current_time_et = bar_et.time()
@@ -315,12 +315,12 @@ class TradingOrchestrator:
                     action_result = result
             return action_result  # No processing during CME maintenance window
 
-        # Entry cutoff at 4:30 PM ET — block new entries, continue position management
+        # Entry cutoff at 4:30 PM ET -- block new entries, continue position management
         self._maintenance_entry_blocked = (
             dt_time(16, 30) <= current_time_et < dt_time(16, 50)
         )
 
-        # === SESSION BOUNDARY DETECTION — reset VWAP at new trading day ===
+        # === SESSION BOUNDARY DETECTION -- reset VWAP at new trading day ===
         bar_date = bar_et.date()
         if self._last_trading_date is not None and bar_date != self._last_trading_date:
             self.feature_engine.reset_session()
@@ -373,7 +373,7 @@ class TradingOrchestrator:
                 is_rth=is_rth,
             )
 
-        # === 3c. FVG DETECTOR (UCL — always runs) ===
+        # === 3c. FVG DETECTOR (UCL -- always runs) ===
         if self._ucl_enabled:
             self._fvg_detector.update(
                 bar=bar,
@@ -395,7 +395,7 @@ class TradingOrchestrator:
                 )
                 if self._executor_fail_count >= self._EXECUTOR_FAIL_LIMIT:
                     logger.critical(
-                        "executor.update() failed %d times — emergency flatten",
+                        "executor.update() failed %d times -- emergency flatten",
                         self._executor_fail_count,
                     )
                     last_price = self._get_last_price()
@@ -406,10 +406,10 @@ class TradingOrchestrator:
                 if result.get("action") == "trade_closed":
                     result["close_timestamp"] = bar.timestamp.isoformat()
                     total_pnl = result["total_pnl"]
-                    # NaN guard — prevent corrupted PnL from poisoning risk engine
+                    # NaN guard -- prevent corrupted PnL from poisoning risk engine
                     if not math.isfinite(total_pnl):
                         logger.critical(
-                            "NaN/Inf total_pnl from trade close — blocking risk update"
+                            "NaN/Inf total_pnl from trade close -- blocking risk update"
                         )
                         total_pnl = 0.0
                         result["total_pnl"] = 0.0
@@ -439,7 +439,7 @@ class TradingOrchestrator:
         # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
         if getattr(self, '_maintenance_entry_blocked', False):
             logger.info(
-                "BLOCKED: New entry rejected — past 4:30 PM ET cutoff "
+                "BLOCKED: New entry rejected -- past 4:30 PM ET cutoff "
                 "(maintenance window protection)"
             )
             return action_result
@@ -453,17 +453,17 @@ class TradingOrchestrator:
         )
 
         # === PATH C+: DUAL-TRIGGER DECISION ENGINE ===
-        # Layer 1: HTF Gate (hard filter — enforced in aggregator)
-        # Layer 2: Structural context (aggregator, OB, FVG — boost sweep score)
-        # Layer 3: Entry trigger — TWO independent paths:
-        #   PATH A: Liquidity sweep (primary) — sweeps generate trades at HC threshold
-        #   PATH B: Aggregator standalone (re-enabled Mar 2026) — high-conviction
+        # Layer 1: HTF Gate (hard filter -- enforced in aggregator)
+        # Layer 2: Structural context (aggregator, OB, FVG -- boost sweep score)
+        # Layer 3: Entry trigger -- TWO independent paths:
+        #   PATH A: Liquidity sweep (primary) -- sweeps generate trades at HC threshold
+        #   PATH B: Aggregator standalone (re-enabled Mar 2026) -- high-conviction
         #           aggregator signals trigger trades independently
         # Layer 4: Risk calibration (downstream HC gates + risk engine)
         #
         # Backtest evidence: aggregator-only trades produced +$12,626 across 1,025
         # trades.  Sweeps added +$9,896 across 338 trades.  Both paths are profitable
-        # independently — running them together maximizes opportunity capture.
+        # independently -- running them together maximizes opportunity capture.
         has_signal = signal and signal.should_trade
         has_sweep = (sweep_signal is not None and
                      sweep_signal.score >= SWEEP_MIN_SCORE)
@@ -478,7 +478,7 @@ class TradingOrchestrator:
             entry_direction = "long" if sweep_signal.direction == "LONG" else "short"
             entry_score = sweep_signal.score
             entry_source = "sweep"
-            # Use sweep's stop price for tighter risk — validate first
+            # Use sweep's stop price for tighter risk -- validate first
             if sweep_signal.stop_price and sweep_signal.stop_price > 0:
                 sweep_stop_override = abs(bar.close - sweep_signal.stop_price)
             else:
@@ -534,15 +534,15 @@ class TradingOrchestrator:
                 logger.debug(
                     f"AGGREGATOR BELOW THRESHOLD: {agg_dir} "
                     f"score={signal.combined_score:.3f} < {AGGREGATOR_STANDALONE_MIN_SCORE} "
-                    f"— no standalone trade"
+                    f"-- no standalone trade"
                 )
 
         elif has_signal:
-            # AGGREGATOR_STANDALONE_ENABLED is False — context only (legacy PATH C)
+            # AGGREGATOR_STANDALONE_ENABLED is False -- context only (legacy PATH C)
             agg_dir = "long" if signal.direction == SignalDirection.LONG else "short"
             logger.debug(
                 f"CONTEXT ONLY (no sweep): aggregator {agg_dir} "
-                f"score={signal.combined_score:.3f} — no trade (standalone disabled)"
+                f"score={signal.combined_score:.3f} -- no trade (standalone disabled)"
             )
 
         # ── Shadow rejection helper ──────────────────────────────────
@@ -591,7 +591,7 @@ class TradingOrchestrator:
                 },
             )
 
-        # === 5b. UCL — EVALUATE ACTIVE WATCH STATES (runs every bar) ===
+        # === 5b. UCL -- EVALUATE ACTIVE WATCH STATES (runs every bar) ===
         ucl_confirmed: List[ConfirmedSignal] = []
         if self._ucl_enabled:
             ucl_confirmed = self._watch_manager.update(
@@ -614,12 +614,12 @@ class TradingOrchestrator:
 
         if entry_direction is not None and not math.isfinite(entry_score):
             # Gate 2: NaN score guard
-            logger.error("HC REJECT: entry_score is NaN/Inf — blocking trade")
+            logger.error("HC REJECT: entry_score is NaN/Inf -- blocking trade")
             _set_rejection(entry_direction, entry_score, None,
                            features.atr_14, "NaN score guard", 2)
             return None
 
-        # === 5c. UCL v2 — FVG CONFLUENCE SCORE BOOST ===
+        # === 5c. UCL v2 -- FVG CONFLUENCE SCORE BOOST ===
         # Before the HC gate, boost score if entry is near an active FVG
         if entry_direction is not None and self._ucl_enabled:
             fvg_direction = "bullish" if entry_direction == "long" else "bearish"
@@ -646,7 +646,7 @@ class TradingOrchestrator:
                     f"score {old_score:.3f} -> {entry_score:.3f}"
                 )
 
-        # === 5d. UCL v2 — PROCESS CONFIRMED SIGNALS ===
+        # === 5d. UCL v2 -- PROCESS CONFIRMED SIGNALS ===
         # A confirmed wide-stop watch re-enters the pipeline with boosted score + tight stop
         if ucl_confirmed and entry_direction is None:
             cs = ucl_confirmed[0]  # Process first confirmed signal
@@ -668,7 +668,7 @@ class TradingOrchestrator:
             )
 
         # -- HTF DIRECTIONAL GATE (softened: score penalty instead of hard block) --
-        # A sweep IS a reversal signal — HTF bias disagreement is expected
+        # A sweep IS a reversal signal -- HTF bias disagreement is expected
         # at the moment of reversal. Penalize score by 0.10 instead of blocking.
         if entry_direction is not None and htf_bias is not None:
             htf_disagrees = False
@@ -679,7 +679,7 @@ class TradingOrchestrator:
             if htf_disagrees:
                 entry_score -= 0.10
                 logger.info(
-                    "HTF BIAS PENALTY: %s entry penalized -0.10 — HTF %s (strength %.2f) "
+                    "HTF BIAS PENALTY: %s entry penalized -0.10 -- HTF %s (strength %.2f) "
                     "disagrees [source=%s, new_score=%.2f]",
                     entry_direction, htf_bias.consensus_direction,
                     htf_bias.consensus_strength, entry_source, entry_score,
@@ -687,11 +687,11 @@ class TradingOrchestrator:
         elif entry_direction is not None and htf_bias is None:
             # Fail-safe: no HTF data -> block all trades
             logger.warning(
-                "HTF GATE BLOCK: %s entry blocked — no HTF data available "
+                "HTF GATE BLOCK: %s entry blocked -- no HTF data available "
                 "[source=%s]", entry_direction, entry_source,
             )
             _set_rejection(entry_direction, entry_score, None,
-                           features.atr_14, "No HTF data — fail-safe block", 1)
+                           features.atr_14, "No HTF data -- fail-safe block", 1)
             return None
 
         # -- HIGH-CONVICTION GATE 1: Signal Score --
@@ -739,7 +739,7 @@ class TradingOrchestrator:
 
         if not math.isfinite(raw_stop):
             # Gate 4: NaN stop distance
-            logger.error("HC REJECT: stop distance is NaN/Inf — blocking trade")
+            logger.error("HC REJECT: stop distance is NaN/Inf -- blocking trade")
             _set_rejection(entry_direction, entry_score, None,
                            features.atr_14, "NaN stop distance", 4)
             return None
@@ -818,7 +818,7 @@ class TradingOrchestrator:
             # Applied AFTER all gates pass, BEFORE trade execution.
             # Adjusts position size, stop width, C2 runner trail.
             modifier_result = None
-            # C2 trail uses RAW ATR (not session-scaled) — the trail needs to
+            # C2 trail uses RAW ATR (not session-scaled) -- the trail needs to
             # adapt to real-time conditions, not be locked to entry session vol.
             atr_for_entry = features.atr_14
             if self._modifiers_enabled:
@@ -831,7 +831,7 @@ class TradingOrchestrator:
                 except Exception as e:
                     # GRACEFUL DEGRADATION: modifier failure -> use 1.0x multipliers
                     logger.warning(
-                        "Modifier engine calculate() failed — using 1.0x multipliers: %s", e
+                        "Modifier engine calculate() failed -- using 1.0x multipliers: %s", e
                     )
                     modifier_result = None
                 if modifier_result and modifier_result.stand_aside:
@@ -872,7 +872,7 @@ class TradingOrchestrator:
 
             # === 7. ENTER SCALE-OUT TRADE ===
             # C1 exits via trail-from-profit (Variant C).
-            # No fixed TP1 target — managed by ScaleOutExecutor.
+            # No fixed TP1 target -- managed by ScaleOutExecutor.
             trade = await self.executor.enter_trade(
                 direction=entry_direction,
                 entry_price=bar.close,
@@ -1224,7 +1224,7 @@ class TradingOrchestrator:
             self.risk_engine.load_economic_calendar(events)
         except Exception as e:
             logger.warning(
-                "Economic calendar load failed: %s — "
+                "Economic calendar load failed: %s -- "
                 "risk engine will proceed without event awareness", e
             )
 

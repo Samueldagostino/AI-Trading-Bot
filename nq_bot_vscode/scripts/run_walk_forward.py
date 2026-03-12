@@ -5,7 +5,7 @@ Walk-Forward Optimization Engine
 Trains on rolling windows and tests out-of-sample to validate that
 strategy parameters hold up across regime changes.
 
-Uses TradingOrchestrator.run_backtest_mtf() as a black box — does NOT
+Uses TradingOrchestrator.run_backtest_mtf() as a black box -- does NOT
 modify the backtest engine, HC filter, risk engine, or signal generation.
 
 Usage:
@@ -285,7 +285,7 @@ class WalkForwardEngine:
             print(f"  SKIPPED: {fold.skip_reason}")
             return fold
 
-        # Run test backtest (same config — no parameter changes)
+        # Run test backtest (same config -- no parameter changes)
         test_results = await self._run_backtest(test_bars)
         fold.test_trades = test_results.get("total_trades", 0)
         fold.test_pf = test_results.get("profit_factor", 0)
@@ -365,7 +365,7 @@ class WalkForwardEngine:
         """Compare aggregate OOS metrics against config/backtest_baseline.json."""
         baseline_path = project_dir / "config" / "backtest_baseline.json"
         if not baseline_path.exists():
-            summary.baseline_reasons.append("No baseline file found — skipping comparison")
+            summary.baseline_reasons.append("No baseline file found -- skipping comparison")
             return
 
         with open(baseline_path) as f:
@@ -463,7 +463,7 @@ class WalkForwardEngine:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Walk-Forward Optimization — Rolling Train/Test Validation"
+        description="Walk-Forward Optimization -- Rolling Train/Test Validation"
     )
     parser.add_argument(
         "--tv", action="store_true",

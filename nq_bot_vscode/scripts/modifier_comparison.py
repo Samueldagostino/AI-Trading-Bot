@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Institutional Modifier Comparison — Baseline vs Modified
+Institutional Modifier Comparison -- Baseline vs Modified
 ==========================================================
 Runs the replay simulator twice:
   1. Baseline: modifiers DISABLED
@@ -30,7 +30,7 @@ async def run_comparison():
 
     # ── Run 1: BASELINE (modifiers disabled) ──
     print("=" * 70)
-    print("  BASELINE RUN — Institutional Modifiers DISABLED")
+    print("  BASELINE RUN -- Institutional Modifiers DISABLED")
     print("=" * 70)
 
     sim_baseline = ReplaySimulator(
@@ -54,7 +54,7 @@ async def run_comparison():
     # ── Run 2: MODIFIED (modifiers enabled) ──
     print()
     print("=" * 70)
-    print("  MODIFIED RUN — Institutional Modifiers ENABLED")
+    print("  MODIFIED RUN -- Institutional Modifiers ENABLED")
     print("=" * 70)
 
     sim_modified = ReplaySimulator(

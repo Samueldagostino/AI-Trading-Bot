@@ -143,7 +143,7 @@ class TWSLauncher:
     def _launch_direct(self) -> bool:
         """Launch TWS directly (user must log in manually)."""
         logger.warning(
-            "IBC not available — launching TWS directly. "
+            "IBC not available -- launching TWS directly. "
             "You will need to log in manually within %ds.",
             self._config.startup_timeout,
         )
@@ -207,7 +207,7 @@ class TWSLauncher:
 
                 return True
 
-            # Check if process died — but only for direct launch.
+            # Check if process died -- but only for direct launch.
             # IBC's StartTWS.bat exits normally after spawning TWS as a
             # separate process, so its exit does NOT mean TWS failed.
             if (self._process and self._process.poll() is not None

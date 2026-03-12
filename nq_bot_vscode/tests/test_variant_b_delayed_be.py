@@ -232,16 +232,16 @@ class TestMFETracking:
         assert leg.mfe == 15.0
 
     def test_mfe_never_decreases(self):
-        """MFE is a high-water mark — it should never decrease."""
+        """MFE is a high-water mark -- it should never decrease."""
         leg = ContractLeg(
             leg_label="C2", contracts=1, is_open=True,
             entry_price=21000.0, stop_price=20990.0, mfe=0.0,
         )
 
         leg.mfe = max(leg.mfe, 20.0)
-        leg.mfe = max(leg.mfe, 15.0)  # Lower — should not replace
-        leg.mfe = max(leg.mfe, 25.0)  # Higher — should replace
-        leg.mfe = max(leg.mfe, 10.0)  # Lower — should not replace
+        leg.mfe = max(leg.mfe, 15.0)  # Lower -- should not replace
+        leg.mfe = max(leg.mfe, 25.0)  # Higher -- should replace
+        leg.mfe = max(leg.mfe, 10.0)  # Lower -- should not replace
 
         assert leg.mfe == 25.0
 

@@ -419,7 +419,7 @@ class TestContract:
             symbol="MNQ", exchange="CME", conId=12346,
             lastTradeDateOrContractMonth="202606",
         )
-        # Return in reverse order — back month first
+        # Return in reverse order -- back month first
         mock_ib.reqContractDetails.return_value = [
             MagicMock(contract=back),
             MagicMock(contract=front),

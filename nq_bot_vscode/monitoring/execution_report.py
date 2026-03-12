@@ -50,12 +50,12 @@ class ExecutionReport:
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Execution Report — {target}</title>
+<title>Execution Report -- {target}</title>
 {self._css()}
 </head>
 <body>
 <div class="container">
-<h1>Execution Quality Report — {target}</h1>
+<h1>Execution Quality Report -- {target}</h1>
 
 {self._summary_card(agg)}
 
@@ -118,12 +118,12 @@ class ExecutionReport:
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Weekly Execution Report — {start} to {end - timedelta(days=1)}</title>
+<title>Weekly Execution Report -- {start} to {end - timedelta(days=1)}</title>
 {self._css()}
 </head>
 <body>
 <div class="container">
-<h1>Weekly Execution Report — {start} to {end - timedelta(days=1)}</h1>
+<h1>Weekly Execution Report -- {start} to {end - timedelta(days=1)}</h1>
 
 {self._summary_card(weekly_agg)}
 
@@ -160,7 +160,7 @@ class ExecutionReport:
         verdict_text = (
             f"Safe to scale to {assessment['safe_contracts']} contracts"
             if ready
-            else f"Not ready — {assessment['reason']}"
+            else f"Not ready -- {assessment['reason']}"
         )
 
         projections = assessment.get("projections", {})
@@ -297,7 +297,7 @@ class ExecutionReport:
             idx = min(int((v - min_v) / step), n_buckets - 1) if step > 0 else 0
             lo = round(min_v + idx * step, 1)
             hi = round(min_v + (idx + 1) * step, 1)
-            key = f"{lo}–{hi}"
+            key = f"{lo}-{hi}"
             buckets[key] = buckets.get(key, 0) + 1
 
         max_count = max(buckets.values()) if buckets else 1
@@ -374,7 +374,7 @@ class ExecutionReport:
     @staticmethod
     def _anomalies_table(anomalies: List[OrderEvent]) -> str:
         if not anomalies:
-            return "<p>No anomalous fills detected — execution quality is consistent.</p>"
+            return "<p>No anomalous fills detected -- execution quality is consistent.</p>"
         rows = ""
         for e in anomalies:
             rows += f"""<tr>

@@ -1,5 +1,5 @@
 """
-Walk-Forward Report — Data Structures & Reporting
+Walk-Forward Report -- Data Structures & Reporting
 ====================================================
 Defines FoldResult, WFSummary, and WalkForwardReport for
 walk-forward optimization output, including JSON export,
@@ -207,7 +207,7 @@ class WalkForwardReport:
 <tbody>{fold_rows}</tbody>
 </table>
 
-<div class="footer">Walk-Forward Optimization Framework — NQ Trading Bot</div>
+<div class="footer">Walk-Forward Optimization Framework -- NQ Trading Bot</div>
 </div>
 
 <script>

@@ -1,5 +1,5 @@
 """
-C1 Deep Comparison — Risk Analysis for Top 3 vs Current
+C1 Deep Comparison -- Risk Analysis for Top 3 vs Current
 ==========================================================
 Runs the Phase 1 capture once, then does detailed risk analysis:
   - Trade-by-trade equity curves
@@ -180,7 +180,7 @@ def print_comparison(configs: List[Dict]):
     """Print side-by-side comparison of configs."""
 
     print(f"\n{'=' * 90}")
-    print(f"  DEEP RISK COMPARISON — Top 3 C1 Strategies vs Current Production")
+    print(f"  DEEP RISK COMPARISON -- Top 3 C1 Strategies vs Current Production")
     print(f"{'=' * 90}\n")
 
     # ── Aggregate Metrics ──
@@ -303,8 +303,8 @@ async def main():
         logging.getLogger(name).setLevel(logging.WARNING)
 
     print(f"\n{'=' * 70}")
-    print(f"  C1 DEEP COMPARISON — Risk Analysis")
-    print(f"  Config D | Sep 2025 – Feb 2026 | FirstRate 1m")
+    print(f"  C1 DEEP COMPARISON -- Risk Analysis")
+    print(f"  Config D | Sep 2025 - Feb 2026 | FirstRate 1m")
     print(f"{'=' * 70}\n")
 
     print("Loading data...")

@@ -16,7 +16,7 @@ Safety rules:
   - Never trade both contracts simultaneously
   - If roll fails at any step, halt trading entirely (CRITICAL log)
   - Verify new contract has adequate volume (>= 1000 daily contracts)
-  - If verification fails, retry next startup — do not force roll
+  - If verification fails, retry next startup -- do not force roll
 """
 
 import logging
@@ -42,7 +42,7 @@ MONTH_CODES = {
 
 CYCLE_ORDER = ["H", "M", "U", "Z"]
 
-# CME holidays (month, day) — fixed-date holidays.
+# CME holidays (month, day) -- fixed-date holidays.
 # Floating holidays (MLK, Presidents, Memorial, Labor, Thanksgiving, Good Friday)
 # are computed dynamically.
 FIXED_CME_HOLIDAYS = {
@@ -255,7 +255,7 @@ class ContractRoller:
 
         # ROLLOVER_OVERRIDE=true skips the roll check (for backtesting or manual control)
         if os.environ.get("ROLLOVER_OVERRIDE", "").lower() == "true":
-            logger.info("Roll check: ROLLOVER_OVERRIDE=true — skipping roll check")
+            logger.info("Roll check: ROLLOVER_OVERRIDE=true -- skipping roll check")
             return False
 
         _base, month_code, year_digit = self.parse_symbol(current_symbol)
@@ -350,14 +350,14 @@ class ContractRoller:
                             return True
 
             logger.warning(
-                "CONTRACT_ROLL: Could not verify %s — not found in IBKR search results",
+                "CONTRACT_ROLL: Could not verify %s -- not found in IBKR search results",
                 symbol,
             )
             return False
 
         except Exception as e:
             logger.error(
-                "CONTRACT_ROLL: Verification failed for %s — %s", symbol, e,
+                "CONTRACT_ROLL: Verification failed for %s -- %s", symbol, e,
             )
             return False
 
@@ -402,7 +402,7 @@ class ContractRoller:
         verified = await self.verify_contract(ibkr_client, next_symbol)
         if not verified:
             logger.warning(
-                "CONTRACT_ROLL: New contract %s failed verification — "
+                "CONTRACT_ROLL: New contract %s failed verification -- "
                 "will retry next startup",
                 next_symbol,
             )
@@ -421,7 +421,7 @@ class ContractRoller:
                 )
             except Exception as e:
                 logger.critical(
-                    "CONTRACT_ROLL FAILED: Could not flatten positions — %s. "
+                    "CONTRACT_ROLL FAILED: Could not flatten positions -- %s. "
                     "TRADING HALTED. Manual intervention required.",
                     e,
                 )
@@ -454,7 +454,7 @@ class ContractRoller:
                 )
             except Exception as e:
                 logger.critical(
-                    "CONTRACT_ROLL FAILED: Could not resubscribe data feed — %s. "
+                    "CONTRACT_ROLL FAILED: Could not resubscribe data feed -- %s. "
                     "TRADING HALTED.",
                     e,
                 )

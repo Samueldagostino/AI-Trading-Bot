@@ -1,9 +1,9 @@
 """
-Liquidity Sweep Detector — HTF-First Architecture
+Liquidity Sweep Detector -- HTF-First Architecture
 ====================================================
 Detects institutional liquidity sweeps using a TOP-DOWN approach:
 
-  1. HTF bars (15m, 1H) detect the sweep — a candle whose wick violates
+  1. HTF bars (15m, 1H) detect the sweep -- a candle whose wick violates
      a key level but closes back inside.  Institutional volume lives on
      these timeframes.
   2. The 2-minute execution bar provides precise entry timing once
@@ -107,11 +107,11 @@ class LiquiditySweepDetector:
     HTF-first liquidity sweep detector.
 
     Flow:
-      1. update_htf_bar(tf, bar) — feed completed HTF bars (15m, 1H)
+      1. update_htf_bar(tf, bar) -- feed completed HTF bars (15m, 1H)
          Detects sweep candidates on these timeframes.
-      2. update_bar(bar, ...) — feed 2m execution bars
+      2. update_bar(bar, ...) -- feed 2m execution bars
          Confirms entries via reversal candle pattern.
-      3. get_signal() — returns confirmed SweepSignal or None
+      3. get_signal() -- returns confirmed SweepSignal or None
 
     Usage:
         detector = LiquiditySweepDetector()
@@ -136,9 +136,9 @@ class LiquiditySweepDetector:
     MIN_SWEEP_DEPTH_DEFAULT = 10.0  # Fallback for unlisted timeframes
     STOP_BUFFER = 3.0               # Buffer beyond HTF sweep extreme for stop
     # Round number intervals for sweep detection.
-    # 100pt removed — too dense, generates noise sweeps on every intraday move.
-    # 1000pt = major psychological (19000, 20000, 21000) — massive liquidity pools.
-    # 500pt  = intermediate psychological (19500, 20500) — significant but less dense.
+    # 100pt removed -- too dense, generates noise sweeps on every intraday move.
+    # 1000pt = major psychological (19000, 20000, 21000) -- massive liquidity pools.
+    # 500pt  = intermediate psychological (19500, 20500) -- significant but less dense.
     ROUND_NUMBER_MAJOR = 1000       # Major round levels (strongest)
     ROUND_NUMBER_MINOR = 500        # Intermediate round levels
     ENTRY_WINDOW_BARS = 15          # Max 2m bars to find entry after HTF sweep (30 min)
@@ -155,7 +155,7 @@ class LiquiditySweepDetector:
     # London open (3-4:30 AM ET) and regular Asia (7-9 PM ET) have
     # clean institutional flow.
     #
-    # Format: (start_hour, end_hour) in ET — fractional hours.
+    # Format: (start_hour, end_hour) in ET -- fractional hours.
     ACTIVE_SESSION_WINDOWS = [
         (18.5, 23.5),   # Asia session: 6:30 PM - 11:30 PM ET
         (2.0,  4.5),    # London open: 2:00 AM - 4:30 AM ET
@@ -208,7 +208,7 @@ class LiquiditySweepDetector:
         self.sweep_log: List[Dict] = []
 
     # ================================================================
-    # HTF BAR PROCESSING — where sweeps are actually detected
+    # HTF BAR PROCESSING -- where sweeps are actually detected
     # ================================================================
 
     def update_htf_bar(self, timeframe: str, htf_bar) -> None:
@@ -348,7 +348,7 @@ class LiquiditySweepDetector:
         self._htf_candidates = merged
 
     # ================================================================
-    # 2M BAR PROCESSING — entry timing & confirmation
+    # 2M BAR PROCESSING -- entry timing & confirmation
     # ================================================================
 
     def update_bar(
@@ -389,7 +389,7 @@ class LiquiditySweepDetector:
         # ── SESSION FILTER ──
         # Only confirm entries during active session windows where institutional
         # volume is present.  Dead zones (11:30 PM - 3 AM ET, 4:30 - 8 AM ET)
-        # showed 13-27% win rate in backtest — pure chop.
+        # showed 13-27% win rate in backtest -- pure chop.
         # Asia/London opens and US session are allowed.
         if not self._is_active_session(bar.timestamp):
             # Still age out candidates, but don't confirm entries
@@ -571,10 +571,10 @@ class LiquiditySweepDetector:
         if self._prior_week_low > 0:
             levels.append(KeyLevel("PWL", self._prior_week_low, "prior_week"))
 
-        # VWAP removed — shadow analysis showed it's not a true liquidity pool
+        # VWAP removed -- shadow analysis showed it's not a true liquidity pool
         # (36.6% WR, -$3,427 over 590 trades vs 39.5% WR without it)
 
-        # Major round numbers (1000pt): 19000, 20000, 21000 — strongest psychological levels
+        # Major round numbers (1000pt): 19000, 20000, 21000 -- strongest psychological levels
         # These get "round_major" type so scoring treats them like PDH/PDL (strong).
         if current_price > 0:
             base_major = int(current_price / self.ROUND_NUMBER_MAJOR) * self.ROUND_NUMBER_MAJOR
@@ -583,7 +583,7 @@ class LiquiditySweepDetector:
                 if rn > 0:
                     levels.append(KeyLevel(f"round_{rn}", float(rn), "round_major"))
 
-        # Minor round numbers (500pt): 19500, 20500 — significant but not as strong
+        # Minor round numbers (500pt): 19500, 20500 -- significant but not as strong
         # Skip any that overlap with major levels (e.g. 20000 is both 500 and 1000).
         if current_price > 0:
             base_minor = int(current_price / self.ROUND_NUMBER_MINOR) * self.ROUND_NUMBER_MINOR
@@ -596,7 +596,7 @@ class LiquiditySweepDetector:
         self._key_levels = levels
 
     # ================================================================
-    # SCORING — recalibrated for HTF-first
+    # SCORING -- recalibrated for HTF-first
     # ================================================================
 
     def _score_and_emit(

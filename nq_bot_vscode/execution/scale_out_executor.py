@@ -1,23 +1,23 @@
 """
-Scale-Out Execution Engine v1.3.1 — 5-Contract TJR Architecture
+Scale-Out Execution Engine v1.3.1 -- 5-Contract TJR Architecture
 ====================================================================
 Manages 5 contracts with diversified exit strategies + delayed C3 runner.
 
-VERSION: 1.3.1 — Validated: 396 trades, PF 2.86, +$47,236, 1.60% max DD
+VERSION: 1.3.1 -- Validated: 396 trades, PF 2.86, +$47,236, 1.60% max DD
 
 THE STRATEGY:
-  C1 (1 contract) — The Canary:     5-bar time exit. Direction probe.
-  C2 (1 contract) — The Structure:  Structural target (nearest swing point).
+  C1 (1 contract) -- The Canary:     5-bar time exit. Direction probe.
+  C2 (1 contract) -- The Structure:  Structural target (nearest swing point).
                                     TJR-inspired: exits at market structure.
-  C3 (3 contracts) — The Runner:    ATR trailing stop, no fixed target.
+  C3 (3 contracts) -- The Runner:    ATR trailing stop, no fixed target.
                                     PROVEN MONEYMAKER (+$51,176 in backtest).
                                     DELAYED ENTRY: C3 only stays open when
                                     C1 exits profitably. If C1 loses, C3 is
                                     closed immediately at market.
 
-DELAYED C3 RUNNER (v1.3.1 — THE KEY EDGE):
+DELAYED C3 RUNNER (v1.3.1 -- THE KEY EDGE):
   Backtest proof: saved $38,430, reduced max DD 8.62% → 1.60%.
-  120/396 trades had C3 blocked (30.3%). C1 is the "canary" —
+  120/396 trades had C3 blocked (30.3%). C1 is the "canary" --
   when it loses, the trade direction was wrong, so we prevent
   C3's 3 contracts from amplifying that loss.
 
@@ -36,8 +36,8 @@ LIFECYCLE:
 
 Research backing:
   - C1: Validated PF 1.81 across 751 trades (c1_exit_research.md)
-  - C2: TJR bootcamp — structural exits allow asymmetric R:R
-  - C3: "Let winners run" — captures fat tails in trend distribution
+  - C2: TJR bootcamp -- structural exits allow asymmetric R:R
+  - C3: "Let winners run" -- captures fat tails in trend distribution
   - C3 delayed: $38,430 saved across 396 trades (v1.3.1 validated)
   - 567K backtests: simple exits > complex exits (KJ Trading Systems)
 """
@@ -260,7 +260,7 @@ class ScaleOutExecutor:
         """
         4 contracts: C1 (1) + C2 (1) + C3 (2).
 
-        C3 (runner) gets 2× allocation — delayed entry + ATR trail captures
+        C3 (runner) gets 2× allocation -- delayed entry + ATR trail captures
         fat tails while C1 canary validates direction first.
 
         C4 is unused (kept for backward compat).
@@ -337,7 +337,7 @@ class ScaleOutExecutor:
         else:
             stop_price = entry_price + stop_distance
 
-        # C2 structural target — use swing point if available, else 2×R fallback
+        # C2 structural target -- use swing point if available, else 2×R fallback
         if structural_target > 0:
             c2_target = round(structural_target, 2)
         else:
@@ -368,28 +368,28 @@ class ScaleOutExecutor:
             atr_at_entry=atr,
         )
 
-        # === C1 — The Scalp (5-bar time exit) ===
+        # === C1 -- The Scalp (5-bar time exit) ===
         trade.c1.contracts = alloc["c1"]
         trade.c1.entry_price = entry_price
         trade.c1.stop_price = round(stop_price, 2)
         trade.c1.target_price = 0
         trade.c1.exit_strategy = "time_5bar"
 
-        # === C2 — The Structure (structural target from swing point) ===
+        # === C2 -- The Structure (structural target from swing point) ===
         trade.c2.contracts = alloc["c2"]
         trade.c2.entry_price = entry_price
         trade.c2.stop_price = round(stop_price, 2)
         trade.c2.target_price = c2_target
         trade.c2.exit_strategy = "structural_target"
 
-        # === C3 — The Runner (pure ATR trail) ===
+        # === C3 -- The Runner (pure ATR trail) ===
         trade.c3.contracts = alloc["c3"]
         trade.c3.entry_price = entry_price
         trade.c3.stop_price = round(stop_price, 2)
         trade.c3.target_price = 0
         trade.c3.exit_strategy = "atr_trail"
 
-        # === C4 — Unused ===
+        # === C4 -- Unused ===
         trade.c4.contracts = 0
         trade.c4.exit_strategy = ""
 
@@ -610,7 +610,7 @@ class ScaleOutExecutor:
 
         CRITICAL: If C1 exits in profit, immediately move ALL remaining
         leg stops to breakeven (entry + 2pt buffer). This makes the trade
-        risk-free on C2/C3 — the worst case is a scratch, not a full loss.
+        risk-free on C2/C3 -- the worst case is a scratch, not a full loss.
 
         Backtest data showed C2 had 139 stop-outs (-$13,258) and C3 had
         87 stop-outs (-$8,968). Many occurred AFTER C1 already won.
@@ -632,7 +632,7 @@ class ScaleOutExecutor:
         )
 
         # ── BREAKEVEN on remaining legs after C1 profit ──
-        # Variant B (delayed): DO NOT apply immediate BE — let _apply_delayed_be()
+        # Variant B (delayed): DO NOT apply immediate BE -- let _apply_delayed_be()
         # handle it during SCALING phase once MFE >= 1.5× stop_distance.
         # Variant D (immediate): Apply BE instantly on C1 exit (original behavior).
         cfg = self.scale_config
@@ -660,7 +660,7 @@ class ScaleOutExecutor:
                 f"New stop: {trade.entry_price + (BE_BUFFER_PTS if direction == 'long' else -BE_BUFFER_PTS):.2f}"
             )
         elif c1_was_profitable and be_variant == "B":
-            # Variant B: delayed breakeven — keep original stops, let _apply_delayed_be()
+            # Variant B: delayed breakeven -- keep original stops, let _apply_delayed_be()
             # handle BE activation during SCALING once MFE >= threshold
             threshold = round(trade.stop_distance * cfg.c2_be_delay_multiplier, 1)
             logger.info(
@@ -783,7 +783,7 @@ class ScaleOutExecutor:
                     closed_legs.append(leg.leg_label)
                     continue
 
-                # C2: Time stop — max 20 bars (~40 min on 2m bars)
+                # C2: Time stop -- max 20 bars (~40 min on 2m bars)
                 # Tighter than before (was 30). If structural target hasn't
                 # been hit in 40 min, the setup has likely failed.
                 c2_max_bars = 20
@@ -914,14 +914,14 @@ class ScaleOutExecutor:
                     trade.c2_be_triggered = True
                 logger.info(
                     f"  {leg.leg_label} BREAKEVEN ACTIVATED: MFE {leg.mfe:.1f}pts "
-                    f"reached threshold {threshold:.1f}pts — stop moved to {new_stop:.2f}"
+                    f"reached threshold {threshold:.1f}pts -- stop moved to {new_stop:.2f}"
                 )
         else:
-            # MFE not yet at threshold — keep original stop
+            # MFE not yet at threshold -- keep original stop
             pct = round(leg.mfe / threshold * 100, 1) if threshold > 0 else 0
             logger.debug(
                 f"  {leg.leg_label} breakeven DELAYED: MFE {leg.mfe:.1f}pts < "
-                f"threshold {threshold:.1f}pts ({pct}% of target) — "
+                f"threshold {threshold:.1f}pts ({pct}% of target) -- "
                 f"keeping original stop at {leg.stop_price:.2f}"
             )
 
@@ -987,7 +987,7 @@ class ScaleOutExecutor:
 
         v1.3.1: When c3_blocked=True, C3's PnL contribution is zeroed out
         to mirror the delayed C3 runner architecture validated in backtest.
-        C3 was never really "in" the trade — we reverse its market exposure.
+        C3 was never really "in" the trade -- we reverse its market exposure.
         """
         trade.total_gross_pnl = sum(l.gross_pnl for l in trade.active_legs)
         trade.total_commission = sum(l.commission for l in trade.active_legs)
@@ -1022,7 +1022,7 @@ class ScaleOutExecutor:
                 f"${self._c3_stats['c3_pnl_saved']:.2f} saved"
             )
         elif trade.c3.contracts > 0:
-            # C3 entered (not blocked) — track stats
+            # C3 entered (not blocked) -- track stats
             self._c3_stats["trades_total"] += 1
             self._c3_stats["c3_entered"] += 1
 
@@ -1115,7 +1115,7 @@ class ScaleOutExecutor:
         """Force-close ALL open positions for CME maintenance window.
 
         Called at 4:50 PM ET (or first bar >= 4:50 PM ET).
-        Unconditional — closes C1 AND C2 regardless of unrealized PnL.
+        Unconditional -- closes C1 AND C2 regardless of unrealized PnL.
         Exit reason tagged as EXIT_MAINTENANCE_FLATTEN.
         """
         if not self.has_active_trade:
@@ -1126,7 +1126,7 @@ class ScaleOutExecutor:
         n_contracts = sum(leg.contracts for leg in open_legs)
 
         logger.warning(
-            "MAINTENANCE FLATTEN: Closing %d contracts at %.2f — "
+            "MAINTENANCE FLATTEN: Closing %d contracts at %.2f -- "
             "10 minutes to maintenance halt",
             n_contracts, price,
         )

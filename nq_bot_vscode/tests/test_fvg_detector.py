@@ -1,4 +1,4 @@
-"""Tests for signals/fvg_detector.py — FVGDetector."""
+"""Tests for signals/fvg_detector.py -- FVGDetector."""
 
 import pytest
 from datetime import datetime, timezone
@@ -192,7 +192,7 @@ class TestDuplicateDetection:
 
         # Add another bar that doesn't create a new pattern, then repeat similar
         detector.update(make_bar(3, 109, 112, 108, 111), 3, "up")
-        # Now re-check — should still have only 1
+        # Now re-check -- should still have only 1
         assert len(detector.get_active_fvgs("bullish")) == 1
 
 

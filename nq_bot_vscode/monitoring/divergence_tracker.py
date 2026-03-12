@@ -267,7 +267,7 @@ class DivergenceTracker:
             )
             result.divergences.append(div)
 
-        # Both entered — check direction and score
+        # Both entered -- check direction and score
         elif paper_has_entry and live_has_entry:
             # DIRECTION_MISMATCH
             if result.paper_direction != result.live_direction:

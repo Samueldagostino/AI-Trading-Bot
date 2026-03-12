@@ -1,5 +1,5 @@
 """
-Tests for Institutional Modifier Layer — Phase 1
+Tests for Institutional Modifier Layer -- Phase 1
 ==================================================
 Covers:
   - OvernightBiasModifier: neutral, alignment, conflict, extreme cases
@@ -86,7 +86,7 @@ class TestFOMCCalendar:
         assert abs(hours - 0.5) < 0.01
 
     def test_hours_until_next_fomc_between_meetings(self):
-        # Feb 15 — between Jan 29 and Mar 19
+        # Feb 15 -- between Jan 29 and Mar 19
         t = datetime(2026, 2, 15, 12, 0, tzinfo=ET)
         hours = hours_until_next_fomc(t)
         assert hours is not None
@@ -258,7 +258,7 @@ class TestFOMCDriftModifier:
     def test_no_fomc_near(self):
         """No FOMC within 24h returns all 1.0x."""
         mod = FOMCDriftModifier()
-        # Jan 1 — 28 days before first FOMC
+        # Jan 1 -- 28 days before first FOMC
         t = datetime(2026, 1, 1, 12, 0, tzinfo=ET)
         result = mod.calculate(t)
         assert result.position_multiplier == 1.0
@@ -270,7 +270,7 @@ class TestFOMCDriftModifier:
     def test_24h_to_4h_window(self):
         """12 hours before FOMC = 24h-4h window."""
         mod = FOMCDriftModifier()
-        # Jan 29 FOMC at 14:00 — 12 hours before = Jan 29 02:00
+        # Jan 29 FOMC at 14:00 -- 12 hours before = Jan 29 02:00
         t = datetime(2026, 1, 29, 2, 0, tzinfo=ET)
         result = mod.calculate(t)
         assert result.position_multiplier == 1.1
@@ -281,7 +281,7 @@ class TestFOMCDriftModifier:
     def test_4h_to_half_hour_window(self):
         """2 hours before FOMC = 4h-0.5h window."""
         mod = FOMCDriftModifier()
-        # Jan 29 FOMC at 14:00 — 2 hours before = Jan 29 12:00
+        # Jan 29 FOMC at 14:00 -- 2 hours before = Jan 29 12:00
         t = datetime(2026, 1, 29, 12, 0, tzinfo=ET)
         result = mod.calculate(t)
         assert result.position_multiplier == 1.15
@@ -292,7 +292,7 @@ class TestFOMCDriftModifier:
     def test_stand_aside_under_half_hour(self):
         """< 0.5h before FOMC = stand aside."""
         mod = FOMCDriftModifier()
-        # Jan 29 FOMC at 14:00 — 15 minutes before = Jan 29 13:45
+        # Jan 29 FOMC at 14:00 -- 15 minutes before = Jan 29 13:45
         t = datetime(2026, 1, 29, 13, 45, tzinfo=ET)
         result = mod.calculate(t)
         assert result.stand_aside is True
@@ -385,7 +385,7 @@ class TestInstitutionalModifierEngine:
         )
         engine.update_bar(open_bar)
 
-        # FOMC Jan 29 at 14:00 — at 9:30AM = ~4.5h away = 24h-4h window
+        # FOMC Jan 29 at 14:00 -- at 9:30AM = ~4.5h away = 24h-4h window
         # Actually 4.5h = in the 24h-4h window (1.1x pos, 0.9x stop)
         t = datetime(2026, 1, 29, 9, 30, tzinfo=ET)
         result = engine.calculate(t, "bullish")
@@ -566,7 +566,7 @@ class TestEdgeCases:
 
         result = mod.calculate("bullish")
         # 50 bps is NOT < 50 (it equals), so this should be alignment_significant
-        # Wait — the threshold is < 50 means neutral. 50 is NOT < 50, so it passes.
+        # Wait -- the threshold is < 50 means neutral. 50 is NOT < 50, so it passes.
         assert result.details["classification"] == "alignment_significant"
 
     def test_overnight_exactly_120_bps(self):

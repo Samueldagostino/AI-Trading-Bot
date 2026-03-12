@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════
-# CONSTANTS — imported from config/constants.py (single source of truth)
+# CONSTANTS -- imported from config/constants.py (single source of truth)
 # ═══════════════════════════════════════════════════════════════
 MIN_SIGNAL_SCORE = HIGH_CONVICTION_MIN_SCORE
 MAX_STOP_DISTANCE_PTS = HIGH_CONVICTION_MAX_STOP_PTS
@@ -51,11 +51,11 @@ class TradeDecision:
 
     Represents a validated trade decision from the aggregator
     scoring + HTF gate.  The bridge does NOT re-run signal
-    generation — it only translates.
+    generation -- it only translates.
     """
     direction: str               # "long" or "short"
     entry_price: float           # market price at decision time
-    signal_score: float          # combined score (0.0–1.0)
+    signal_score: float          # combined score (0.0-1.0)
     atr: float                   # current ATR for stop/target calc
     htf_bias: str                # "bullish", "bearish", "neutral"
     htf_allows_long: bool

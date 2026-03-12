@@ -1,5 +1,5 @@
 """
-Paper Trading Runner — Config D Live on Tradovate Demo
+Paper Trading Runner -- Config D Live on Tradovate Demo
 ========================================================
 Feeds real-time 2m bars from Tradovate demo into the SAME pipeline
 used by the backtester. Zero parameter changes.
@@ -14,7 +14,7 @@ Pipeline:
 Session rules:
   - No entries before 6:01 PM ET
   - Flat by 4:30 PM ET
-  - No trading during maintenance (5:00–6:00 PM ET)
+  - No trading during maintenance (5:00-6:00 PM ET)
   - Daily loss limit: $500 -> halt
   - Connection loss > 60s -> flatten + halt
 
@@ -81,7 +81,7 @@ DECISION_LOG_PATH = str(LOGS_DIR / "paper_decisions.json")
 from monitoring.json_logger import JSONLineLogger
 _decision_jl = JSONLineLogger(str(LOGS_DIR), "paper_decisions")
 
-# OOS baseline for comparison (Config D + C1 Time Exit, Sep 2025 – Feb 2026)
+# OOS baseline for comparison (Config D + C1 Time Exit, Sep 2025 - Feb 2026)
 OOS_EXPECTANCY = 15.34    # $/trade from 6-month OOS
 OOS_WIN_RATE = 68.1       # % from 6-month OOS
 OOS_TRADES_PER_MONTH = 158
@@ -116,7 +116,7 @@ class PaperTradingRunner:
     async def start(self) -> None:
         """Initialize pipeline and connect to Tradovate demo."""
         logger.info("=" * 60)
-        logger.info("  PAPER TRADING — CONFIG D + C1 TRAIL FROM PROFIT")
+        logger.info("  PAPER TRADING -- CONFIG D + C1 TRAIL FROM PROFIT")
         logger.info("  HC filter: score>=0.75, stop<=30pts")
         logger.info("  C1 exit: trail from +3pts (trail 2.5pts, fallback 12 bars)")
         logger.info("  HTF gate: strength>=0.3")
@@ -150,7 +150,7 @@ class PaperTradingRunner:
         await self._run_loop()
 
     async def _run_loop(self) -> None:
-        """Main event loop — runs until shutdown signal."""
+        """Main event loop -- runs until shutdown signal."""
         try:
             while not self._shutdown_event.is_set():
                 await asyncio.sleep(1)
@@ -168,7 +168,7 @@ class PaperTradingRunner:
                 # Flat-by time check
                 if TradovatePaperConnector.should_be_flat(et_now):
                     if self.bot and self.bot.executor.has_active_trade:
-                        logger.info("Session close approaching — flattening")
+                        logger.info("Session close approaching -- flattening")
                         self._log_decision("session_flatten", {
                             "time_et": et_now.strftime("%H:%M"),
                         })
@@ -236,7 +236,7 @@ class PaperTradingRunner:
             })
             return
 
-        # Check flat-by time — no new entries
+        # Check flat-by time -- no new entries
         if TradovatePaperConnector.should_be_flat(et_now):
             # Still update active positions
             if self.bot.executor.has_active_trade:
@@ -326,13 +326,13 @@ class PaperTradingRunner:
         total_trades = stats.get("total_trades", 0)
 
         print(f"\n{'=' * 60}")
-        print(f"  DAILY SUMMARY — {state.session_date}")
+        print(f"  DAILY SUMMARY -- {state.session_date}")
         print(f"{'=' * 60}")
         print(f"  Bars processed:     {self._bars_processed}")
         print(f"  Trades today:       {state.daily_trades}")
         print(f"  Daily PnL:          ${state.daily_pnl:+.2f}")
         print(f"  Loss limit hit:     {'YES' if state.daily_loss_limit_hit else 'No'}")
-        print(f"  Halted:             {'YES — ' + state.halt_reason if state.is_halted else 'No'}")
+        print(f"  Halted:             {'YES -- ' + state.halt_reason if state.is_halted else 'No'}")
 
         if state.daily_trades > 0:
             today_exp = state.daily_pnl / state.daily_trades
@@ -392,7 +392,7 @@ class PaperTradingRunner:
     # SHUTDOWN
     # ================================================================
     async def shutdown(self) -> None:
-        """Graceful shutdown — flatten, disconnect, log."""
+        """Graceful shutdown -- flatten, disconnect, log."""
         logger.info("Shutting down paper trading session...")
 
         # Flatten any open positions
@@ -422,7 +422,7 @@ class PaperTradingRunner:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Paper Trading Runner — Config D")
+    parser = argparse.ArgumentParser(description="Paper Trading Runner -- Config D")
     parser.add_argument(
         "--symbol", type=str, default=None,
         help="Override trading symbol (default: from config)"
@@ -466,7 +466,7 @@ def main():
             loop.add_signal_handler(sig, _signal_handler)
     else:
         logger.info(
-            "Windows detected — using KeyboardInterrupt for Ctrl+C shutdown"
+            "Windows detected -- using KeyboardInterrupt for Ctrl+C shutdown"
         )
 
     try:
@@ -476,7 +476,7 @@ def main():
     except Exception:
         # NEVER leave positions open on crash
         logger.critical(
-            "UNHANDLED EXCEPTION — flattening all positions\n%s",
+            "UNHANDLED EXCEPTION -- flattening all positions\n%s",
             traceback.format_exc(),
         )
         loop.run_until_complete(runner.shutdown())

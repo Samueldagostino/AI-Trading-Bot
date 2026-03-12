@@ -1,5 +1,5 @@
 """
-NQ Trading Bot — Unified Launcher
+NQ Trading Bot -- Unified Launcher
 ===================================
 One command to rule them all:
 
@@ -115,7 +115,7 @@ def launch_tws(port: int = 7497, wait_timeout: int = 120) -> bool:
         elif config.tws_available:
             logger.info("  Launching TWS directly (manual login required)...")
         else:
-            logger.warning("  TWS/IBC not found — please start TWS manually")
+            logger.warning("  TWS/IBC not found -- please start TWS manually")
             logger.info("  Waiting up to %ds for TWS on port %d...", wait_timeout, port)
             return _wait_for_port(port, wait_timeout)
 
@@ -123,7 +123,7 @@ def launch_tws(port: int = 7497, wait_timeout: int = 120) -> bool:
             logger.error("  Failed to launch TWS process")
             return False
 
-        logger.info("  TWS process started — waiting for API port %d...", port)
+        logger.info("  TWS process started -- waiting for API port %d...", port)
         return _wait_for_port(port, wait_timeout)
 
     except ImportError as e:
@@ -221,7 +221,7 @@ def start_publisher(interval: int = 60) -> subprocess.Popen:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="NQ Trading Bot — Unified Launcher",
+        description="NQ Trading Bot -- Unified Launcher",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -264,7 +264,7 @@ Examples:
 
     print()
     print("=" * 60)
-    print("  NQ TRADING SYSTEM — UNIFIED LAUNCHER")
+    print("  NQ TRADING SYSTEM -- UNIFIED LAUNCHER")
     print(f"  {timestamp}")
     print("=" * 60)
     print(f"  TWS Port:        {args.port}")
@@ -289,13 +289,13 @@ Examples:
         if not args.dry_run and not args.no_tws_launch:
             tws_ready = launch_tws(port=args.port, wait_timeout=args.tws_wait)
             if not tws_ready:
-                logger.error("TWS not available — exiting")
+                logger.error("TWS not available -- exiting")
                 logger.error("Start TWS manually, or use --dry-run for testing")
                 sys.exit(1)
         elif args.no_tws_launch:
             logger.info("TWS launch: skipped (--no-tws-launch)")
             if not check_tws_port(args.port):
-                logger.warning("TWS not detected on port %d — bot may fail to connect", args.port)
+                logger.warning("TWS not detected on port %d -- bot may fail to connect", args.port)
 
         # ── Step 3: Start Website Publisher (background) ──
         pub_proc = start_publisher(interval=args.publish_interval)
@@ -323,7 +323,7 @@ Examples:
 
     except KeyboardInterrupt:
         print()
-        logger.info("Shutdown signal received — stopping all processes...")
+        logger.info("Shutdown signal received -- stopping all processes...")
 
     finally:
         # Stop bot

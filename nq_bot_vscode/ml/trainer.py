@@ -139,7 +139,7 @@ class WalkForwardTrainer:
             Trained lgb.Booster
         """
         if X.shape[0] < 20:
-            logger.warning("Too few samples (%d) — skipping training", X.shape[0])
+            logger.warning("Too few samples (%d) -- skipping training", X.shape[0])
             return None
 
         # Split: last 20% for validation (time-ordered, no shuffle)
@@ -267,7 +267,7 @@ class WalkForwardTrainer:
             fold_idx += 1
 
             logger.info(
-                "Fold %d: train=%s–%s (%d) test=%s–%s (%d) | "
+                "Fold %d: train=%s-%s (%d) test=%s-%s (%d) | "
                 "acc=%.3f prec=%.3f rec=%.3f auc=%.3f",
                 fold_result.fold_idx,
                 fold_result.train_start, fold_result.train_end, fold_result.n_train,

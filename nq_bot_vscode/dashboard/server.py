@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="NQ Trading Bot — Dashboard",
+    title="NQ Trading Bot -- Dashboard",
     version="1.0.0",
     description="Real-time monitoring dashboard for the NQ Futures trading system",
 )
@@ -43,13 +43,13 @@ app.add_middleware(
 )
 
 # ================================================================
-# Kill-switch auth — requires DASHBOARD_API_TOKEN env var
+# Kill-switch auth -- requires DASHBOARD_API_TOKEN env var
 # ================================================================
 _DASHBOARD_TOKEN = os.environ.get("DASHBOARD_API_TOKEN", "")
 if not _DASHBOARD_TOKEN:
     _DASHBOARD_TOKEN = secrets.token_hex(32)
     logger.warning(
-        "DASHBOARD_API_TOKEN not set — generated ephemeral token: %s",
+        "DASHBOARD_API_TOKEN not set -- generated ephemeral token: %s",
         _DASHBOARD_TOKEN,
     )
 
@@ -148,7 +148,7 @@ async def serve_dashboard():
 
 @app.get("/api/status")
 async def get_status():
-    """Full system status snapshot — includes trade metrics from OrderManager."""
+    """Full system status snapshot -- includes trade metrics from OrderManager."""
     DEMO_STATE["uptime_seconds"] = int(
         (datetime.now(timezone.utc) - _start_time).total_seconds()
     )
@@ -188,7 +188,7 @@ async def get_performance():
 
 @app.get("/api/trades")
 async def get_trades():
-    """Recent trade history — returns live position data from OrderManager if available."""
+    """Recent trade history -- returns live position data from OrderManager if available."""
     # Try to get live data from OrderManager
     order_mgr = app.state.__dict__.get("order_manager")
     if order_mgr is not None:
@@ -309,7 +309,7 @@ static_path = Path(__file__).parent / "static"
 if static_path.exists():
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 """
-Dashboard Web Server — Real-Time Monitoring Hub
+Dashboard Web Server -- Real-Time Monitoring Hub
 FastAPI server providing:
 - REST API for equity, regime, signals, execution quality, alerts, HTF, WF, contract
 - WebSocket for real-time push updates (bar, signal, trade, regime, alert, pnl)
@@ -340,7 +340,7 @@ from starlette.templating import Jinja2Templates
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="NQ Trading Bot — Dashboard",
+    title="NQ Trading Bot -- Dashboard",
     version="2.0.0",
     description="Real-time monitoring dashboard for the NQ Futures trading system",
 )
@@ -364,13 +364,13 @@ _templates_dir.mkdir(exist_ok=True)
 templates = Jinja2Templates(directory=str(_templates_dir))
 
 # ================================================================
-# Auth — requires DASHBOARD_API_TOKEN env var
+# Auth -- requires DASHBOARD_API_TOKEN env var
 # ================================================================
 _DASHBOARD_TOKEN = os.environ.get("DASHBOARD_API_TOKEN", "")
 if not _DASHBOARD_TOKEN:
     _DASHBOARD_TOKEN = secrets.token_hex(32)
     logger.warning(
-        "DASHBOARD_API_TOKEN not set — generated ephemeral token: %s",
+        "DASHBOARD_API_TOKEN not set -- generated ephemeral token: %s",
         _DASHBOARD_TOKEN,
     )
 
@@ -384,7 +384,7 @@ async def _require_token(authorization: str = Header(...)) -> None:
 
 
 async def _optional_token(authorization: str = Header(default="")) -> bool:
-    """Check token without raising — returns True if valid."""
+    """Check token without raising -- returns True if valid."""
     if not authorization.startswith("Bearer "):
         return False
     return secrets.compare_digest(authorization[7:], _DASHBOARD_TOKEN)
@@ -534,7 +534,7 @@ async def serve_dashboard(request: Request):
 
 
 # ================================================================
-# REST API Endpoints — Original
+# REST API Endpoints -- Original
 # ================================================================
 
 @app.get("/api/status", dependencies=[Depends(_require_token)])
@@ -639,7 +639,7 @@ async def reset_kill_switch():
 
 
 # ================================================================
-# NEW API Endpoints — Dashboard Overhaul
+# NEW API Endpoints -- Dashboard Overhaul
 # ================================================================
 
 @app.get("/api/equity-curve", dependencies=[Depends(_require_token)])
@@ -866,7 +866,7 @@ async def broadcast(message: dict):
 
 
 # ================================================================
-# Push helpers — called by trading pipeline
+# Push helpers -- called by trading pipeline
 # ================================================================
 
 async def push_bar(price: float, volume: int = 0, vwap: float = 0.0, timestamp: str = ""):

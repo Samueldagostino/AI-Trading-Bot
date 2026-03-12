@@ -7,16 +7,16 @@ using Python multiprocessing. Each period gets its own worker process
 with an independent CausalReplayEngine instance.
 
 This turns a ~15-hour sequential backtest into ~3 hours
-(limited by the slowest period — Period 7 at 352K bars).
+(limited by the slowest period -- Period 7 at 352K bars).
 
-PERIODS (from TradingView 1m exports — CONTINUOUS Sep 2021 to Aug 2025):
-  1: Sep 2021 – Feb 2022  (175,429 1m bars, 6 months)
-  2: Mar 2022 – Aug 2022  (180,054 1m bars, 6 months)
-  3: Sep 2022 – Feb 2023  (174,057 1m bars, 6 months)
-  4: Feb 2023 – Aug 2023  (208,060 1m bars, 7 months)
-  5: Sep 2023 – Feb 2024  (175,315 1m bars, 6 months)
-  6: Mar 2024 – Aug 2024  (177,997 1m bars, 6 months)
-  7: Sep 2024 – Aug 2025  (352,039 1m bars, 12 months) ← 2 workers for verification
+PERIODS (from TradingView 1m exports -- CONTINUOUS Sep 2021 to Aug 2025):
+  1: Sep 2021 - Feb 2022  (175,429 1m bars, 6 months)
+  2: Mar 2022 - Aug 2022  (180,054 1m bars, 6 months)
+  3: Sep 2022 - Feb 2023  (174,057 1m bars, 6 months)
+  4: Feb 2023 - Aug 2023  (208,060 1m bars, 7 months)
+  5: Sep 2023 - Feb 2024  (175,315 1m bars, 6 months)
+  6: Mar 2024 - Aug 2024  (177,997 1m bars, 6 months)
+  7: Sep 2024 - Aug 2025  (352,039 1m bars, 12 months) ← 2 workers for verification
 
 Each period runs the IDENTICAL strategy, configuration, and gates.
 Results are aggregated at the end with cross-period verification.
@@ -74,51 +74,51 @@ TV_DIR = REPO_DIR / "data" / "tradingview"
 PERIODS = {
     1: {
         "name": "Period 1",
-        "label": "Sep 2021 – Feb 2022",
+        "label": "Sep 2021 - Feb 2022",
         "data_file": str(TV_DIR / "September (2021) - Feb (2022) (6-Months).txt"),
         "months": 6,
     },
     2: {
         "name": "Period 2",
-        "label": "Mar 2022 – Aug 2022",
+        "label": "Mar 2022 - Aug 2022",
         "data_file": str(TV_DIR / "March - August (2022) (6-Months).txt"),
         "months": 6,
     },
     3: {
         "name": "Period 3",
-        "label": "Sep 2022 – Feb 2023",
+        "label": "Sep 2022 - Feb 2023",
         "data_file": str(TV_DIR / "Feb (2023) - September (2023) (6-Months).txt"),
         "months": 6,
-        # Using the mislabeled file — actual data is Sep 2022 to Feb 2023
+        # Using the mislabeled file -- actual data is Sep 2022 to Feb 2023
         # with 174K bars (more complete than the Jan-cutoff file with 146K)
     },
     4: {
         "name": "Period 4",
-        "label": "Feb 2023 – Aug 2023",
+        "label": "Feb 2023 - Aug 2023",
         "data_file": str(TV_DIR / "Feb 2023 - August 2023 ) (6-months).txt"),
         "months": 7,
-        # Fills the former data gap — 208K bars
+        # Fills the former data gap -- 208K bars
     },
     5: {
         "name": "Period 5",
-        "label": "Sep 2023 – Feb 2024",
+        "label": "Sep 2023 - Feb 2024",
         "data_file": str(TV_DIR / "September (2023) - Feb (2024) (6--Months).txt"),
         "months": 6,
     },
     6: {
         "name": "Period 6",
-        "label": "Mar 2024 – Aug 2024",
+        "label": "Mar 2024 - Aug 2024",
         "data_file": str(TV_DIR / "March - August 2024 (6-Months).txt"),
         "months": 6,
     },
     7: {
         "name": "Period 7",
-        "label": "Sep 2024 – Aug 2025",
+        "label": "Sep 2024 - Aug 2025",
         "data_file": str(TV_DIR / "September (2024) - August (2025) (12-months).txt"),
         "months": 12,
     },
 }
-# 7 periods covering Sep 2021 through Aug 2025 — CONTINUOUS coverage.
+# 7 periods covering Sep 2021 through Aug 2025 -- CONTINUOUS coverage.
 # Period 7 is the 12-month file that gets dual-worker verification.
 
 # Output directory for per-period results
@@ -166,7 +166,7 @@ def verify_data_files(period_ids: List[int]) -> Dict[int, Dict]:
 
 
 # =====================================================================
-#  WORKER PROCESS — runs one period's backtest
+#  WORKER PROCESS -- runs one period's backtest
 # =====================================================================
 
 def _load_tradingview_txt(filepath: str) -> List[Dict]:
@@ -609,13 +609,13 @@ def cross_verify_periods(results: List[Dict], data_hashes: Dict) -> Dict:
         "periods": period_verification,
     }
 
-    # 2. Data integrity — hashes match expected
+    # 2. Data integrity -- hashes match expected
     checks["data_integrity"] = {
         "passed": all(h["exists"] for h in data_hashes.values()),
         "hashes": {pid: h["hash"][:16] for pid, h in data_hashes.items()},
     }
 
-    # 3. Configuration consistency — all periods used same config
+    # 3. Configuration consistency -- all periods used same config
     configs_same = True
     first_config = None
     for r in results:
@@ -653,7 +653,7 @@ def cross_verify_periods(results: List[Dict], data_hashes: Dict) -> Dict:
         "suspicious": suspicious_periods,
     }
 
-    # 5. Shadow analysis consistency — gates should have similar directionality
+    # 5. Shadow analysis consistency -- gates should have similar directionality
     gate_directions = defaultdict(list)
     for r in results:
         if r["status"] != "success":
@@ -724,7 +724,7 @@ def generate_parallel_report(
         lines.append(f"  {text}")
         sep()
 
-    heading("PARALLEL MULTI-PERIOD BACKTEST — UNIFIED RESULTS")
+    heading("PARALLEL MULTI-PERIOD BACKTEST -- UNIFIED RESULTS")
     lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"  Periods: {unified['periods_completed']} completed, {unified['periods_failed']} failed")
     lines.append(f"  Wall time (parallel): {unified['wall_time_parallel']:.1f}s")
@@ -772,7 +772,7 @@ def generate_parallel_report(
 
     for r in sorted(per_period, key=lambda x: x["period_id"]):
         if r["status"] != "success":
-            lines.append(f"  Period {r['period_id']}: FAILED — {r.get('error', 'unknown')[:50]}")
+            lines.append(f"  Period {r['period_id']}: FAILED -- {r.get('error', 'unknown')[:50]}")
             continue
         agg = r["aggregate"]
         label = PERIODS[r["period_id"]]["label"]
@@ -837,7 +837,7 @@ def generate_parallel_report(
     if all_passed:
         lines.append("  ALL CROSS-PERIOD VERIFICATION CHECKS PASSED")
     else:
-        lines.append("  *** SOME VERIFICATION CHECKS FAILED — REVIEW ABOVE ***")
+        lines.append("  *** SOME VERIFICATION CHECKS FAILED -- REVIEW ABOVE ***")
     lines.append("")
 
     # ── Data Integrity ──
@@ -1100,7 +1100,7 @@ def main():
 
     print()
     print("=" * 80)
-    print(f"  PARALLEL BACKTEST COMPLETE — Wall time: {wall_elapsed:.1f}s")
+    print(f"  PARALLEL BACKTEST COMPLETE -- Wall time: {wall_elapsed:.1f}s")
     print(f"  Sequential equivalent: {unified.get('total_replay_time_sequential', 0):.1f}s")
     print(f"  Speedup: {unified.get('speedup_factor', 0)}x")
     print("=" * 80)

@@ -1,5 +1,5 @@
 """
-IBKR Order Manager — 2-Contract Scale-Out Execution
+IBKR Order Manager -- 2-Contract Scale-Out Execution
 ======================================================
 Manages the full order lifecycle for the MNQ 2-contract strategy via TWS API.
 
@@ -46,9 +46,9 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
-# CONSTANTS — SAFETY LIMITS (NOT CONFIGURABLE)
+# CONSTANTS -- SAFETY LIMITS (NOT CONFIGURABLE)
 # ═══════════════════════════════════════════════════════════════
-MAX_CONTRACTS = 2                   # ABSOLUTE MAXIMUM — no exceptions
+MAX_CONTRACTS = 4                   # ABSOLUTE MAXIMUM -- no exceptions
 MNQ_POINT_VALUE = 2.0               # $2.00 per point per contract (default, overridden by instrument)
 MNQ_TICK_SIZE = 0.25                # Minimum price increment (default, overridden by instrument)
 ENTRY_CHASE_TICKS = 2               # 2 ticks chase allowance
@@ -188,7 +188,7 @@ class OrderManager:
         if elapsed > HEARTBEAT_STALE_SECONDS:
             return "SAFETY_STALE_DATA"
 
-        # g. Kill switch — drawdown check
+        # g. Kill switch -- drawdown check
         if self._peak_equity > 0:
             drawdown_pct = ((self._peak_equity - self._current_equity) / self._peak_equity) * 100
             if drawdown_pct > KILL_SWITCH_DRAWDOWN_PCT:
@@ -276,7 +276,7 @@ class OrderManager:
             self._market_halt_suspected = False
             self._market_halt_resume_time = now + MARKET_HALT_RESUME_WAIT
             self._log_event("MARKET_HALT_RESUMED")
-            logger.info("Market halt resumed — waiting %.0fs before allowing new entries",
+            logger.info("Market halt resumed -- waiting %.0fs before allowing new entries",
                         MARKET_HALT_RESUME_WAIT)
 
     def check_market_halt(self) -> bool:
@@ -286,7 +286,7 @@ class OrderManager:
             self._market_halt_suspected = True
             self._log_event("MARKET_HALT_SUSPECTED",
                             details=f"No data for {elapsed:.0f}s")
-            logger.warning("MARKET HALT SUSPECTED — no data for %.0fs", elapsed)
+            logger.warning("MARKET HALT SUSPECTED -- no data for %.0fs", elapsed)
             return True
         return self._market_halt_suspected
 
@@ -304,7 +304,7 @@ class OrderManager:
 
         # Warning
         if (h == warn_h and m == warn_m):
-            logger.warning("EOD_CLOSE_APPROACHING — positions must be flat by %s ET", EOD_CLOSE_TIME)
+            logger.warning("EOD_CLOSE_APPROACHING -- positions must be flat by %s ET", EOD_CLOSE_TIME)
             self._log_event("EOD_CLOSE_APPROACHING")
 
         # Force close
@@ -435,7 +435,7 @@ class OrderManager:
 
             # Handle timeout / partial fill
             if filled_qty == 0:
-                # No fill — cancel and abort
+                # No fill -- cancel and abort
                 try:
                     self.ib.cancelOrder(entry_trade.order)
                 except Exception:
@@ -444,11 +444,11 @@ class OrderManager:
                 self._log_event("ENTRY_TIMEOUT", trade_id=trade_id,
                                 direction=direction, quantity=num_contracts,
                                 details=f"0/{num_contracts} filled")
-                logger.info("ENTRY TIMEOUT: %s — 0/%d contracts filled", trade_id, num_contracts)
+                logger.info("ENTRY TIMEOUT: %s -- 0/%d contracts filled", trade_id, num_contracts)
                 return None
 
             if filled_qty < num_contracts:
-                # Partial fill — cancel remainder, treat as C1-only
+                # Partial fill -- cancel remainder, treat as C1-only
                 try:
                     self.ib.cancelOrder(entry_trade.order)
                 except Exception:
@@ -457,7 +457,7 @@ class OrderManager:
                 self._log_event("PARTIAL_FILL", trade_id=trade_id,
                                 direction=direction, quantity=filled_qty,
                                 details=f"{filled_qty}/{num_contracts} contracts filled, C1-only mode")
-                logger.warning("PARTIAL FILL: %s — %d contracts filled, switching to C1-only",
+                logger.warning("PARTIAL FILL: %s -- %d contracts filled, switching to C1-only",
                                trade_id, filled_qty)
 
             # Calculate slippage
@@ -517,8 +517,8 @@ class OrderManager:
             # Place stop-loss order
             stop_placed = await self._place_stop_order(trade, stop_price, num_contracts)
             if not stop_placed:
-                # CRITICAL: stop rejected — emergency flatten
-                logger.critical("STOP REJECTED — emergency flatten for %s", trade_id)
+                # CRITICAL: stop rejected -- emergency flatten
+                logger.critical("STOP REJECTED -- emergency flatten for %s", trade_id)
                 await self._emergency_flatten_trade(trade, "STOP_REJECTED_EMERGENCY_FLATTEN")
                 self._order_in_flight = False
                 return None
@@ -595,7 +595,7 @@ class OrderManager:
                 logger.info("Stop placed on retry with wider price: %.2f", wider_stop)
                 return True
             except Exception as e2:
-                logger.critical("Stop retry also failed: %s — MUST FLATTEN", e2)
+                logger.critical("Stop retry also failed: %s -- MUST FLATTEN", e2)
                 return False
 
     async def _place_c1_target(self, trade: dict) -> bool:
@@ -645,7 +645,7 @@ class OrderManager:
                     return True
                 return False
 
-        # Order not in open trades — check if it completed
+        # Order not in open trades -- check if it completed
         for ib_trade in self.ib.trades():
             if ib_trade.order.orderId == c1_order_id:
                 if ib_trade.orderStatus.status == "Filled":
@@ -708,7 +708,7 @@ class OrderManager:
                                 new_qty, trade["trade_id"])
                     return
 
-            # Order not found — place new stop
+            # Order not found -- place new stop
             new_stop = StopOrder(reverse_action, new_qty, round(stop_price, 2))
             new_stop.tif = "GTC"
             new_trade = self.ib.placeOrder(self.contract, new_stop)
@@ -833,7 +833,7 @@ class OrderManager:
             logger.info("C2 trail: placed new stop order at %.2f", new_stop_price)
             return True
         except Exception as e:
-            logger.critical("C2 trail: all attempts failed — market closing C2: %s", e)
+            logger.critical("C2 trail: all attempts failed -- market closing C2: %s", e)
             await self._handle_c2_exit(trade, new_stop_price)
             return False
 
@@ -870,14 +870,14 @@ class OrderManager:
     # ══════════════════════════════════════════════════════════
 
     def _handle_stop_fill(self, trade: dict, fill_price: float, filled_qty: int) -> None:
-        """Process stop-loss fill — closes remaining contracts."""
+        """Process stop-loss fill -- closes remaining contracts."""
         direction = trade["direction"]
         entry_price = trade["entry_price"]
 
         # Handle partial stop fill
         if filled_qty < trade.get("stop_qty", trade["contracts"]):
             remaining = trade["stop_qty"] - filled_qty
-            logger.critical("PARTIAL STOP FILL: %d/%d — submitting market order for %d",
+            logger.critical("PARTIAL STOP FILL: %d/%d -- submitting market order for %d",
                             filled_qty, trade["stop_qty"], remaining)
             self._log_event("PARTIAL_STOP_FILL", trade_id=trade["trade_id"],
                             quantity=filled_qty,
@@ -1175,7 +1175,7 @@ class OrderManager:
                     return
 
     def _on_execution(self, trade, fill) -> None:
-        """Handle IBKR execution details — deduplicate by execId."""
+        """Handle IBKR execution details -- deduplicate by execId."""
         exec_id = fill.execution.execId
         if exec_id in self._processed_exec_ids:
             logger.debug("Duplicate execution ignored: %s", exec_id)
@@ -1201,10 +1201,10 @@ class OrderManager:
         if errorCode == 201:
             self._log_event("ORDER_REJECTED", order_id=reqId,
                             details=f"Error 201: {errorString}")
-            # Check if this is a stop rejection — CRITICAL
+            # Check if this is a stop rejection -- CRITICAL
             for t_id, t in list(self._active_positions.items()):
                 if t.get("stop_order_id") == reqId:
-                    logger.critical("STOP ORDER REJECTED for %s — emergency flatten!", t_id)
+                    logger.critical("STOP ORDER REJECTED for %s -- emergency flatten!", t_id)
                     asyncio.get_event_loop().create_task(
                         self._emergency_flatten_trade(t, "STOP_REJECTED_EMERGENCY_FLATTEN"))
                     return
@@ -1216,7 +1216,7 @@ class OrderManager:
 
     def _on_disconnect(self) -> None:
         """Handle TWS disconnection."""
-        logger.critical("TWS DISCONNECTED — stop orders remain on server")
+        logger.critical("TWS DISCONNECTED -- stop orders remain on server")
         self._log_event("TWS_DISCONNECTED",
                         details="Stop orders survive on IBKR server")
 
@@ -1255,7 +1255,7 @@ class OrderManager:
                     "type": "GHOST_POSITION",
                     "ibkr_qty": mnq_position,
                     "local_qty": 0,
-                    "action": "ALERT — closing unknown position",
+                    "action": "ALERT -- closing unknown position",
                 })
                 logger.critical("GHOST POSITION: IBKR shows %d MNQ but bot has no record",
                                 mnq_position)
@@ -1272,10 +1272,10 @@ class OrderManager:
                     result["discrepancies"].append({
                         "type": "POSITION_CLOSED_WHILE_DISCONNECTED",
                         "trade_id": t_id,
-                        "action": "Updating local state — stop was likely hit",
+                        "action": "Updating local state -- stop was likely hit",
                     })
                     logger.warning("Position %s was closed while disconnected", t_id)
-                    # Reconstruct — assume stopped out at stop price
+                    # Reconstruct -- assume stopped out at stop price
                     stop_price = trade.get("stop_price", trade["entry_price"])
                     self._finalize_emergency_close(trade, stop_price, "DISCONNECTED_STOP_OUT")
 
@@ -1326,7 +1326,7 @@ class OrderManager:
             expected_positive = entry > exit
 
         if expected_positive and pnl < 0:
-            logger.error("PNL_SIGN_ERROR: direction=%s entry=%.2f exit=%.2f pnl=%.2f — recalculating",
+            logger.error("PNL_SIGN_ERROR: direction=%s entry=%.2f exit=%.2f pnl=%.2f -- recalculating",
                          direction, entry, exit, pnl)
             if direction == "LONG":
                 return round((exit - entry) * self._point_value, 2)
@@ -1334,7 +1334,7 @@ class OrderManager:
                 return round((entry - exit) * self._point_value, 2)
 
         if not expected_positive and pnl > 0 and entry != exit:
-            logger.error("PNL_SIGN_ERROR: direction=%s entry=%.2f exit=%.2f pnl=%.2f — recalculating",
+            logger.error("PNL_SIGN_ERROR: direction=%s entry=%.2f exit=%.2f pnl=%.2f -- recalculating",
                          direction, entry, exit, pnl)
             if direction == "LONG":
                 return round((exit - entry) * self._point_value, 2)

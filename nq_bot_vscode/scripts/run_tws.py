@@ -2,7 +2,7 @@
 IBKR TWS Direct Runner
 =======================
 Connects to TWS/IB Gateway via socket API (ib_insync) on port 7497.
-No Client Portal Gateway required — no browser login, no session timeouts.
+No Client Portal Gateway required -- no browser login, no session timeouts.
 
 Pipeline:
   TWS (5-sec real-time bars) -> 2-min candle aggregator -> Bar
@@ -145,7 +145,7 @@ class HTFCandleAggregator:
             boundary = self._boundary(bar.timestamp, mins)
 
             if tf not in self._accum:
-                # First bar ever for this TF — just start accumulating
+                # First bar ever for this TF -- just start accumulating
                 self._accum[tf] = {
                     "o": bar.open, "h": bar.high, "l": bar.low,
                     "c": bar.close, "vol": bar.volume,
@@ -175,7 +175,7 @@ class HTFCandleAggregator:
                     "ts": bar.timestamp, "boundary": boundary,
                 }
             else:
-                # Same period — extend OHLCV
+                # Same period -- extend OHLCV
                 acc["h"] = max(acc["h"], bar.high)
                 acc["l"] = min(acc["l"], bar.low)
                 acc["c"] = bar.close
@@ -382,7 +382,7 @@ class TWSLiveRunner:
                 if attempt < max_connect_attempts:
                     wait = 10 * attempt
                     logger.warning(
-                        "TWS connect attempt %d/%d failed: %s — retrying in %ds...",
+                        "TWS connect attempt %d/%d failed: %s -- retrying in %ds...",
                         attempt, max_connect_attempts, e, wait,
                     )
                     await asyncio.sleep(wait)
@@ -439,7 +439,7 @@ class TWSLiveRunner:
         logger.info("Pipeline initialized (paper mode, TWS socket)")
         logger.info("  HTF aggregator: 2m → 5m, 15m → HTF Bias Engine")
 
-        # ── Historical backfill — prime ALL indicators + session levels ──
+        # ── Historical backfill -- prime ALL indicators + session levels ──
         await self._backfill_historical(contract)
 
         # ── Set up 2-min candle aggregator ──
@@ -469,14 +469,14 @@ class TWSLiveRunner:
         health_adapter = TWSHealthAdapter(self._pipeline._client)
         self._health_monitor = TWSHealthMonitor(
             client=health_adapter,
-            launcher=None,  # No IBC launcher — TWS is started manually
+            launcher=None,  # No IBC launcher -- TWS is started manually
             heartbeat_file=LOGS_DIR / "heartbeat_state.json",
             check_interval=10.0,
             failure_threshold=3,
             on_critical_failure=self._handle_critical_failure,
         )
         self._health_monitor.start()
-        logger.info("Health monitor started — heartbeat_state.json updating every 10s")
+        logger.info("Health monitor started -- heartbeat_state.json updating every 10s")
 
         # ── Write initial state files so website picks up immediately ──
         self._write_state_files()
@@ -494,17 +494,17 @@ class TWSLiveRunner:
                     stderr=subprocess.PIPE,
                 )
                 logger.info(
-                    "Stats publisher started (PID %d) — pushing to GitHub every 60s",
+                    "Stats publisher started (PID %d) -- pushing to GitHub every 60s",
                     self._publisher_proc.pid,
                 )
             except OSError as e:
                 logger.warning("Could not start publish_stats.py: %s", e)
         else:
-            logger.warning("publish_stats.py not found at %s — website won't update", publisher_script)
+            logger.warning("publish_stats.py not found at %s -- website won't update", publisher_script)
 
         logger.info("=" * 60)
-        logger.info("  TWS RUNNER ACTIVE — TRADING ENABLED")
-        logger.info("  Historical warmup complete — indicators primed")
+        logger.info("  TWS RUNNER ACTIVE -- TRADING ENABLED")
+        logger.info("  Historical warmup complete -- indicators primed")
         logger.info("  Health monitor:   RUNNING")
         logger.info("  Stats publisher:  %s",
                      "RUNNING" if self._publisher_proc else "NOT STARTED")
@@ -523,7 +523,7 @@ class TWSLiveRunner:
         This replaces the old 60-minute warmup with instant priming.
         """
         logger.info("=" * 60)
-        logger.info("  HISTORICAL BACKFILL — loading 2 days of 2-min bars")
+        logger.info("  HISTORICAL BACKFILL -- loading 2 days of 2-min bars")
         logger.info("=" * 60)
 
         try:
@@ -541,7 +541,7 @@ class TWSLiveRunner:
 
             if not hist_bars:
                 logger.warning(
-                    "No historical bars returned — falling back to live warmup"
+                    "No historical bars returned -- falling back to live warmup"
                 )
                 return
 
@@ -658,22 +658,22 @@ class TWSLiveRunner:
                 logger.info("  HTF per-TF: %s", htf_bias.tf_biases)
             else:
                 logger.warning(
-                    "  HTF bias: STILL NONE after backfill — "
+                    "  HTF bias: STILL NONE after backfill -- "
                     "check HTF_TIMEFRAMES vs aggregator output"
                 )
 
         except Exception as e:
             logger.error(
-                "Historical backfill failed: %s — falling back to live warmup", e
+                "Historical backfill failed: %s -- falling back to live warmup", e
             )
             # If backfill fails, the old warmup logic still works as fallback
 
     def _handle_critical_failure(self) -> None:
         """Called by health monitor when consecutive failures exceed threshold."""
         logger.critical(
-            "HEALTH MONITOR: Critical failure detected — TWS connection may be down"
+            "HEALTH MONITOR: Critical failure detected -- TWS connection may be down"
         )
-        # Log but don't auto-shutdown — let the user decide
+        # Log but don't auto-shutdown -- let the user decide
         # Future: integrate with IBC auto-restart
 
     def _on_realtime_bar(self, bars, has_new_bar) -> None:
@@ -713,7 +713,7 @@ class TWSLiveRunner:
 
     def _on_2min_candle(self, candle: Bar) -> None:
         """Process a completed 2-minute candle."""
-        # Warmup phase — prime indicators only
+        # Warmup phase -- prime indicators only
         if not self._warmup_complete:
             self._warmup_count += 1
             self._pipeline._feature_engine.update(candle)
@@ -724,12 +724,12 @@ class TWSLiveRunner:
             if self._warmup_count >= self.WARMUP_BARS:
                 self._warmup_complete = True
                 logger.info("=" * 60)
-                logger.info("  WARMUP COMPLETE — TRADING ACTIVE")
+                logger.info("  WARMUP COMPLETE -- TRADING ACTIVE")
                 logger.info("  Indicators primed with %d candles", self.WARMUP_BARS)
                 logger.info("=" * 60)
             return
 
-        # Dry run — log only
+        # Dry run -- log only
         if self._dry_run:
             logger.info(
                 "DRY RUN bar: close=%.2f vol=%d time=%s",
@@ -872,7 +872,7 @@ class TWSLiveRunner:
             logger.warning("Failed to write state files: %s", e)
 
     async def _run_loop(self) -> None:
-        """Main loop — ib_insync processes events via the shared asyncio loop."""
+        """Main loop -- ib_insync processes events via the shared asyncio loop."""
         try:
             while not self._shutdown_event.is_set():
                 await asyncio.sleep(0.2)  # ib_insync events auto-dispatch on this loop
@@ -979,8 +979,8 @@ class TWSSupervisor:
     """
     Wraps TWSLiveRunner with:
       1. Auto-launch TWS via IBC (if not already running)
-      2. Crash detection — monitors runner health
-      3. Auto-restart — kills TWS, relaunches via IBC, reconnects bot
+      2. Crash detection -- monitors runner health
+      3. Auto-restart -- kills TWS, relaunches via IBC, reconnects bot
 
     This lets the bot run completely unattended:
       TWS crash/disconnect → supervisor detects → IBC relaunches TWS
@@ -1021,7 +1021,7 @@ class TWSSupervisor:
         while not self._user_shutdown:
             if self._restart_count >= self.MAX_RESTART_ATTEMPTS:
                 logger.critical(
-                    "Max restart attempts (%d) reached — giving up. "
+                    "Max restart attempts (%d) reached -- giving up. "
                     "Manual intervention required.",
                     self.MAX_RESTART_ATTEMPTS,
                 )
@@ -1030,7 +1030,7 @@ class TWSSupervisor:
             # Step 1: Ensure TWS is running (launch via IBC if needed)
             if not self._ensure_tws_running():
                 logger.error(
-                    "Cannot start TWS — retrying in %ds...",
+                    "Cannot start TWS -- retrying in %ds...",
                     self.RESTART_COOLDOWN,
                 )
                 self._restart_count += 1
@@ -1082,10 +1082,10 @@ class TWSSupervisor:
                 loop.close()
 
             if self._user_shutdown:
-                logger.info("SUPERVISOR: User requested shutdown — exiting")
+                logger.info("SUPERVISOR: User requested shutdown -- exiting")
                 break
 
-            # Step 3: Bot exited — decide whether to restart
+            # Step 3: Bot exited -- decide whether to restart
             self._restart_count += 1
             logger.warning(
                 "SUPERVISOR: Bot exited (%s). Restart %d/%d in %ds...",
@@ -1121,8 +1121,8 @@ class TWSSupervisor:
         except (ConnectionRefusedError, OSError, _socket.timeout):
             pass
 
-        # Not running — try to launch via IBC
-        logger.info("SUPERVISOR: TWS not running — launching via IBC...")
+        # Not running -- try to launch via IBC
+        logger.info("SUPERVISOR: TWS not running -- launching via IBC...")
 
         if not self._auto_config.ibc_available:
             logger.warning(
@@ -1136,7 +1136,7 @@ class TWSSupervisor:
                 logger.error("SUPERVISOR: Neither IBC nor TWS found")
                 return False
             logger.info(
-                "SUPERVISOR: Launching TWS directly — you must log in manually"
+                "SUPERVISOR: Launching TWS directly -- you must log in manually"
             )
 
         from Broker.tws_launcher import TWSLauncher
@@ -1183,7 +1183,7 @@ class TWSSupervisor:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IBKR TWS Direct Runner — MNQ via socket API"
+        description="IBKR TWS Direct Runner -- MNQ via socket API"
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -1264,7 +1264,7 @@ def main():
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, runner.request_shutdown)
     else:
-        logger.info("Windows detected — using KeyboardInterrupt for Ctrl+C shutdown")
+        logger.info("Windows detected -- using KeyboardInterrupt for Ctrl+C shutdown")
 
     SHUTDOWN_TIMEOUT = 30
 
@@ -1276,7 +1276,7 @@ def main():
                 asyncio.wait_for(runner.shutdown(), timeout=SHUTDOWN_TIMEOUT)
             )
         except asyncio.TimeoutError:
-            logger.critical("Shutdown timed out — MANUAL POSITION CHECK REQUIRED")
+            logger.critical("Shutdown timed out -- MANUAL POSITION CHECK REQUIRED")
     except Exception:
         logger.critical("UNHANDLED EXCEPTION\n%s", traceback.format_exc())
         try:
@@ -1284,7 +1284,7 @@ def main():
                 asyncio.wait_for(runner.shutdown(), timeout=SHUTDOWN_TIMEOUT)
             )
         except asyncio.TimeoutError:
-            logger.critical("Shutdown timed out — MANUAL POSITION CHECK REQUIRED")
+            logger.critical("Shutdown timed out -- MANUAL POSITION CHECK REQUIRED")
         sys.exit(1)
     finally:
         loop.close()

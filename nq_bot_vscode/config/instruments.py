@@ -6,7 +6,7 @@ Defines InstrumentSpec for CME Micro futures:
   MYM (Micro Dow), M2K (Micro Russell 2000)
 
 Each spec captures tick_size, point_value, margins, session times,
-and contract cycle — everything needed to trade an instrument
+and contract cycle -- everything needed to trade an instrument
 without hardcoding.
 
 Usage:

@@ -1,5 +1,5 @@
 """
-Tests for IBKRLivePipeline — full vertical-slice integration.
+Tests for IBKRLivePipeline -- full vertical-slice integration.
 
 Covers:
   - Bar -> signal evaluation -> bridge -> executor -> position manager
@@ -134,7 +134,7 @@ def _make_rejected_record(
 
 
 # ═══════════════════════════════════════════════════════════════
-# PIPELINE WIRING — bar to execution
+# PIPELINE WIRING -- bar to execution
 # ═══════════════════════════════════════════════════════════════
 
 class TestPipelineWiring:
@@ -153,7 +153,7 @@ class TestPipelineWiring:
         pipeline._last_bar = None
         pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
-        # HTF bias must be present — fail-safe blocks trades when None
+        # HTF bias must be present -- fail-safe blocks trades when None
         from features.htf_engine import HTFBiasResult
         pipeline._htf_bias = HTFBiasResult(
             consensus_direction="bullish",
@@ -266,7 +266,7 @@ class TestPipelineWiring:
 
 
 class TestBridgeRejection:
-    """Bridge rejects low-score signals — no orders placed."""
+    """Bridge rejects low-score signals -- no orders placed."""
 
     @pytest.mark.asyncio
     async def test_low_score_rejected(
@@ -374,7 +374,7 @@ class TestPartialFill:
         pipeline._last_bar = None
         pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
-        # HTF bias must be present — fail-safe blocks trades when None
+        # HTF bias must be present -- fail-safe blocks trades when None
         from features.htf_engine import HTFBiasResult
         pipeline._htf_bias = HTFBiasResult(
             consensus_direction="bullish",

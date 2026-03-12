@@ -1,5 +1,5 @@
 """
-Trading Constants — Single Source of Truth
+Trading Constants -- Single Source of Truth
 ===========================================
 All hard-gate constants live here.  Every module that needs these values
 MUST import from this file.  Do NOT redefine them locally.
@@ -12,12 +12,12 @@ Do not loosen these gates without new backtested evidence across the full
 """
 
 # ── HIGH-CONVICTION FILTER ────────────────────────────────────────
-#   Rule 1 – Min signal score >= 0.75  (eliminates low-conviction noise)
-#   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
+#   Rule 1 - Min signal score >= 0.75  (eliminates low-conviction noise)
+#   Rule 2 - Max stop distance <= 30 pts (caps tail risk per trade)
 #   Reverted to 30pt to match v3 validated config (PF 2.86, 396 trades).
 #   Dollar-based stop tiers handle conviction-scaled risk within the 30pt cap.
 HIGH_CONVICTION_MIN_SCORE: float = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS: float = 30.0   # v3 validated: 30pt hard cap (reverted from 50pt — matches PF 2.86 backtest)
+HIGH_CONVICTION_MAX_STOP_PTS: float = 30.0   # v3 validated: 30pt hard cap (reverted from 50pt -- matches PF 2.86 backtest)
 HIGH_CONVICTION_MIN_STOP_PTS: float = 15.0   # Floor: prevents micro-stops that get clipped by noise
 
 # ── DOLLAR-BASED STOP TIERS ────────────────────────────────────────
@@ -77,7 +77,7 @@ HTF_STALENESS_LIMITS: dict = {
     "30m": 90,    # 3x bar period
     "1H":  180,   # 3x bar period
     "4H":  720,   # 3x bar period
-    "1D":  2880,  # 2x bar period (48h — accounts for weekends gracefully)
+    "1D":  2880,  # 2x bar period (48h -- accounts for weekends gracefully)
 }
 
 # ── UNIVERSAL CONFIRMATION LAYER (UCL) v2 ────────────────────────
@@ -101,7 +101,7 @@ CONTEXT_FVG_BOOST: float = 0.05          # FVG near sweep price
 # ── AGGREGATOR STANDALONE TRIGGER (PATH C+ dual-trigger) ──────────
 # Re-enables aggregator as an independent entry trigger when it reaches
 # high conviction.  Backtest data showed aggregator-only trades produced
-# +$12,626 across 1,025 trades — more total profit than sweep-only.
+# +$12,626 across 1,025 trades -- more total profit than sweep-only.
 # PATH C demoted the aggregator to context-only, but there's no documented
 # evidence that removing standalone triggers improved anything.
 # Mar 2026: Re-enabled alongside sweeps as a dual-trigger architecture.
@@ -110,6 +110,6 @@ AGGREGATOR_STANDALONE_MIN_SCORE: float = 0.75  # Must meet HC gate independently
 
 # ── TIMEFRAMES ────────────────────────────────────────────────────
 # Intraday-only HTF bias: 5m + 15m (relevant to 10-min C1 scalp window)
-# Higher TFs (30m, 1H, 4H, 1D) removed — irrelevant for scalp timing.
+# Higher TFs (30m, 1H, 4H, 1D) removed -- irrelevant for scalp timing.
 HTF_TIMEFRAMES: frozenset = frozenset({"15m", "5m"})
 EXECUTION_TIMEFRAMES: frozenset = frozenset({"2m", "3m", "1m"})

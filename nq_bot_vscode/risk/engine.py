@@ -8,8 +8,8 @@ Design principles:
 1. The risk engine runs in its own evaluation loop
 2. It can ONLY reduce exposure, never increase it
 3. Kill switch operates on a separate logical path (drawdown-triggered only;
-   consecutive-loss kill switch removed — evidence showed net negative impact)
-4. All limits are HARD — no exceptions for "high confidence" signals
+   consecutive-loss kill switch removed -- evidence showed net negative impact)
+4. All limits are HARD -- no exceptions for "high confidence" signals
 """
 
 import logging
@@ -145,7 +145,7 @@ class RiskEngine:
         if self.state.kill_switch_active:
             if self._can_resume(current_time):
                 self._deactivate_kill_switch()
-                logger.info("Kill switch deactivated — resuming trading")
+                logger.info("Kill switch deactivated -- resuming trading")
             else:
                 return RiskAssessment(
                     decision=RiskDecision.KILL_SWITCH,
@@ -162,7 +162,7 @@ class RiskEngine:
             return RiskAssessment(
                 decision=RiskDecision.REJECT,
                 max_contracts=0,
-                reason="Daily loss limit reached — no more trades today",
+                reason="Daily loss limit reached -- no more trades today",
                 suggested_stop_distance=0,
                 suggested_target_distance=0,
                 risk_per_contract=0,
@@ -206,7 +206,7 @@ class RiskEngine:
             return RiskAssessment(
                 decision=RiskDecision.REJECT,
                 max_contracts=0,
-                reason="Near scheduled news event — no new trades",
+                reason="Near scheduled news event -- no new trades",
                 suggested_stop_distance=0,
                 suggested_target_distance=0,
                 risk_per_contract=0,
@@ -234,7 +234,7 @@ class RiskEngine:
             stop_distance, entry_price, size_multiplier
         )
 
-        # Dollar risk calculation — instrument-aware
+        # Dollar risk calculation -- instrument-aware
         point_value = self._point_value
         commission = self.config.get_commission(self._instrument)
         risk_per_contract = stop_distance * point_value + commission
@@ -254,7 +254,7 @@ class RiskEngine:
 
         if max_contracts == 0:
             decision = RiskDecision.REJECT
-            adjustments.append("Computed size is 0 contracts — risk too high for account")
+            adjustments.append("Computed size is 0 contracts -- risk too high for account")
 
         return RiskAssessment(
             decision=decision,
@@ -364,7 +364,7 @@ class RiskEngine:
         conditions. Always <= 1.0.
 
         Uses min(factors) instead of multiplying all factors together.
-        Multiplicative chaining was too aggressive — worst case produced
+        Multiplicative chaining was too aggressive -- worst case produced
         0.01875 which rounds to 0 contracts, killing the strategy.
         Taking the single worst factor prevents compounding.
         """
@@ -454,7 +454,7 @@ class RiskEngine:
     # Kill Switch
     # ================================================================
     def _activate_kill_switch(self, reason: str, current_time: datetime) -> None:
-        """Activate kill switch — stops all trading."""
+        """Activate kill switch -- stops all trading."""
         self.state.kill_switch_active = True
         self.state.kill_switch_reason = reason
         self.state.kill_switch_resume_at = (

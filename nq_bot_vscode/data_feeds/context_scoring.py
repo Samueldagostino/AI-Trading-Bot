@@ -1,12 +1,12 @@
 """
-Context Scorer — Converts MarketContext into confluence score adjustments.
+Context Scorer -- Converts MarketContext into confluence score adjustments.
 ==========================================================================
 
 STATUS: DISABLED. Enable only after analyze_quantdata_correlation.py
 confirms statistical significance at p < 0.05.
 
 To enable: set QUANTDATA_SCORING=true in .env AND change ENABLED below.
-The .env flag alone is NOT sufficient — this is a safety measure to prevent
+The .env flag alone is NOT sufficient -- this is a safety measure to prevent
 accidental activation before validation.
 """
 

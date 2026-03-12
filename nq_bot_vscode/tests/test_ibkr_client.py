@@ -509,7 +509,7 @@ class TestDisconnect:
 # ================================================================
 
 class TestSessionType:
-    """Test RTH vs ETH detection — must match main.py process_bar() logic."""
+    """Test RTH vs ETH detection -- must match main.py process_bar() logic."""
 
     def _utc(self, hour: int, minute: int = 0) -> datetime:
         """Helper: create a UTC datetime for 2026-02-28 at given H:M."""
@@ -593,7 +593,7 @@ class TestCandleAggregation:
         aggregator.process_tick(20990.0, 1, _ts(0, 45))
         aggregator.process_tick(21005.0, 1, _ts(1, 30))
 
-        # Still in [14:00, 14:02) window — no candle yet
+        # Still in [14:00, 14:02) window -- no candle yet
         assert aggregator._current_open == 21000.0
         assert aggregator._current_high == 21010.0
         assert aggregator._current_low == 20990.0
@@ -659,11 +659,11 @@ class TestCandleAggregation:
         aggregator.process_tick(21000.0, 1, _ts(0, 0))
         aggregator.process_tick(21010.0, 1, _ts(1, 0))
 
-        # Window 2: [14:02, 14:04) — emits candle 1
+        # Window 2: [14:02, 14:04) -- emits candle 1
         c1 = aggregator.process_tick(21020.0, 1, _ts(2, 0))
         aggregator.process_tick(21015.0, 1, _ts(3, 0))
 
-        # Window 3: [14:04, 14:06) — emits candle 2
+        # Window 3: [14:04, 14:06) -- emits candle 2
         c2 = aggregator.process_tick(21030.0, 1, _ts(4, 0))
 
         assert c1 is not None
@@ -808,10 +808,10 @@ class TestDataQualityChecks:
         aggregator.process_tick(21000.0, 1, _ts(0, 0))
         aggregator.process_tick(21005.0, 1, _ts(2, 0))  # emits candle :00, starts :02
 
-        # Candle 2 at :02 — skip ahead so gap shows on candle 3
+        # Candle 2 at :02 -- skip ahead so gap shows on candle 3
         aggregator.process_tick(21010.0, 1, _ts(8, 0))  # emits candle :02, starts :08
 
-        # Candle 3 at :08 — gap detected: last=:02, expected=:04, current=:08
+        # Candle 3 at :08 -- gap detected: last=:02, expected=:04, current=:08
         # gap = (08-04) = 240s, missed = 240/120 = 2
         aggregator.process_tick(21015.0, 1, _ts(10, 0))  # emits candle :08
 
@@ -823,10 +823,10 @@ class TestDataQualityChecks:
         aggregator.process_tick(21000.0, 1, _ts(0, 0))
         aggregator.process_tick(21005.0, 1, _ts(2, 0))  # emits candle :00, starts :02
 
-        # Candle 2 at :02 — skip far ahead
+        # Candle 2 at :02 -- skip far ahead
         aggregator.process_tick(21010.0, 1, _ts(12, 0))  # emits candle :02, starts :12
 
-        # Candle 3 at :12 — gap: last=:02, expected=:04, current=:12
+        # Candle 3 at :12 -- gap: last=:02, expected=:04, current=:12
         # gap = (12-04) = 480s, missed = 480/120 = 4
         aggregator.process_tick(21015.0, 1, _ts(14, 0))  # emits candle :12
 
@@ -838,7 +838,7 @@ class TestDataQualityChecks:
         aggregator.process_tick(21000.0, 1, _ts(0, 0))
         aggregator.process_tick(21005.0, 1, _ts(2, 0))
 
-        # Candle 2 — no gap
+        # Candle 2 -- no gap
         aggregator.process_tick(21010.0, 1, _ts(4, 0))
 
         assert aggregator._consecutive_gaps == 0
@@ -1421,7 +1421,7 @@ class TestDataFeedIntegration:
         # Simulate WebSocket ticks flowing through the aggregator
         agg = feed._aggregator
 
-        # Window 1: [14:30, 14:32) — 14:30 UTC = 9:30 ET = RTH
+        # Window 1: [14:30, 14:32) -- 14:30 UTC = 9:30 ET = RTH
         agg.process_tick(21000.0, 1, _ts(30, 0))
         agg.process_tick(21010.0, 1, _ts(30, 30))
         agg.process_tick(20990.0, 1, _ts(31, 0))

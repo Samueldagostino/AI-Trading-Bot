@@ -2,7 +2,7 @@
 Unit tests for AdaptiveExitConfig regime detection and parameter adjustment.
 
 Tests cover:
-1. Static (disabled) mode — baseline parameters always returned
+1. Static (disabled) mode -- baseline parameters always returned
 2. Trending regime classification (ADX > 25)
 3. Ranging regime classification (ADX < 20)
 4. Hysteresis band behavior (20 ≤ ADX ≤ 25)
@@ -111,7 +111,7 @@ class TestAdaptiveExitConfigRanging:
 
 
 class TestAdaptiveExitConfigHysteresis:
-    """Test hysteresis band [20, 25) — holds previous regime."""
+    """Test hysteresis band [20, 25) -- holds previous regime."""
 
     def test_hysteresis_keeps_trending(self):
         """ADX in [20, 25) with trending previous should stay trending."""

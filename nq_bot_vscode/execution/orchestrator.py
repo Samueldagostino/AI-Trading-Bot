@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 # Phase 3 Additive: Post-Sweep FVG Tracking (data collection only)
 # ICT model: Sweep → Displacement → FVG → Retracement
 # Entries are IMMEDIATE (Phase 1 behavior). FVG detection runs in
-# background for data collection — no entry delay, no score changes.
+# background for data collection -- no entry delay, no score changes.
 # ═══════════════════════════════════════════════════════════════
 SWEEP_FVG_TRACKING = True
 SWEEP_FVG_DISPLACEMENT_WINDOW = 5       # Bars after sweep to find displacement candle
@@ -82,7 +82,7 @@ class PipelineState(Enum):
 
 
 class TradePhase(Enum):
-    """Current phase of the active trade — mirrors ScaleOutPhase from backtest."""
+    """Current phase of the active trade -- mirrors ScaleOutPhase from backtest."""
     PHASE_1 = "phase_1"     # All contracts open, C1 5-bar timer running
     SCALING = "scaling"     # C1 exited, managing C2/C3 independently
     DONE = "done"           # Trade complete
@@ -210,7 +210,7 @@ class IBKRLivePipeline:
 
         self._state = PipelineState.STARTING
         logger.info("=" * 60)
-        logger.info("IBKR LIVE PIPELINE — STARTING")
+        logger.info("IBKR LIVE PIPELINE -- STARTING")
         logger.info("=" * 60)
 
         try:
@@ -276,17 +276,17 @@ class IBKRLivePipeline:
             return
 
         self._state = PipelineState.STOPPING
-        logger.info("IBKR Live Pipeline — stopping")
+        logger.info("IBKR Live Pipeline -- stopping")
 
         await self._position_manager.stop_reconciliation_loop()
         await self._data_feed.stop()
         await self._client.disconnect()
 
         self._state = PipelineState.IDLE
-        logger.info("IBKR Live Pipeline — stopped")
+        logger.info("IBKR Live Pipeline -- stopped")
 
     # ──────────────────────────────────────────────────────────
-    # BAR PROCESSING — the core pipeline
+    # BAR PROCESSING -- the core pipeline
     # ──────────────────────────────────────────────────────────
 
     def _on_bar(self, bar: Bar) -> None:
@@ -304,7 +304,7 @@ class IBKRLivePipeline:
             asyncio.run(self._process_bar_guarded(bar))
 
     async def _process_bar_guarded(self, bar: Bar) -> Optional[Dict[str, Any]]:
-        """Serialize bar processing — prevents concurrent mutations of shared state."""
+        """Serialize bar processing -- prevents concurrent mutations of shared state."""
         async with self._bar_lock:
             return await self._process_bar(bar)
 
@@ -324,16 +324,16 @@ class IBKRLivePipeline:
         if self._executor.is_halted:
             return None
 
-        # === MAINTENANCE WINDOW CHECKS (must be FIRST — Axiom 2) ===
+        # === MAINTENANCE WINDOW CHECKS (must be FIRST -- Axiom 2) ===
         from datetime import time as dt_time
         bar_et = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
         current_time_et = bar_et.time()
 
-        # Hard flatten at 4:50 PM ET — close ALL positions unconditionally
+        # Hard flatten at 4:50 PM ET -- close ALL positions unconditionally
         if current_time_et >= dt_time(16, 50):
             if self._active_group_id is not None:
                 logger.warning(
-                    "MAINTENANCE FLATTEN: Closing all positions — "
+                    "MAINTENANCE FLATTEN: Closing all positions -- "
                     "10 minutes to maintenance halt"
                 )
                 try:
@@ -343,13 +343,13 @@ class IBKRLivePipeline:
                 self._active_group_id = None
             return None  # No further processing after 4:50 PM ET
 
-        # Entry cutoff at 4:30 PM ET — block new entries
+        # Entry cutoff at 4:30 PM ET -- block new entries
         self._maintenance_entry_blocked = current_time_et >= dt_time(16, 30)
 
-        # === 0. SESSION VALIDITY — halt if gateway session expired ===
+        # === 0. SESSION VALIDITY -- halt if gateway session expired ===
         if hasattr(self, '_client') and self._client and not self._client.is_connected:
             logger.error(
-                "Gateway session invalid — halting pipeline to prevent "
+                "Gateway session invalid -- halting pipeline to prevent "
                 "silent order failures"
             )
             self._state = PipelineState.HALTED
@@ -414,7 +414,7 @@ class IBKRLivePipeline:
         # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
         if getattr(self, '_maintenance_entry_blocked', False):
             logger.info(
-                "BLOCKED: New entry rejected — past 4:30 PM ET cutoff "
+                "BLOCKED: New entry rejected -- past 4:30 PM ET cutoff "
                 "(maintenance window protection)"
             )
             return None
@@ -470,7 +470,7 @@ class IBKRLivePipeline:
             return None
 
         # === HTF DIRECTIONAL GATE (softened: score penalty instead of block) ===
-        # A sweep IS a reversal — HTF disagreement is expected. Penalize -0.10.
+        # A sweep IS a reversal -- HTF disagreement is expected. Penalize -0.10.
         if htf_bias is not None:
             htf_disagrees = False
             if entry_direction == "long" and not htf_bias.htf_allows_long:
@@ -480,7 +480,7 @@ class IBKRLivePipeline:
             if htf_disagrees:
                 entry_score -= 0.10
                 logger.info(
-                    "HTF BIAS PENALTY: %s penalized -0.10 — HTF %s (%.2f) "
+                    "HTF BIAS PENALTY: %s penalized -0.10 -- HTF %s (%.2f) "
                     "[source=%s, new_score=%.2f]",
                     entry_direction, htf_bias.consensus_direction,
                     htf_bias.consensus_strength, entry_source, entry_score,
@@ -488,17 +488,17 @@ class IBKRLivePipeline:
         else:
             # Fail-safe: no HTF data → block all trades
             logger.warning(
-                "HTF GATE BLOCK: %s blocked — no HTF data [source=%s]",
+                "HTF GATE BLOCK: %s blocked -- no HTF data [source=%s]",
                 entry_direction, entry_source,
             )
             return None
 
-        # === NaN GUARD — NaN comparisons always return False, bypassing gates ===
+        # === NaN GUARD -- NaN comparisons always return False, bypassing gates ===
         if not math.isfinite(entry_score):
-            logger.error("HC REJECT: entry_score is NaN/Inf — blocking trade")
+            logger.error("HC REJECT: entry_score is NaN/Inf -- blocking trade")
             return None
 
-        # === 6. HIGH-CONVICTION GATE 1 — min score ===
+        # === 6. HIGH-CONVICTION GATE 1 -- min score ===
         if entry_score < HIGH_CONVICTION_MIN_SCORE:
             logger.info(
                 "HC GATE REJECT: %s score=%.2f < %.2f [source=%s, levels=%s]",
@@ -526,10 +526,10 @@ class IBKRLivePipeline:
         raw_stop = risk_assessment.suggested_stop_distance
 
         if not math.isfinite(raw_stop):
-            logger.error("HC REJECT: stop distance is NaN/Inf — blocking trade")
+            logger.error("HC REJECT: stop distance is NaN/Inf -- blocking trade")
             return None
 
-        # === 8. HIGH-CONVICTION GATE 2 — stop distance cap ===
+        # === 8. HIGH-CONVICTION GATE 2 -- stop distance cap ===
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
             logger.info(
                 "STOP CAP REJECT: %s stop=%.1f > %.1f max [score=%.2f, source=%s, levels=%s]",
@@ -542,7 +542,7 @@ class IBKRLivePipeline:
         # Regime gate
         if regime_adj["size_multiplier"] == 0:
             logger.info(
-                "REGIME REJECT: %s blocked — regime size_multiplier=0 [score=%.2f]",
+                "REGIME REJECT: %s blocked -- regime size_multiplier=0 [score=%.2f]",
                 entry_direction, entry_score,
             )
             return None
@@ -551,7 +551,7 @@ class IBKRLivePipeline:
             RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE
         ):
             logger.info(
-                "RISK REJECT: %s blocked — risk decision=%s [score=%.2f]",
+                "RISK REJECT: %s blocked -- risk decision=%s [score=%.2f]",
                 entry_direction, risk_assessment.decision, entry_score,
             )
             return None
@@ -800,7 +800,7 @@ class IBKRLivePipeline:
 
     async def _manage_active_trade(self, bar: Bar) -> Optional[Dict[str, Any]]:
         """
-        Bar-by-bar trade management — the core exit logic.
+        Bar-by-bar trade management -- the core exit logic.
 
         Routes to Phase 1 or Scaling management based on current phase.
         This mirrors ScaleOutExecutor.update() from the backtest engine.
@@ -813,7 +813,7 @@ class IBKRLivePipeline:
         remaining = self._get_open_leg_ids()
         if not remaining:
             logger.warning(
-                "All legs externally closed for group %s — finalizing",
+                "All legs externally closed for group %s -- finalizing",
                 self._active_group_id,
             )
             self._finalize_trade()
@@ -939,7 +939,7 @@ class IBKRLivePipeline:
         c1_was_profitable = c1_net_pnl > 0
 
         # ── BREAKEVEN on remaining legs after C1 profit ──
-        # Variant B (delayed): skip immediate BE — _apply_delayed_be() handles it
+        # Variant B (delayed): skip immediate BE -- _apply_delayed_be() handles it
         # during SCALING once MFE >= 1.5× stop_distance.
         BE_BUFFER_PTS = self._scale_config.c2_breakeven_buffer_points
         be_variant = getattr(self._scale_config, "c2_be_variant", "D")
@@ -973,7 +973,7 @@ class IBKRLivePipeline:
                                          else -BE_BUFFER_PTS),
                 )
         elif c1_was_profitable and be_variant == "B":
-            # Variant B: delayed breakeven — keep original stops
+            # Variant B: delayed breakeven -- keep original stops
             threshold = round(self._stop_distance * self._scale_config.c2_be_delay_multiplier, 1)
             open_leg_labels = [pid.split("-")[-1] for pid, s in self._leg_state.items()
                                if pid != c1_pos_id and pid in self._position_manager.open_positions]
@@ -1102,7 +1102,7 @@ class IBKRLivePipeline:
                         closed_legs.append(pos_id.split("-")[-1])
                         continue
 
-                # C2: Time stop — max 20 bars (~40 min on 2m bars)
+                # C2: Time stop -- max 20 bars (~40 min on 2m bars)
                 if state["bars_since_active"] >= 20:
                     self._close_leg(pos_id, round(price, 2), current_time,
                                     "time_20bars")
@@ -1206,7 +1206,7 @@ class IBKRLivePipeline:
             if state["be_triggered"]:
                 logger.info(
                     "%s BREAKEVEN ACTIVATED: MFE %.1fpts reached threshold "
-                    "%.1fpts — stop moved to %.2f",
+                    "%.1fpts -- stop moved to %.2f",
                     state.get("leg_label", "C2"), state["mfe"],
                     threshold, state["stop_price"],
                 )
@@ -1214,7 +1214,7 @@ class IBKRLivePipeline:
             pct = round(state["mfe"] / threshold * 100, 1) if threshold > 0 else 0
             logger.debug(
                 "%s breakeven DELAYED: MFE %.1fpts < threshold %.1fpts "
-                "(%s%% of target) — keeping original stop at %.2f",
+                "(%s%% of target) -- keeping original stop at %.2f",
                 state.get("leg_label", "C2"), state["mfe"],
                 threshold, pct, state["stop_price"],
             )
@@ -1377,7 +1377,7 @@ class IBKRLivePipeline:
         """Phase 3 additive: background FVG tracking (data collection only).
 
         Tracks displacement → FVG → retracement after each sweep.
-        Does NOT affect entries — all entries happen immediately (Phase 1).
+        Does NOT affect entries -- all entries happen immediately (Phase 1).
         Data is collected for future analysis and potential strategy refinement.
         """
         if self._sweep_event is None:
@@ -1460,7 +1460,7 @@ class IBKRLivePipeline:
                 self._sweep_fvg = None
 
     # ──────────────────────────────────────────────────────────
-    # POSITION CLOSE — external API (for reconciliation/emergency)
+    # POSITION CLOSE -- external API (for reconciliation/emergency)
     # ──────────────────────────────────────────────────────────
 
     def close_position(
@@ -1472,7 +1472,7 @@ class IBKRLivePipeline:
         """
         Close a tracked position immediately (external API).
 
-        Called by reconciliation or emergency flatten — NOT by the
+        Called by reconciliation or emergency flatten -- NOT by the
         trade management state machine (which uses _close_leg directly).
 
         Updates PositionManager -> feeds P&L to executor -> checks

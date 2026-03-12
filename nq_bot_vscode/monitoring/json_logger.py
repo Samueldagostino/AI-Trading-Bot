@@ -1,5 +1,5 @@
 """
-JSON Line Logger — Append-Only Decision & Trade Logging
+JSON Line Logger -- Append-Only Decision & Trade Logging
 ========================================================
 Replaces the old load-rewrite pattern with append-only JSONL files.
 Each entry is a single JSON object per line, written atomically.
@@ -108,7 +108,7 @@ class JSONLineLogger:
                         entries.append(json.loads(line))
                     except json.JSONDecodeError:
                         logger.warning(
-                            "Corrupt line %d in %s — skipped",
+                            "Corrupt line %d in %s -- skipped",
                             line_num, path.name,
                         )
         except OSError as e:
@@ -119,7 +119,7 @@ class JSONLineLogger:
         """Return the path for today's log file, rotating on date change."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if today != self._current_date:
-            # Date changed — rotate
+            # Date changed -- rotate
             if self._buffer:
                 # Flush remaining to old file before rotating
                 if self._current_path:

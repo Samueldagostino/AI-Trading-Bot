@@ -214,7 +214,7 @@ class TestParseSymbol:
 
 
 # ================================================================
-# EXECUTE ROLL — Position Closure
+# EXECUTE ROLL -- Position Closure
 # ================================================================
 
 class TestExecuteRoll:

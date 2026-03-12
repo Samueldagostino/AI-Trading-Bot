@@ -115,7 +115,7 @@ def _build_heartbeat(status: dict, candles) -> dict:
     hb_data = _read_json_safe(HEARTBEAT_FILE)
 
     if hb_data and hb_data.get("last_seen"):
-        # Health monitor is running — use its data
+        # Health monitor is running -- use its data
         try:
             last_seen = datetime.fromisoformat(hb_data["last_seen"])
             age_sec = (now - last_seen).total_seconds()
@@ -126,7 +126,7 @@ def _build_heartbeat(status: dict, candles) -> dict:
         uptime_pct = round(hb_data.get("uptime_pct", 0.0), 1)
         quality = hb_data.get("connection_quality", "unknown")
     else:
-        # No health monitor — derive from publisher activity
+        # No health monitor -- derive from publisher activity
         last_seen = now  # We're publishing right now, so we're alive
         age_sec = 0.0
         uptime_start = _PUBLISHER_START
@@ -220,7 +220,7 @@ def build_sanitized_stats() -> dict:
         last_candle = candles[-1]
         last_price = last_candle.get("c", 0.0)
 
-    # HTF bias — extract from modifier state or default
+    # HTF bias -- extract from modifier state or default
     htf_bias = "NEUTRAL"
     if modifiers:
         overnight = modifiers.get("overnight", {})
@@ -289,7 +289,7 @@ def build_sanitized_stats() -> dict:
         }
         recent_decisions.append(sanitized)
 
-    # Build heartbeat and state (backward compatible — new fields)
+    # Build heartbeat and state (backward compatible -- new fields)
     heartbeat = _build_heartbeat(status, candles)
     bot_state = _build_bot_state(status, decisions)
 
@@ -352,79 +352,170 @@ def write_stats(stats: dict) -> None:
             pass
 
 
+def _clean_git_locks() -> None:
+    """Remove stale git lock files (common with OneDrive sync conflicts)."""
+    git_dir = ROOT_DIR / ".git"
+    lock_files = [
+        git_dir / "HEAD.lock",
+        git_dir / "index.lock",
+        git_dir / "objects" / "maintenance.lock",
+    ]
+    for lf in lock_files:
+        try:
+            if lf.exists():
+                lf.unlink()
+                logger.info("Removed stale lock file: %s", lf.name)
+        except OSError:
+            pass
+
+
+def _get_current_branch() -> str:
+    """Return the name of the currently checked-out branch."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=str(ROOT_DIR),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+# ── Target branch for GitHub Pages (website always serves from main) ──
+PAGES_BRANCH = "main"
+
+
 def git_commit_and_push(dry_run: bool = False) -> bool:
-    """Commit and push live_stats.json to GitHub."""
+    """Commit and push live_stats.json to GitHub.
+
+    Strategy: Always push the stats file to the 'main' branch so that
+    GitHub Pages (which serves from main/docs) shows current data —
+    regardless of which feature branch the bot is running on.
+
+    How it works:
+    1. Clean stale git lock files (OneDrive conflict safety).
+    2. Stage & commit the stats file on the current branch.
+    3. If the current branch IS main, push directly.
+    4. If the current branch is NOT main, cherry-pick the commit onto
+       main, push main, then switch back. The current branch keeps its
+       own commit too (harmless duplicate in docs/data/).
+    """
     try:
-        # Stage only the stats file
+        _clean_git_locks()
+
+        # Stage the stats file
         rel_path = OUTPUT_FILE.relative_to(ROOT_DIR)
         subprocess.run(
             ["git", "add", str(rel_path)],
             cwd=str(ROOT_DIR),
-            capture_output=True,
-            text=True,
-            timeout=30,
+            capture_output=True, text=True, timeout=30,
         )
 
-        # Check if there are changes to commit
+        # Also stage trade_viz_data if it exists
+        trade_viz = DOCS_DATA_DIR / "trade_viz_data.json"
+        if trade_viz.exists():
+            rel_viz = trade_viz.relative_to(ROOT_DIR)
+            subprocess.run(
+                ["git", "add", str(rel_viz)],
+                cwd=str(ROOT_DIR),
+                capture_output=True, text=True, timeout=30,
+            )
+
+        # Check if there are staged changes
         result = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             cwd=str(ROOT_DIR),
-            capture_output=True,
-            timeout=30,
+            capture_output=True, timeout=30,
         )
         if result.returncode == 0:
-            logger.debug("No changes to commit")
+            logger.info("Git: no changes to commit (file unchanged)")
             return True
 
         if dry_run:
             logger.info("[DRY-RUN] Would commit and push live_stats.json")
-            # Unstage in dry-run
             subprocess.run(
                 ["git", "reset", "HEAD", str(rel_path)],
                 cwd=str(ROOT_DIR),
-                capture_output=True,
-                timeout=30,
+                capture_output=True, timeout=30,
             )
             return True
 
-        # Commit
+        # Commit on current branch
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         result = subprocess.run(
             ["git", "commit", "-m", f"stats: update live_stats.json ({timestamp})"],
             cwd=str(ROOT_DIR),
-            capture_output=True,
-            text=True,
-            timeout=30,
+            capture_output=True, text=True, timeout=30,
         )
         if result.returncode != 0:
             logger.warning("Git commit failed: %s", result.stderr)
             return False
 
-        # Push with retry (use --set-upstream on first attempt)
-        for attempt in range(4):
-            push_cmd = ["git", "push"]
-            if attempt == 0:
-                push_cmd = ["git", "push", "--set-upstream", "origin", "HEAD"]
-            result = subprocess.run(
-                push_cmd,
+        current_branch = _get_current_branch()
+
+        # ── If NOT on main, cherry-pick the stats commit onto main ──
+        if current_branch and current_branch != PAGES_BRANCH:
+            commit_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
                 cwd=str(ROOT_DIR),
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if result.returncode == 0:
-                logger.info("Stats pushed to GitHub")
-                return True
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
 
-            wait = 2 ** (attempt + 1)
-            logger.warning(
-                "Git push failed (attempt %d/4): %s — retrying in %ds",
-                attempt + 1, result.stderr.strip(), wait,
+            # Switch to main
+            sw = subprocess.run(
+                ["git", "checkout", PAGES_BRANCH],
+                cwd=str(ROOT_DIR),
+                capture_output=True, text=True, timeout=30,
             )
-            time.sleep(wait)
+            if sw.returncode != 0:
+                logger.warning("Could not switch to %s: %s", PAGES_BRANCH, sw.stderr.strip())
+                # Fall back: just push the current branch
+                return _push_branch(current_branch)
 
-        logger.error("Git push failed after 4 attempts")
-        return False
+            # Cherry-pick the stats commit (no-commit + commit to avoid editor)
+            cp = subprocess.run(
+                ["git", "cherry-pick", "--no-commit", commit_sha],
+                cwd=str(ROOT_DIR),
+                capture_output=True, text=True, timeout=30,
+            )
+            if cp.returncode != 0:
+                # Conflict or empty cherry-pick — abort and go back
+                subprocess.run(
+                    ["git", "cherry-pick", "--abort"],
+                    cwd=str(ROOT_DIR),
+                    capture_output=True, timeout=10,
+                )
+                subprocess.run(
+                    ["git", "checkout", current_branch],
+                    cwd=str(ROOT_DIR),
+                    capture_output=True, timeout=30,
+                )
+                logger.warning("Cherry-pick to %s failed, pushing %s instead", PAGES_BRANCH, current_branch)
+                return _push_branch(current_branch)
+
+            # Commit on main
+            subprocess.run(
+                ["git", "commit", "-m", f"stats: update live_stats.json ({timestamp})"],
+                cwd=str(ROOT_DIR),
+                capture_output=True, text=True, timeout=30,
+            )
+
+            # Push main
+            pushed = _push_branch(PAGES_BRANCH)
+
+            # Switch back to original branch
+            subprocess.run(
+                ["git", "checkout", current_branch],
+                cwd=str(ROOT_DIR),
+                capture_output=True, text=True, timeout=30,
+            )
+
+            if pushed:
+                logger.info("Stats pushed to GitHub (main branch for Pages)")
+            return pushed
+
+        # ── Already on main — push directly ──
+        return _push_branch(PAGES_BRANCH)
 
     except subprocess.TimeoutExpired:
         logger.error("Git operation timed out")
@@ -432,6 +523,33 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
     except Exception as e:
         logger.error("Git error: %s", e)
         return False
+
+
+def _push_branch(branch: str) -> bool:
+    """Push a branch to origin with retry logic."""
+    for attempt in range(4):
+        _clean_git_locks()
+        push_cmd = ["git", "push", "origin", branch]
+        if attempt == 0:
+            push_cmd = ["git", "push", "--set-upstream", "origin", branch]
+        result = subprocess.run(
+            push_cmd,
+            cwd=str(ROOT_DIR),
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0:
+            logger.info("Stats pushed to GitHub (%s)", branch)
+            return True
+
+        wait = 2 ** (attempt + 1)
+        logger.warning(
+            "Git push failed (attempt %d/4): %s -- retrying in %ds",
+            attempt + 1, result.stderr.strip(), wait,
+        )
+        time.sleep(wait)
+
+    logger.error("Git push failed after 4 attempts")
+    return False
 
 
 def _check_status_transition(new_status: str) -> None:
@@ -443,7 +561,7 @@ def _check_status_transition(new_status: str) -> None:
 
     if (_previous_status == "OFFLINE" and new_status == "LIVE"
             and not _notification_sent_this_session):
-        logger.info("STATUS TRANSITION: OFFLINE → LIVE — triggering SMS notifications")
+        logger.info("STATUS TRANSITION: OFFLINE → LIVE -- triggering SMS notifications")
         _notification_sent_this_session = True
 
         def _send_in_background():
@@ -453,11 +571,11 @@ def _check_status_transition(new_status: str) -> None:
                     "NQ.BOT is now LIVE!\n\n"
                     "The MNQ futures simulation is running.\n"
                     "Watch live: www.makemoneymarkets.com\n\n"
-                    "— NQ.BOT"
+                    "-- NQ.BOT"
                 )
                 logger.info("SMS notification result: %s", result)
             except ImportError:
-                logger.warning("notify_subscribers module not found — SMS notifications disabled")
+                logger.warning("notify_subscribers module not found -- SMS notifications disabled")
             except Exception as e:
                 logger.error("SMS notification failed: %s", e)
 

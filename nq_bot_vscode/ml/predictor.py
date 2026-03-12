@@ -36,7 +36,7 @@ class MLPredictor:
     Loads a trained model and predicts entry setup quality.
 
     If no model is loaded, all predictions return neutral with
-    confidence 0.0 — the system works identically to no-ML mode.
+    confidence 0.0 -- the system works identically to no-ML mode.
     """
 
     def __init__(self, model_path: Optional[str] = None):
@@ -56,11 +56,11 @@ class MLPredictor:
         Returns True if loaded successfully, False otherwise.
         """
         if not HAS_LGB:
-            logger.warning("lightgbm not installed — ML predictor disabled")
+            logger.warning("lightgbm not installed -- ML predictor disabled")
             return False
         p = Path(path)
         if not p.exists():
-            logger.warning("Model file not found: %s — ML predictor disabled", p)
+            logger.warning("Model file not found: %s -- ML predictor disabled", p)
             return False
         try:
             self._model = lgb.Booster(model_file=str(p))

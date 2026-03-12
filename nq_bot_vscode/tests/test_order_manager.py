@@ -1,9 +1,9 @@
 """
-Tests for Broker.order_manager — OrderManager (TWS API)
+Tests for Broker.order_manager -- OrderManager (TWS API)
 =========================================================
 Tests for the 2-contract scale-out order execution system.
 
-All tests use mocked IB instances — no real IBKR connection needed.
+All tests use mocked IB instances -- no real IBKR connection needed.
 30+ tests covering:
   - Entry orders (long, short, timeout, partial fill)
   - Stop loss (fill, rejection, flatten)
@@ -230,7 +230,7 @@ def om(tmp_log_dir):
 
 class TestSafetyRails:
     def test_safety_rejects_when_in_position(self, om):
-        """No pyramiding — reject if already in a position."""
+        """No pyramiding -- reject if already in a position."""
         om._active_positions["T001"] = {"contracts": 0, "direction": "LONG"}
         result = om._check_safety(make_signal())
         assert result == "SAFETY_ALREADY_IN_POSITION"
@@ -421,13 +421,13 @@ class TestC2Trail:
         mock_ib_trade = MockTrade(order_id=200)
         om.ib.openTrades.return_value = [mock_ib_trade]
 
-        # Price moves up — trail should move up
+        # Price moves up -- trail should move up
         exited = await om.manage_c2_trail(trade, 25020.0)
         assert not exited
         assert trade["c2_trail_stop"] == 25010.0  # 25020 - 10
         assert trade["max_price_since_entry"] == 25020.0
 
-        # Price drops — trail should NOT move down
+        # Price drops -- trail should NOT move down
         exited = await om.manage_c2_trail(trade, 25015.0)
         assert not exited
         assert trade["c2_trail_stop"] == 25010.0  # Still 25010
@@ -447,7 +447,7 @@ class TestC2Trail:
         assert not exited
         assert trade["c2_trail_stop"] == 24990.0  # 24980 + 10
 
-        # Price moves up — trail should NOT move up
+        # Price moves up -- trail should NOT move up
         exited = await om.manage_c2_trail(trade, 24985.0)
         assert not exited
         assert trade["c2_trail_stop"] == 24990.0  # Stays
@@ -510,11 +510,11 @@ class TestC2Trail:
                                    max_favorable_excursion=20.0)
 
         om.ib.openTrades.return_value = []  # No matching trade
-        # Attempt 3 places a new order — make it raise to trigger full failure
+        # Attempt 3 places a new order -- make it raise to trigger full failure
         om.ib.placeOrder.side_effect = Exception("Connection lost")
 
         result = await om._modify_trail_stop(trade, 25010.0)
-        # All 3 attempts fail — should return False
+        # All 3 attempts fail -- should return False
         assert not result
 
 
@@ -769,7 +769,7 @@ class TestWatchdog:
         om._start_watchdog(700, 0.1)
         time.sleep(0.3)
 
-        # Timer has fired — verify cancel was attempted and order_in_flight cleared
+        # Timer has fired -- verify cancel was attempted and order_in_flight cleared
         om.ib.cancelOrder.assert_called_once()
         assert not om._order_in_flight
 

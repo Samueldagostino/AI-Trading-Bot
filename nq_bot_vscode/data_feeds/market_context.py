@@ -1,8 +1,8 @@
 """
-MarketContext — Frozen snapshot of external market data from QuantData.
+MarketContext -- Frozen snapshot of external market data from QuantData.
 ===========================================================================
 Immutable dataclass created once per refresh cycle, consumed by all downstream
-components. Currently LOG-ONLY — does NOT affect confluence scoring.
+components. Currently LOG-ONLY -- does NOT affect confluence scoring.
 
 Data sources: QuantData GEX, DEX, net options flow, dark pool, volatility skew.
 """
@@ -16,7 +16,7 @@ from typing import List, Optional
 class MarketContext:
     """
     Frozen snapshot of external market data from QuantData.
-    Immutable — created once per refresh cycle, consumed by all downstream.
+    Immutable -- created once per refresh cycle, consumed by all downstream.
     """
     timestamp: datetime
 
@@ -140,7 +140,7 @@ class NQContextTranslator:
         # If SPY context available and conflicts with QQQ, log warning
         if spy_context and spy_context.gamma_regime != qqq_context.gamma_regime:
             logger.warning(
-                "SPY gamma (%s) conflicts with QQQ gamma (%s) — using QQQ",
+                "SPY gamma (%s) conflicts with QQQ gamma (%s) -- using QQQ",
                 spy_context.gamma_regime,
                 qqq_context.gamma_regime,
             )

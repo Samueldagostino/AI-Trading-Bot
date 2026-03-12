@@ -6,8 +6,8 @@ trade decision with confidence scoring.
 
 Signal Sources:
 1. Discord bias (weighted at 25%)
-2. Technical features — OB, FVG, sweeps, VWAP, delta (weighted at 50%)
-3. ML model predictions (weighted at 25%) — placeholder for future
+2. Technical features -- OB, FVG, sweeps, VWAP, delta (weighted at 50%)
+3. ML model predictions (weighted at 25%) -- placeholder for future
 
 CRITICAL RULE: A trade requires minimum 3 independent signals
 agreeing on direction. Discord alone NEVER triggers a trade.
@@ -70,7 +70,7 @@ class SignalAggregator:
     """
     Aggregates signals from all sources and computes confluence score.
     
-    The aggregator does NOT make risk decisions — it only determines
+    The aggregator does NOT make risk decisions -- it only determines
     direction and confidence. The risk engine decides sizing and approval.
     """
 
@@ -157,7 +157,7 @@ class SignalAggregator:
                     metadata=ml_prediction,
                 ))
 
-        # === Not enough signals — no trade ===
+        # === Not enough signals -- no trade ===
         if len(signals) < 2:
             return None
 
@@ -176,7 +176,7 @@ class SignalAggregator:
             direction = SignalDirection.SHORT
             aligned_signals = short_signals
         else:
-            # No clear consensus — no trade
+            # No clear consensus -- no trade
             return None
 
         # === Compute weighted scores by category ===
@@ -225,17 +225,17 @@ class SignalAggregator:
         # === HARD RULE: Discord alone cannot trigger ===
         if should_trade and len(tech_scores) == 0 and len(ml_scores) == 0:
             should_trade = False
-            rejection_reason = "Discord signal alone — requires technical or ML confluence"
+            rejection_reason = "Discord signal alone -- requires technical or ML confluence"
 
         # === HTF BIAS GATE ===
-        # CRITICAL: fail-safe — if HTF data is unavailable, block all trades.
+        # CRITICAL: fail-safe -- if HTF data is unavailable, block all trades.
         # The HTF gate provides 84% of the system's edge; trading without it
         # is trading blind.  Never default to allowing trades.
         if should_trade:
             if htf_bias is None:
                 should_trade = False
                 rejection_reason = (
-                    "HTF data unavailable — blocking trade (fail-safe)"
+                    "HTF data unavailable -- blocking trade (fail-safe)"
                 )
                 self._htf_blocked_count += 1
                 logger.warning("HTF FAIL-SAFE: no HTF data, blocking %s signal", direction.value)
@@ -374,7 +374,7 @@ class SignalAggregator:
 
         # --- VWAP ---
         if snapshot.price_vs_vwap != 0 and snapshot.session_vwap > 0:
-            if snapshot.price_vs_vwap < -5:  # Price well below VWAP — mean reversion long
+            if snapshot.price_vs_vwap < -5:  # Price well below VWAP -- mean reversion long
                 signals.append(IndividualSignal(
                     name="vwap_below",
                     direction=SignalDirection.LONG,
@@ -383,7 +383,7 @@ class SignalAggregator:
                     timestamp=current_time,
                     metadata={"feature": "VWAP", "deviation": snapshot.price_vs_vwap},
                 ))
-            elif snapshot.price_vs_vwap > 5:  # Price well above VWAP — mean reversion short
+            elif snapshot.price_vs_vwap > 5:  # Price well above VWAP -- mean reversion short
                 signals.append(IndividualSignal(
                     name="vwap_above",
                     direction=SignalDirection.SHORT,

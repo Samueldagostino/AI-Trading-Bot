@@ -56,7 +56,7 @@ DECISIONS_LOG = LOGS_DIR / "ibkr_decisions.json"
 BASELINE_PATH = project_dir / "config" / "backtest_baseline.json"
 VIZ_DATA_PATH = DOCS_DIR / "viz_data.json"
 
-# MNQ point value — matches Broker/order_executor.py
+# MNQ point value -- matches Broker/order_executor.py
 MNQ_POINT_VALUE = 2.0
 
 # RTH close hour in ET (16:00)
@@ -125,7 +125,7 @@ class BacktestBaseline:
 
 
 # ═══════════════════════════════════════════════════════════════
-# TRADE RECORD — parsed from log entries
+# TRADE RECORD -- parsed from log entries
 # ═══════════════════════════════════════════════════════════════
 
 @dataclass
@@ -150,7 +150,7 @@ class StatsEngine:
     """
     Computes all running statistics from trade records.
 
-    Pure computation — no I/O, no side effects.
+    Pure computation -- no I/O, no side effects.
     """
 
     def __init__(self, baseline: BacktestBaseline):
@@ -266,7 +266,7 @@ class StatsEngine:
         return (max_dd / account_size) * 100
 
     def max_drawdown_pct(self, account_size: float) -> float:
-        """Same as current_drawdown_pct — max DD over full history."""
+        """Same as current_drawdown_pct -- max DD over full history."""
         return self.current_drawdown_pct(account_size)
 
     # ── Daily stats ──
@@ -779,7 +779,7 @@ def run_weekly_report(
     trades = parse_trades(raw_trades)
 
     if not trades:
-        print("No trades found — cannot generate weekly report.")
+        print("No trades found -- cannot generate weekly report.")
         return None
 
     # Generate report for the current week
@@ -1087,8 +1087,8 @@ def render_dashboard(stats: StatsEngine, alerts: List[Alert]) -> str:
     else:
         day_count = 0
 
-    pf_bar = f"{pf_str}" if stats.total_trades > 0 else "—"
-    wr_bar = f"{stats.win_rate:.0f}%" if stats.total_trades > 0 else "—"
+    pf_bar = f"{pf_str}" if stats.total_trades > 0 else "--"
+    wr_bar = f"{stats.win_rate:.0f}%" if stats.total_trades > 0 else "--"
     lines.append("")
     lines.append(
         f"  {mode} | Day {day_count} | {stats.total_trades} trades | "
@@ -1130,8 +1130,8 @@ def run_snapshot():
 
 
 def run_live():
-    """Live tail mode — refreshes when log files change."""
-    print("IBKR Paper Trading Monitor — Live Mode (Ctrl+C to exit)")
+    """Live tail mode -- refreshes when log files change."""
+    print("IBKR Paper Trading Monitor -- Live Mode (Ctrl+C to exit)")
     print(f"Watching: {TRADES_LOG}")
     print(f"          {DECISIONS_LOG}")
     print(f"Baseline: {BASELINE_PATH}")
@@ -1178,7 +1178,7 @@ def run_live():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IBKR Paper Trading Monitor — backtest comparison + alerts"
+        description="IBKR Paper Trading Monitor -- backtest comparison + alerts"
     )
     parser.add_argument(
         "--snapshot", action="store_true",

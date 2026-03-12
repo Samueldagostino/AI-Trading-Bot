@@ -4,10 +4,10 @@ Tradovate Demo Paper Trading Connector
 Wraps the existing TradovateClient with paper-trading safety guards.
 
 Safety rules (hard-coded, non-negotiable):
-  1. ENVIRONMENT=demo — assertion blocks live trading
-  2. Max position = 2 contracts — assertion enforced
-  3. Daily loss limit = $500 — auto-halts trading
-  4. Connection drop > 60s — flattens all positions and stops
+  1. ENVIRONMENT=demo -- assertion blocks live trading
+  2. Max position = 2 contracts -- assertion enforced
+  3. Daily loss limit = $500 -- auto-halts trading
+  4. Connection drop > 60s -- flattens all positions and stops
 
 This connector:
   - Authenticates to Tradovate demo API
@@ -40,7 +40,7 @@ _LOGS_DIR = _PROJECT_DIR / "logs"
 
 
 # ═══════════════════════════════════════════════════════════════
-# SAFETY CONSTANTS — DO NOT CHANGE
+# SAFETY CONSTANTS -- DO NOT CHANGE
 # ═══════════════════════════════════════════════════════════════
 ENVIRONMENT = "demo"
 MAX_POSITION_CONTRACTS = 2
@@ -50,7 +50,7 @@ HEARTBEAT_INTERVAL_SECONDS = 10
 
 # NQ session boundaries (all times in US/Eastern)
 # Globex opens Sunday 6:00 PM ET, closes Friday 5:00 PM ET
-# Daily maintenance: 5:00 PM – 6:00 PM ET
+# Daily maintenance: 5:00 PM - 6:00 PM ET
 SESSION_OPEN_HOUR_ET = 18       # 6:00 PM ET
 SESSION_OPEN_MINUTE_ET = 1      # 6:01 PM ET (skip first minute)
 SESSION_CLOSE_HOUR_ET = 16      # 4:00 PM ET
@@ -111,7 +111,7 @@ class TradovatePaperConnector:
         self._on_position_update: Optional[Callable] = None
         self._on_connection_lost: Optional[Callable] = None
 
-        # Trade log — JSONL with daily rotation (replaces load-rewrite pattern)
+        # Trade log -- JSONL with daily rotation (replaces load-rewrite pattern)
         self._trade_log: List[Dict] = []
         _LOGS_DIR.mkdir(parents=True, exist_ok=True)
         self._trade_log_path = str(_LOGS_DIR / "paper_trades.json")
@@ -242,7 +242,7 @@ class TradovatePaperConnector:
             s.current_2m_start = bar_time
             s.bars_in_current_2m = 1
         else:
-            # Second bar — complete the 2m bar
+            # Second bar -- complete the 2m bar
             s.current_2m_high = max(s.current_2m_high, h)
             s.current_2m_low = min(s.current_2m_low, lo)
             s.current_2m_volume += v
@@ -277,7 +277,7 @@ class TradovatePaperConnector:
             await self._on_fill(fill)
 
     async def _handle_position_update(self, data: Dict) -> None:
-        """Handle position update — enforce max contracts."""
+        """Handle position update -- enforce max contracts."""
         net_pos = abs(data.get("netPos", 0))
         if net_pos > MAX_POSITION_CONTRACTS:
             logger.critical(
@@ -307,7 +307,7 @@ class TradovatePaperConnector:
 
         # ── SAFETY: Check halt state ──
         if self.state.is_halted:
-            logger.warning(f"BLOCKED: Trading halted — {self.state.halt_reason}")
+            logger.warning(f"BLOCKED: Trading halted -- {self.state.halt_reason}")
             self._log_event("blocked", {"reason": self.state.halt_reason})
             return {"success": False, "reason": self.state.halt_reason}
 
@@ -362,7 +362,7 @@ class TradovatePaperConnector:
         self.state.halt_reason = f"emergency: {reason}"
         self._log_event("emergency_flatten", {"reason": reason})
 
-        # Retry flatten up to 3 times — positions MUST be closed
+        # Retry flatten up to 3 times -- positions MUST be closed
         for attempt in range(1, 4):
             try:
                 await self._client.flatten_position()
@@ -376,7 +376,7 @@ class TradovatePaperConnector:
                     await asyncio.sleep(2.0)
 
         logger.critical(
-            "EMERGENCY FLATTEN FAILED after 3 attempts — "
+            "EMERGENCY FLATTEN FAILED after 3 attempts -- "
             "MANUAL INTERVENTION REQUIRED. Positions may still be open."
         )
 
@@ -425,7 +425,7 @@ class TradovatePaperConnector:
     # ================================================================
     @staticmethod
     def get_et_now() -> datetime:
-        """Get current time in US/Eastern — DST-aware via ZoneInfo."""
+        """Get current time in US/Eastern -- DST-aware via ZoneInfo."""
         return datetime.now(ZoneInfo("America/New_York"))
 
     @staticmethod
@@ -433,14 +433,14 @@ class TradovatePaperConnector:
         """Check if current ET time is within trading session.
 
         Session: 6:01 PM ET -> 4:30 PM ET next day.
-        Maintenance: 5:00 PM – 6:00 PM ET.
+        Maintenance: 5:00 PM - 6:00 PM ET.
         """
         if et_time is None:
             et_time = TradovatePaperConnector.get_et_now()
 
         h, m = et_time.hour, et_time.minute
 
-        # Maintenance window: 5:00 PM – 6:00 PM ET
+        # Maintenance window: 5:00 PM - 6:00 PM ET
         if h == MAINTENANCE_START_HOUR_ET:
             return False
 

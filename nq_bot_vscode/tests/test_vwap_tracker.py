@@ -1,4 +1,4 @@
-"""Tests for signals/vwap_tracker.py — VWAPTracker."""
+"""Tests for signals/vwap_tracker.py -- VWAPTracker."""
 
 import pytest
 from datetime import datetime, timezone
@@ -206,7 +206,7 @@ class TestVWAPCrossover:
         tracker.update(make_bar_et(9, 35, 18015, 18025, 18010, 18020, vol=1000))
         tracker.update(make_bar_et(9, 40, 18020, 18022, 17980, 17985, vol=1000))
         signal = tracker.get_vwap_signal(17985)
-        # Close went from above VWAP to below — cross detected
+        # Close went from above VWAP to below -- cross detected
         assert signal["crossed_recently"] is True
 
     def test_consistent_side_no_cross(self):

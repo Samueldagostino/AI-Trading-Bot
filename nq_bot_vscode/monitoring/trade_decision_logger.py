@@ -1,14 +1,14 @@
 """
-Trade Decision Logger — Full Approval + Rejection Logging
+Trade Decision Logger -- Full Approval + Rejection Logging
 ============================================================
-Logs EVERY signal evaluation — both approved and rejected trades —
+Logs EVERY signal evaluation -- both approved and rejected trades --
 with complete reasoning chains.  READ-ONLY: observes and records
 decisions, never modifies them.
 
 Output files:
-  logs/trade_decisions.json          — machine-readable, one JSON per line
-  logs/trade_decisions_readable.txt  — human-readable formatted summaries
-  logs/daily_summaries.txt           — end-of-day session statistics
+  logs/trade_decisions.json          -- machine-readable, one JSON per line
+  logs/trade_decisions_readable.txt  -- human-readable formatted summaries
+  logs/daily_summaries.txt           -- end-of-day session statistics
 """
 
 import json
@@ -25,7 +25,7 @@ class TradeDecisionLogger:
     """
     Logs every trade decision (approved or rejected) with full context.
 
-    This logger is READ-ONLY — it observes and records decisions made by
+    This logger is READ-ONLY -- it observes and records decisions made by
     the trading pipeline.  It never modifies trade logic, sizing, or gates.
 
     Usage:
@@ -129,7 +129,7 @@ class TradeDecisionLogger:
         )
 
         logger.debug(
-            "Decision logged: REJECTED %s @ %.2f — stage=%s",
+            "Decision logged: REJECTED %s @ %.2f -- stage=%s",
             signal_direction, price_at_signal, rejection_stage,
         )
 
@@ -199,7 +199,7 @@ class TradeDecisionLogger:
         self._approved_count += 1
 
         logger.debug(
-            "Decision logged: APPROVED %s @ %.2f — score=%.3f size=%.0f",
+            "Decision logged: APPROVED %s @ %.2f -- score=%.3f size=%.0f",
             signal_direction, price_at_signal, confluence_score, position_size,
         )
 
@@ -288,7 +288,7 @@ class TradeDecisionLogger:
 
         lines = [
             f"\n{'=' * 50}",
-            f"  SESSION SUMMARY — {now_str}",
+            f"  SESSION SUMMARY -- {now_str}",
             f"{'=' * 50}",
             f"  Total signals evaluated:  {summary['total_signals']}",
             f"  Approved:                 {summary['approved']}",
@@ -318,7 +318,7 @@ class TradeDecisionLogger:
             logger.warning("Failed to write daily summary: %s", e)
 
     # ================================================================
-    # INTERNAL — FILE I/O
+    # INTERNAL -- FILE I/O
     # ================================================================
     def _write_json(self, entry: Dict[str, Any]) -> None:
         """Append one JSON object per line to trade_decisions.json."""

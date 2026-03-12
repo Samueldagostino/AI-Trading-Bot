@@ -71,7 +71,7 @@ class TestIntegration:
         """Scaled ATR * 2.0 = 35pts still blocked by 30pt HC cap.
 
         The session scaler widens ATR but the 30pt max stop gate in
-        main.py is UNCHANGED — it operates on the final stop distance,
+        main.py is UNCHANGED -- it operates on the final stop distance,
         not on ATR itself.
         """
         scaler = SessionVolatilityScaler(enabled=True)
@@ -100,7 +100,7 @@ class TestIntegration:
         raw_atr = 10.0
         ts = _et(9, 45)
 
-        # When disabled, scale factor is 1.0 — no change
+        # When disabled, scale factor is 1.0 -- no change
         assert scaler.get_scale_factor(ts) == 1.0
         assert scaler.scale_atr(raw_atr, ts) == raw_atr
 

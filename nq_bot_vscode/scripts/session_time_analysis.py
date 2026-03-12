@@ -6,7 +6,7 @@ Analyzes MNQ futures backtest trades to answer:
 "Should the trailing stop tighten approaching 4pm ET?
 Do late-day trailing exits have lower avg PnL?"
 
-Action Plan Item: R4 — Session Timing Analysis
+Action Plan Item: R4 -- Session Timing Analysis
 - Bucket C2 trades by EXIT TIME into trading session windows
 - Bucket C2 trades by ENTRY TIME into trading session windows
 - Analyze exit PnL by exit reason (trailing, breakeven, stop, max_target, time_stop)
@@ -18,13 +18,13 @@ Data Source: logs/paper_trades.json (or --trades argument)
 Output: logs/session_time_analysis.json
 
 Session Windows (ET):
-  - Pre-market:       06:00 – 09:30 ET
-  - Open volatility:  09:30 – 10:30 ET
-  - Morning:          10:30 – 12:00 ET
-  - Lunch doldrums:   12:00 – 14:00 ET
-  - Afternoon:        14:00 – 15:30 ET
-  - Close:            15:30 – 16:00 ET
-  - After hours:      16:00 – 18:00 ET
+  - Pre-market:       06:00 - 09:30 ET
+  - Open volatility:  09:30 - 10:30 ET
+  - Morning:          10:30 - 12:00 ET
+  - Lunch doldrums:   12:00 - 14:00 ET
+  - Afternoon:        14:00 - 15:30 ET
+  - Close:            15:30 - 16:00 ET
+  - After hours:      16:00 - 18:00 ET
 """
 
 import argparse
@@ -510,7 +510,7 @@ def print_report(
 ):
     """Print formatted analysis report to console."""
     print("\n" + "=" * 80)
-    print("SESSION TIME ANALYSIS — Research Question R4")
+    print("SESSION TIME ANALYSIS -- Research Question R4")
     print("=" * 80)
 
     print("\n" + "-" * 80)

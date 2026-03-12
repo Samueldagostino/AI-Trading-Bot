@@ -2,7 +2,7 @@
 Execution Analytics Engine
 ===========================
 Tracks fill quality, slippage, latency, and order execution performance.
-Non-blocking — all recording methods are fire-and-forget async tasks
+Non-blocking -- all recording methods are fire-and-forget async tasks
 that never delay order placement.
 
 Metrics:
@@ -53,7 +53,7 @@ class ExecutionAnalytics:
     """
     Tracks and aggregates order execution quality metrics.
 
-    Thread-safe via asyncio — all DB writes are non-blocking.
+    Thread-safe via asyncio -- all DB writes are non-blocking.
     In-memory rolling window for real-time metrics.
     """
 
@@ -204,7 +204,7 @@ class ExecutionAnalytics:
         return round(raw / MNQ_TICK_SIZE, 2)
 
     # ══════════════════════════════════════════════════════════
-    # METRICS — POINT-IN-TIME
+    # METRICS -- POINT-IN-TIME
     # ══════════════════════════════════════════════════════════
 
     def get_rolling_metrics(self) -> Dict[str, Any]:
@@ -544,12 +544,12 @@ class ExecutionAnalytics:
             return 0
 
     def _schedule_db_insert(self, event: OrderEvent) -> None:
-        """Fire-and-forget DB insert — never blocks order flow."""
+        """Fire-and-forget DB insert -- never blocks order flow."""
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(self._db_insert(event))
         except RuntimeError:
-            pass  # No event loop — skip DB write
+            pass  # No event loop -- skip DB write
 
     async def _db_insert(self, event: OrderEvent) -> None:
         """Insert a single event into the execution_metrics table."""

@@ -33,10 +33,10 @@ def print_validation_status() -> None:
     for sym in sorted(INSTRUMENT_SPECS):
         spec = INSTRUMENT_SPECS[sym]
         if spec.validated:
-            print(f"  {spec.symbol:<6} VALIDATED   — cleared for trading")
+            print(f"  {spec.symbol:<6} VALIDATED   -- cleared for trading")
         else:
             has_unvalidated = True
-            print(f"  {spec.symbol:<6} UNVALIDATED — blocked from order execution")
+            print(f"  {spec.symbol:<6} UNVALIDATED -- blocked from order execution")
 
     print()
 
@@ -48,7 +48,7 @@ def print_validation_status() -> None:
         print("  !! 200+ trades. Orders will be BLOCKED at execution.    !!")
         if override:
             print("  !!                                                      !!")
-            print("  !! ALLOW_UNVALIDATED=true is SET — override active.     !!")
+            print("  !! ALLOW_UNVALIDATED=true is SET -- override active.     !!")
             print("  !! Use for PAPER TESTING ONLY.                          !!")
         else:
             print("  !!                                                      !!")

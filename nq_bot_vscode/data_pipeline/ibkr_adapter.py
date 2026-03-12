@@ -8,9 +8,9 @@ Data flow verification (2026-03-04):
   IBKRDataFeed.candle_to_bar() already handles the conversion properly.
 
   This module provides:
-  1. adapt_ibkr_bar() — explicit adapter for IBKR candle dicts -> Bar
+  1. adapt_ibkr_bar() -- explicit adapter for IBKR candle dicts -> Bar
      (thin wrapper around candle_to_bar for standalone usage outside IBKRDataFeed)
-  2. adapt_historical_bar() — converts raw IBKR API historical bar format
+  2. adapt_historical_bar() -- converts raw IBKR API historical bar format
   3. Field mapping documentation
 
 IBKR Raw Formats:
@@ -23,7 +23,7 @@ IBKR Raw Formats:
     {"timestamp": datetime, "open": float, "high": float, "low": float, "close": float,
      "volume": int, "tick_count": int, "session_type": SessionType}
 
-  Both are converted to Bar by IBKRDataFeed.candle_to_bar() — VERIFIED CORRECT.
+  Both are converted to Bar by IBKRDataFeed.candle_to_bar() -- VERIFIED CORRECT.
 """
 
 import math

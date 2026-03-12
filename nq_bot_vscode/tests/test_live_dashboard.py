@@ -1,5 +1,5 @@
 """
-Tests for Live Dashboard — HTTP Server + JSON File Reading
+Tests for Live Dashboard -- HTTP Server + JSON File Reading
 ============================================================
 Covers:
   - API endpoints return valid JSON
@@ -131,7 +131,7 @@ class TestAtomicWrite:
 
 
 # =====================================================================
-#  DashboardServer — HTTP endpoints
+#  DashboardServer -- HTTP endpoints
 # =====================================================================
 class TestDashboardServer:
 

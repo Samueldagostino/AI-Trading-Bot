@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Review Trade Decisions — CLI Tool
+Review Trade Decisions -- CLI Tool
 ====================================
 Post-session review of trade decisions from logs/trade_decisions.json.
 

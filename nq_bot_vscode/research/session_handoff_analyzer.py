@@ -1,7 +1,7 @@
 """
 Session Handoff Conditional Probability Analyzer
 
-OBSERVATION TOOL ONLY — not a trading strategy.
+OBSERVATION TOOL ONLY -- not a trading strategy.
 Calculates conditional probabilities of continuation, reversal, and range-bound
 behavior across Asia → London → NY sessions using historical MNQ 1-minute data.
 
@@ -53,11 +53,11 @@ class HandoffOutcome(Enum):
 # ---------------------------------------------------------------------------
 
 SESSION_TIMES = {
-    SessionName.ASIA:     (time(18, 0), time(2, 0)),    # 18:00–02:00 ET (crosses midnight)
-    SessionName.LONDON:   (time(2, 0),  time(8, 0)),    # 02:00–08:00 ET
-    SessionName.NY_OPEN:  (time(8, 0),  time(10, 30)),  # 08:00–10:30 ET
-    SessionName.NY_CORE:  (time(10, 30), time(15, 0)),  # 10:30–15:00 ET
-    SessionName.NY_CLOSE: (time(15, 0), time(16, 0)),   # 15:00–16:00 ET
+    SessionName.ASIA:     (time(18, 0), time(2, 0)),    # 18:00-02:00 ET (crosses midnight)
+    SessionName.LONDON:   (time(2, 0),  time(8, 0)),    # 02:00-08:00 ET
+    SessionName.NY_OPEN:  (time(8, 0),  time(10, 30)),  # 08:00-10:30 ET
+    SessionName.NY_CORE:  (time(10, 30), time(15, 0)),  # 10:30-15:00 ET
+    SessionName.NY_CLOSE: (time(15, 0), time(16, 0)),   # 15:00-16:00 ET
 }
 
 # Consecutive session pairs for handoff analysis
@@ -274,7 +274,7 @@ class SessionHandoffAnalyzer:
             if o.from_session == from_session and o.to_session == to_session
         ]
         if len(relevant) < 20:
-            return {"error": f"Only {len(relevant)} observations — cannot split"}
+            return {"error": f"Only {len(relevant)} observations -- cannot split"}
 
         dates = sorted(set(o.date for o in relevant))
         midpoint = dates[len(dates) // 2]
@@ -321,7 +321,7 @@ class SessionHandoffAnalyzer:
             if o.from_session == from_session and o.to_session == to_session
         ]
         if len(relevant) < 20:
-            return {"error": f"Only {len(relevant)} observations — cannot split"}
+            return {"error": f"Only {len(relevant)} observations -- cannot split"}
 
         # Get session ranges for each observation date
         date_ranges = {}
@@ -425,7 +425,7 @@ class SessionHandoffAnalyzer:
             "verdict": (
                 "SESSION OPENS HAVE SIGNIFICANTLY HIGHER VOLATILITY"
                 if p_value < 0.05
-                else "SESSION OPEN VOLATILITY IS NOT SPECIAL — confirmation bias"
+                else "SESSION OPEN VOLATILITY IS NOT SPECIAL -- confirmation bias"
             ),
         }
 
@@ -441,11 +441,11 @@ class SessionHandoffAnalyzer:
         end = max(dates)
         months = (end.year - start.year) * 12 + (end.month - start.month)
         if months < 3:
-            label = "INSUFFICIENT DATA — results unreliable"
+            label = "INSUFFICIENT DATA -- results unreliable"
         elif months < 6:
-            label = "PRELIMINARY — needs more data"
+            label = "PRELIMINARY -- needs more data"
         else:
-            label = "USABLE — but verify with live observation"
+            label = "USABLE -- but verify with live observation"
         return {
             "start": str(start.date()) if hasattr(start, 'date') else str(start),
             "end": str(end.date()) if hasattr(end, 'date') else str(end),
@@ -460,7 +460,7 @@ class SessionHandoffAnalyzer:
         lines = []
         lines.append("=" * 80)
         lines.append("SESSION HANDOFF CONDITIONAL PROBABILITY ANALYSIS")
-        lines.append("OBSERVATION ONLY — NOT A TRADING STRATEGY")
+        lines.append("OBSERVATION ONLY -- NOT A TRADING STRATEGY")
         lines.append("=" * 80)
         lines.append("")
 
@@ -575,7 +575,7 @@ class SessionHandoffAnalyzer:
             lines.append("WARNING: Statistical significance ≠ trading edge.")
             lines.append("Check effect sizes, transaction costs, and survivorship tests above.")
         else:
-            lines.append("NO EDGE FOUND — session handoffs are random")
+            lines.append("NO EDGE FOUND -- session handoffs are random")
             lines.append("No cell showed p < 0.05 against uniform distribution.")
         lines.append("=" * 80)
 

@@ -235,7 +235,7 @@ def simulate_shadow_trade(
     trail_distance = stop_distance  # ATR-based trail
 
     if c1_outcome == "LOSS":
-        # Both contracts stopped — same loss
+        # Both contracts stopped -- same loss
         c2_outcome = "LOSS"
         c2_pnl = -(stop_distance * POINT_VALUE) - c1_commission
     else:

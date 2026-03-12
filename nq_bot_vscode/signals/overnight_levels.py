@@ -86,7 +86,7 @@ class OvernightLevelTracker:
         et_time = et_dt.time()
         et_date = et_dt.date()
 
-        # Detect new trading day — simple calendar date change
+        # Detect new trading day -- simple calendar date change
         is_new_day = False
         if self._current_date is None:
             is_new_day = True
@@ -103,7 +103,7 @@ class OvernightLevelTracker:
         is_rth = RTH_OPEN <= et_time < RTH_CLOSE
 
         if is_rth:
-            # First RTH bar — capture open and initialize gap
+            # First RTH bar -- capture open and initialize gap
             if not self._rth_open_seen:
                 self._rth_open_seen = True
                 self._rth_open_price = bar.open
@@ -126,7 +126,7 @@ class OvernightLevelTracker:
             # Update gap fill tracking
             self._update_gap_fill(bar)
         else:
-            # Overnight session — update overnight high/low
+            # Overnight session -- update overnight high/low
             if self._overnight_high is None or bar.high > self._overnight_high:
                 self._overnight_high = bar.high
             if self._overnight_low is None or bar.low < self._overnight_low:
@@ -187,7 +187,7 @@ class OvernightLevelTracker:
             return
 
         diff = self._rth_open_price - self._prev_close
-        if abs(diff) < 0.25:  # 1 tick on NQ — effectively no gap
+        if abs(diff) < 0.25:  # 1 tick on NQ -- effectively no gap
             self._gap_direction = "NONE"
             self._gap_size = 0.0
         elif diff > 0:

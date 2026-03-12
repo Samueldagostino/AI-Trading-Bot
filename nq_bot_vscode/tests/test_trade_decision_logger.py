@@ -96,7 +96,7 @@ class TestRejectionLogging:
             signal_direction="LONG",
             rejection_stage="MODIFIER_STANDSIDE",
             rejection_details={
-                "stand_aside_reason": "FOMC in 0.25h — stand aside",
+                "stand_aside_reason": "FOMC in 0.25h -- stand aside",
                 "modifier_values": {
                     "overnight": 1.0,
                     "fomc": 0.0,
@@ -109,7 +109,7 @@ class TestRejectionLogging:
 
         assert entry["rejection_stage"] == "MODIFIER_STANDSIDE"
         details = entry["rejection_details"]
-        assert details["stand_aside_reason"] == "FOMC in 0.25h — stand aside"
+        assert details["stand_aside_reason"] == "FOMC in 0.25h -- stand aside"
 
     def test_log_rejection_safety_rail(self, logger):
         """Test safety rail triggered rejection."""

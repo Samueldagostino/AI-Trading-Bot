@@ -50,7 +50,7 @@ def _make_fold(fold_id, train_pf=1.8, test_pf=1.4, train_wr=60.0, test_wr=55.0,
 
 
 class TestFoldGeneration:
-    """test_fold_generation — correct number of folds for given data length."""
+    """test_fold_generation -- correct number of folds for given data length."""
 
     def test_basic_fold_count(self):
         """6 months data, train=3, test=1, step=1 → 3 folds."""
@@ -96,7 +96,7 @@ class TestFoldGeneration:
 
 
 class TestNoLookahead:
-    """test_no_lookahead — train window never overlaps test window."""
+    """test_no_lookahead -- train window never overlaps test window."""
 
     def test_no_overlap(self):
         """Verify train months and test months never share elements."""
@@ -133,7 +133,7 @@ class TestNoLookahead:
 
 
 class TestMinTradesFilter:
-    """test_min_trades_filter — folds with <10 trades are skipped."""
+    """test_min_trades_filter -- folds with <10 trades are skipped."""
 
     def test_skipped_fold_low_train_trades(self):
         fold = _make_fold(1, train_trades=5, skipped=True, skip_reason="Too few train trades")
@@ -158,7 +158,7 @@ class TestMinTradesFilter:
 
 
 class TestDegradationCalculation:
-    """test_degradation_calculation — OOS/IS ratio computed correctly."""
+    """test_degradation_calculation -- OOS/IS ratio computed correctly."""
 
     def test_basic_degradation(self):
         fold = _make_fold(1, train_pf=2.0, test_pf=1.2)
@@ -191,7 +191,7 @@ class TestDegradationCalculation:
 
 
 class TestConsistencyMetric:
-    """test_consistency_metric — correct % of profitable folds."""
+    """test_consistency_metric -- correct % of profitable folds."""
 
     def test_all_profitable(self):
         engine = WalkForwardEngine()
@@ -260,7 +260,7 @@ class TestRegimeBreaks:
 
 
 class TestReportJsonExport:
-    """test_report_json_export — valid JSON output."""
+    """test_report_json_export -- valid JSON output."""
 
     def test_json_export_creates_file(self):
         folds = [_make_fold(1), _make_fold(2)]
@@ -319,7 +319,7 @@ class TestReportJsonExport:
 
 
 class TestReportHtmlGeneration:
-    """test_report_html_generation — HTML file created with expected sections."""
+    """test_report_html_generation -- HTML file created with expected sections."""
 
     def test_html_export_creates_file(self):
         folds = [_make_fold(1), _make_fold(2)]
@@ -405,7 +405,7 @@ class TestReportHtmlGeneration:
 
 
 class TestBaselineComparison:
-    """test_baseline_comparison — PASS/FAIL logic against baseline metrics."""
+    """test_baseline_comparison -- PASS/FAIL logic against baseline metrics."""
 
     def _make_engine_and_summary(self, **kwargs):
         defaults = {

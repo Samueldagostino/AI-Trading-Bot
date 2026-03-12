@@ -31,7 +31,7 @@ from typing import Callable, Dict, List, Optional
 
 from ib_insync import IB, Contract, Future, MarketOrder, LimitOrder, StopOrder, util
 
-# Use ib_insync's own patcher instead of nest_asyncio — fixes
+# Use ib_insync's own patcher instead of nest_asyncio -- fixes
 # "Future attached to a different loop" on Windows Python 3.10+
 util.patchAsyncio()
 
@@ -158,7 +158,7 @@ class IBKRClient:
 
             return True
         except (ConnectionRefusedError, OSError, asyncio.TimeoutError) as e:
-            logger.error("Failed to connect to TWS at %s:%d — %s", h, p, e)
+            logger.error("Failed to connect to TWS at %s:%d -- %s", h, p, e)
             return False
         except Exception as e:
             logger.error("Unexpected connection error: %s", e)
@@ -259,7 +259,7 @@ class IBKRClient:
         self._last_heartbeat = time.monotonic()
         ib_bar = bars[-1]
 
-        # Extract timestamp — RealTimeBar uses .time, HistoricalBar uses .date
+        # Extract timestamp -- RealTimeBar uses .time, HistoricalBar uses .date
         raw_ts = getattr(ib_bar, "time", None) or getattr(ib_bar, "date", None)
         if isinstance(raw_ts, datetime):
             ts = raw_ts.astimezone(timezone.utc) if raw_ts.tzinfo else raw_ts.replace(tzinfo=timezone.utc)
@@ -268,7 +268,7 @@ class IBKRClient:
         else:
             ts = datetime.now(timezone.utc)
 
-        # Extract open — RealTimeBar uses .open_, HistoricalBar uses .open
+        # Extract open -- RealTimeBar uses .open_, HistoricalBar uses .open
         open_price = getattr(ib_bar, "open_", None) or getattr(ib_bar, "open", None)
 
         bar = Bar(
@@ -312,7 +312,7 @@ class IBKRClient:
             order_id on success, None on failure.
         """
         if self._contract is None:
-            logger.error("No contract qualified — call get_contract() first")
+            logger.error("No contract qualified -- call get_contract() first")
             return None
 
         if order_type == "MKT":
@@ -429,7 +429,7 @@ class IBKRClient:
         """Handle IB error events."""
         # Filter out non-critical info messages
         if errorCode in (2104, 2106, 2158, 2119):
-            # Data farm connection messages — info only
+            # Data farm connection messages -- info only
             logger.debug("IB info [%d]: %s", errorCode, errorString)
             return
 
@@ -441,12 +441,12 @@ class IBKRClient:
                 logger.error("Error callback failed: %s", e)
 
     def _handle_disconnect(self) -> None:
-        """Handle disconnection — attempt reconnect."""
+        """Handle disconnection -- attempt reconnect."""
         logger.warning("Disconnected from TWS")
         asyncio.ensure_future(self._reconnect())
 
     def _handle_order_status(self, trade) -> None:
-        """Handle order status updates — fire on_order_filled for fills."""
+        """Handle order status updates -- fire on_order_filled for fills."""
         if trade.orderStatus.status == "Filled":
             fill_info = {
                 "order_id": trade.order.orderId,
@@ -494,7 +494,7 @@ class IBKRClient:
                 logger.warning("Reconnect attempt %d failed: %s", attempt, e)
 
         logger.critical(
-            "Failed to reconnect after %d attempts — manual intervention required",
+            "Failed to reconnect after %d attempts -- manual intervention required",
             RECONNECT_MAX_RETRIES,
         )
 

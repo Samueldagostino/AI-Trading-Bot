@@ -174,7 +174,7 @@ class MonitoringEngine:
         data = self.get_dashboard_data(risk_state)
         
         print("\n" + "=" * 60)
-        print("  NQ TRADING BOT — STATUS DASHBOARD")
+        print("  NQ TRADING BOT -- STATUS DASHBOARD")
         print("=" * 60)
         
         perf = data["performance"]

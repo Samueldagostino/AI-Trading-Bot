@@ -1,5 +1,5 @@
 """
-Live Paper Trading Dashboard — HTTP Server
+Live Paper Trading Dashboard -- HTTP Server
 =============================================
 Serves a Bloomberg Terminal-style dashboard with TradingView-inspired
 candlestick chart.  READ-ONLY: reads log files, never modifies state.
@@ -156,7 +156,7 @@ def atomic_write_json(filepath: Path, data) -> None:
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, default=str)
-        # Windows PermissionError retry — another process may hold the file briefly
+        # Windows PermissionError retry -- another process may hold the file briefly
         for attempt in range(3):
             try:
                 os.replace(str(tmp_path), str(filepath))

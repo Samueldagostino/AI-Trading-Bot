@@ -20,11 +20,11 @@ For each BE exit:
   - Look forward N bars in 2-minute price data
   - Track max favorable price movement from exit in original direction
   - Bucket by MFE size:
-    * A: MFE < 5pts   (correctly stopped — would have lost anyway)
-    * B: MFE 5-15pts  (marginal — small continuation)
+    * A: MFE < 5pts   (correctly stopped -- would have lost anyway)
+    * B: MFE 5-15pts  (marginal -- small continuation)
     * C: MFE 15-30pts (moderate stolen runner)
     * D: MFE 30-50pts (significant stolen runner)
-    * E: MFE > 50pts  (major stolen runner — big money left on table)
+    * E: MFE > 50pts  (major stolen runner -- big money left on table)
 
 OUTPUT:
 ------

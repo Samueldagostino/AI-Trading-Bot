@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NQ Trading Bot — Project Setup Validator
+NQ Trading Bot -- Project Setup Validator
 ==========================================
 Run this after placing CLAUDE.md in your project root.
 It discovers your folder structure, validates key files exist,
@@ -128,7 +128,7 @@ def main():
     root = find_project_root(start)
     
     print("=" * 65)
-    print("  NQ TRADING BOT — PROJECT VALIDATOR")
+    print("  NQ TRADING BOT -- PROJECT VALIDATOR")
     print("=" * 65)
     print(f"  Project root: {root}")
     print()
@@ -139,7 +139,7 @@ def main():
         lines = len(claude_md.read_text().splitlines())
         print(f"  [OK] CLAUDE.md found ({lines} lines)")
     else:
-        print(f"  [!!] CLAUDE.md NOT FOUND — copy it to: {root}/CLAUDE.md")
+        print(f"  [!!] CLAUDE.md NOT FOUND -- copy it to: {root}/CLAUDE.md")
         print(f"       Agent Teams need this file for shared context.")
     print()
     
@@ -150,9 +150,9 @@ def main():
         result = check_file(root, f)
         if result["exists"]:
             status = "OK" if result["syntax_ok"] else f"SYNTAX ERROR: {result.get('error','')}"
-            print(f"    [OK] {f} ({result['lines']} lines) — {status}")
+            print(f"    [OK] {f} ({result['lines']} lines) -- {status}")
         else:
-            print(f"    [!!] {f} — MISSING")
+            print(f"    [!!] {f} -- MISSING")
             all_critical = False
     print()
     
@@ -197,11 +197,11 @@ def main():
         print("       claude")
         print("    4. Tell the lead what you want built.")
     else:
-        print("  STATUS: ISSUES FOUND — fix items marked [!!] above")
+        print("  STATUS: ISSUES FOUND -- fix items marked [!!] above")
         if not claude_md.exists():
             print(f"  -> Copy CLAUDE.md to {root}/")
         if not all_critical:
-            print("  -> Missing critical files — check your project path")
+            print("  -> Missing critical files -- check your project path")
     print("=" * 65)
 
 

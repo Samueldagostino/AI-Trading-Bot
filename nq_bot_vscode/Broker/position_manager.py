@@ -87,9 +87,9 @@ class TrackedPosition:
 class ScaleOutGroup:
     """Groups C1, C2, and C3 legs of a single 5-contract trade entry.
 
-    C1 (1 contract): canary — 5-bar time exit
-    C2 (1 contract): structural target — swing point exit
-    C3 (3 contracts): delayed runner — ATR trailing stop
+    C1 (1 contract): canary -- 5-bar time exit
+    C2 (1 contract): structural target -- swing point exit
+    C3 (3 contracts): delayed runner -- ATR trailing stop
         C3 is only kept if C1 exits profitably.
         If C1 loses, C3 is closed immediately.
     """
@@ -166,7 +166,7 @@ class PositionManager:
     Tracks positions, reconciles with IBKR, and feeds P&L
     to the order executor.
 
-    Reconciliation mismatches trigger HALT — no auto-correction.
+    Reconciliation mismatches trigger HALT -- no auto-correction.
     Human must intervene.
     """
 
@@ -244,7 +244,7 @@ class PositionManager:
             # Check for partial fill
             if group.is_partial:
                 logger.warning(
-                    "PARTIAL FILL: group=%s — %s filled, not all legs complete",
+                    "PARTIAL FILL: group=%s -- %s filled, not all legs complete",
                     group_id, tag,
                 )
 
@@ -252,7 +252,7 @@ class PositionManager:
             "POSITION OPENED: id=%s side=%s contracts=%d "
             "entry=%.2f tag=%s group=%s",
             position_id, side, contracts,
-            entry_price, tag, group_id or "—",
+            entry_price, tag, group_id or "--",
         )
         self._save_state()
         return pos
@@ -266,7 +266,7 @@ class PositionManager:
         """
         Close a position immediately and compute realized P&L.
 
-        Updates internal state right away — does NOT wait for
+        Updates internal state right away -- does NOT wait for
         the reconciliation cycle.
         """
         pos = self._open_positions.pop(position_id, None)
@@ -331,7 +331,7 @@ class PositionManager:
             group.c3.fill_state = FillState.UNFILLED
 
         logger.warning(
-            "PARTIAL FILL RECORDED: group=%s — %s marked unfilled",
+            "PARTIAL FILL RECORDED: group=%s -- %s marked unfilled",
             group_id, unfilled_tag,
         )
 
@@ -430,14 +430,14 @@ class PositionManager:
         if not result.matched:
             logger.critical(
                 "RECONCILIATION MISMATCH: internal=%d broker=%d "
-                "ghosts=%d missing=%d — %s",
+                "ghosts=%d missing=%d -- %s",
                 result.internal_count,
                 result.broker_count,
                 len(result.ghost_positions),
                 len(result.missing_positions),
                 result.details,
             )
-            # HALT — human must intervene
+            # HALT -- human must intervene
             await self._executor.emergency_flatten(
                 f"Position reconciliation mismatch: {result.details}"
             )
@@ -458,7 +458,7 @@ class PositionManager:
         """
         account_id = self._client.account_id
         if not account_id:
-            logger.warning("No account_id — cannot fetch positions")
+            logger.warning("No account_id -- cannot fetch positions")
             return []
 
         endpoint = f"/portfolio/{account_id}/positions/0"
@@ -672,7 +672,7 @@ class PositionManager:
         """
         path = Path(self._state_file)
         if not path.exists():
-            logger.info("No position state file at %s — starting fresh", path)
+            logger.info("No position state file at %s -- starting fresh", path)
             return False
 
         try:

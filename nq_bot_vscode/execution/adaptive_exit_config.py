@@ -188,12 +188,12 @@ class AdaptiveExitConfig:
     def enable(self) -> None:
         """Enable adaptive mode (after validation)."""
         logger.warning(
-            "AdaptiveExitConfig ENABLED — verify walk-forward tests passed first! "
+            "AdaptiveExitConfig ENABLED -- verify walk-forward tests passed first! "
             "Overfitting risk if ADX thresholds not validated out-of-sample."
         )
         self.enabled = True
 
     def disable(self) -> None:
         """Revert to static/baseline mode."""
-        logger.info("AdaptiveExitConfig DISABLED — reverting to baseline parameters")
+        logger.info("AdaptiveExitConfig DISABLED -- reverting to baseline parameters")
         self.enabled = False

@@ -1,5 +1,5 @@
 """
-Regime Cross-Analysis — Priority 3
+Regime Cross-Analysis -- Priority 3
 ====================================
 Runs the current production pipeline (Config D + C1 time exit) across
 the full 6-month OOS window and cross-tabulates PnL by:
@@ -180,8 +180,8 @@ def print_analysis(all_trades: List[dict]):
     total_pnl = sum(t["total_pnl"] for t in all_trades)
 
     print(f"\n{'=' * 90}")
-    print(f"  REGIME CROSS-ANALYSIS — Priority 3")
-    print(f"  Config D + C1 Time Exit | Sep 2025 – Feb 2026 | {n_total} trades")
+    print(f"  REGIME CROSS-ANALYSIS -- Priority 3")
+    print(f"  Config D + C1 Time Exit | Sep 2025 - Feb 2026 | {n_total} trades")
     print(f"{'=' * 90}")
 
     # ── 1. PnL by Regime ──
@@ -349,7 +349,7 @@ def print_analysis(all_trades: List[dict]):
 
     # ── 7. Impact Assessment ──
     print(f"\n{'=' * 90}")
-    print(f"  IMPACT ASSESSMENT — What if we block the toxic combos?")
+    print(f"  IMPACT ASSESSMENT -- What if we block the toxic combos?")
     print(f"{'=' * 90}")
 
     # Simulate blocking: for each toxic combo, see how many trades and PnL would be removed
@@ -363,7 +363,7 @@ def print_analysis(all_trades: List[dict]):
         remaining_pnl = total_pnl - total_blocked_pnl
         remaining_trades = n_total - total_blocked_trades
 
-        print(f"\n  WARNING: Toxic combos overlap — blocking all would NOT remove")
+        print(f"\n  WARNING: Toxic combos overlap -- blocking all would NOT remove")
         print(f"  {total_blocked_trades} trades (some counted in multiple combos).")
         print(f"  Use the individual combo trade counts as upper bounds.")
         print()
@@ -395,7 +395,7 @@ def print_analysis(all_trades: List[dict]):
             status = "TOXIC" if s["expectancy"] < -5 else "OK" if s["expectancy"] >= 0 else "WEAK"
             print(f"  {label:<45} {s['trades']:>6} {s['wr']:>5.1f}% {s['pf']:>7.2f} ${s['total_pnl']:>+8,.0f} ${s['expectancy']:>+8.2f} {status:>10}")
         else:
-            print(f"  {label:<45}      0     —       —          —          — {'NO DATA':>10}")
+            print(f"  {label:<45}      0     --       --          --          -- {'NO DATA':>10}")
 
     print(f"\n{'=' * 90}")
 
@@ -412,8 +412,8 @@ async def main():
         logging.getLogger(name).setLevel(logging.WARNING)
 
     print(f"\n{'=' * 70}")
-    print(f"  REGIME CROSS-ANALYSIS — Priority 3")
-    print(f"  Config D + C1 Time Exit | Sep 2025 – Feb 2026 | FirstRate 1m")
+    print(f"  REGIME CROSS-ANALYSIS -- Priority 3")
+    print(f"  Config D + C1 Time Exit | Sep 2025 - Feb 2026 | FirstRate 1m")
     print(f"{'=' * 70}\n")
 
     data_dir = str(project_dir / "data" / "firstrate")

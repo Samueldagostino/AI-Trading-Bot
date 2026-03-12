@@ -1,4 +1,4 @@
-"""Tests for signals/watch_state.py — WatchStateManager."""
+"""Tests for signals/watch_state.py -- WatchStateManager."""
 
 import pytest
 from datetime import datetime, timezone
@@ -103,7 +103,7 @@ class TestAddWatch:
         mgr.add_watch(make_fvg_tap_watch(direction="LONG"))
         assert len(mgr.get_active_watches()) == 3
 
-        # 4th watch — should evict oldest
+        # 4th watch -- should evict oldest
         mgr.add_watch(make_fvg_tap_watch(direction="SHORT"))
         assert len(mgr.get_active_watches()) == 3
 
@@ -141,7 +141,7 @@ class TestExpiry:
         mgr.add_watch(watch)
         detector = FVGDetector()
 
-        # Process 5 bars — watch should expire on bar 5
+        # Process 5 bars -- watch should expire on bar 5
         for i in range(5):
             bar = make_bar(i, 95, 96, 94, 95)  # below key_level, no reclaim
             mgr.update(bar, detector)
@@ -193,7 +193,7 @@ class TestInvalidation:
         mgr.add_watch(watch)
         detector = FVGDetector()
 
-        bar = make_bar(0, 91, 92, 89, 90)  # close=90 == invalidation — not below
+        bar = make_bar(0, 91, 92, 89, 90)  # close=90 == invalidation -- not below
         mgr.update(bar, detector)
         assert len(mgr.get_active_watches()) == 1
 
@@ -240,7 +240,7 @@ class TestSweepConfirmation:
         detector.update(make_bar(2, 103, 109, 102, 108), 2, "up")
         detector.update(make_bar(3, 108, 111, 106, 110), 3, "up")
 
-        # Now update manager — should detect FVG_FORM
+        # Now update manager -- should detect FVG_FORM
         bar4 = make_bar(4, 110, 112, 109, 111)
         mgr.update(bar4, detector)
         w = mgr.get_active_watches()[0]
@@ -258,7 +258,7 @@ class TestSweepConfirmation:
         detector.update(make_bar(2, 103, 109, 102, 108), 2, "up")
         detector.update(make_bar(3, 108, 111, 106, 110), 3, "up")
 
-        # Update manager with bar below key_level — no reclaim
+        # Update manager with bar below key_level -- no reclaim
         bar = make_bar(4, 98, 99, 97, 98)
         mgr.update(bar, detector)
         w = mgr.get_active_watches()[0]
@@ -288,7 +288,7 @@ class TestSweepConfirmation:
         confirmed = mgr.update(make_bar(5, 110, 112, 109, 111), detector)
         assert len(confirmed) == 0
 
-        # Bar 6: FVG_TAP — price returns to FVG zone (103-106), holds
+        # Bar 6: FVG_TAP -- price returns to FVG zone (103-106), holds
         w = mgr.get_active_watches()[0]
         fvg_low = w.metadata.get("confirmed_fvg_low", 0)
         fvg_high = w.metadata.get("confirmed_fvg_high", 0)
@@ -661,7 +661,7 @@ class TestWideStopSweep:
         confirmed = mgr.update(make_bar(5, 105, 107, 104, 106), detector)
         assert len(confirmed) == 0
 
-        # Bar 6: FVG_TAP — price returns to FVG zone, holds
+        # Bar 6: FVG_TAP -- price returns to FVG zone, holds
         w = mgr.get_active_watches()[0]
         fvg_low = w.metadata.get("confirmed_fvg_low", 0)
         assert fvg_low > 0
@@ -684,7 +684,7 @@ class TestWideStopSweep:
         mgr.add_watch(watch)
         detector = FVGDetector()
 
-        # Process 89 bars — should still be active
+        # Process 89 bars -- should still be active
         for i in range(89):
             bar = MockBar(
                 timestamp=datetime(2026, 3, 1, 10 + i // 60, i % 60, tzinfo=timezone.utc),
@@ -693,7 +693,7 @@ class TestWideStopSweep:
             mgr.update(bar, detector)
         assert len(mgr.get_active_watches()) == 1
 
-        # Bar 90 — should expire
+        # Bar 90 -- should expire
         bar90 = MockBar(
             timestamp=datetime(2026, 3, 1, 11, 29, tzinfo=timezone.utc),
             open=90, high=91, low=89, close=90,

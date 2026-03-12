@@ -1,4 +1,4 @@
-"""Tests for signals/initial_balance.py — InitialBalanceTracker."""
+"""Tests for signals/initial_balance.py -- InitialBalanceTracker."""
 
 import pytest
 from datetime import datetime, timezone
@@ -62,7 +62,7 @@ class TestIBAccumulation:
     def test_bars_after_ib_window_ignored(self):
         tracker = InitialBalanceTracker()
         tracker.update(make_bar_et(9, 30, 18000, 18020, 17990, 18010))
-        # After IB window — trigger completion first
+        # After IB window -- trigger completion first
         tracker.update(make_bar_et(10, 35, 18010, 18100, 17900, 18050))
         # IB should not be updated by this bar
         assert tracker.get_ib_high() == 18020

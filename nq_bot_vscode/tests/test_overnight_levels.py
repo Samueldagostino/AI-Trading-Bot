@@ -1,4 +1,4 @@
-"""Tests for signals/overnight_levels.py — OvernightLevelTracker."""
+"""Tests for signals/overnight_levels.py -- OvernightLevelTracker."""
 
 import pytest
 from datetime import datetime, timezone
@@ -72,7 +72,7 @@ class TestDayRollover:
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, 18010, date_day=4))
         tracker.update(make_bar_et(15, 55, 18010, 18020, 18000, 18015, date_day=4))
 
-        # Day 2 starts — triggers rollover
+        # Day 2 starts -- triggers rollover
         tracker.update(make_bar_et(9, 30, 18020, 18030, 18010, 18025, date_day=5))
 
         levels = tracker.get_levels()
@@ -82,12 +82,12 @@ class TestDayRollover:
 
     def test_overnight_resets_on_new_day(self):
         tracker = OvernightLevelTracker()
-        # Day 1 — some overnight data
+        # Day 1 -- some overnight data
         tracker.update(make_bar_et(5, 0, 17950, 17980, 17930, 17970, date_day=4))
         # Day 1 RTH
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, 18010, date_day=4))
 
-        # Day 2 — new overnight data
+        # Day 2 -- new overnight data
         tracker.update(make_bar_et(5, 0, 18010, 18030, 18000, 18020, date_day=5))
 
         levels = tracker.get_levels()
@@ -105,9 +105,9 @@ class TestGapAnalysis:
     def _setup_with_prev_close(self, prev_close):
         """Create tracker with a known previous close."""
         tracker = OvernightLevelTracker()
-        # Day 1 — establish prev close
+        # Day 1 -- establish prev close
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, prev_close, date_day=3))
-        # Day 2 — trigger rollover
+        # Day 2 -- trigger rollover
         return tracker
 
     def test_gap_up(self):
@@ -151,7 +151,7 @@ class TestGapFill:
         tracker = OvernightLevelTracker()
         # Day 1
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, 18000, date_day=3))
-        # Day 2 — gap up
+        # Day 2 -- gap up
         tracker.update(make_bar_et(9, 30, 18020, 18025, 18015, 18022, date_day=4))
         # Price retraces to fill gap
         tracker.update(make_bar_et(9, 35, 18022, 18022, 17995, 17998, date_day=4))
@@ -164,7 +164,7 @@ class TestGapFill:
         tracker = OvernightLevelTracker()
         # Day 1
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, 18000, date_day=3))
-        # Day 2 — gap up 20 points
+        # Day 2 -- gap up 20 points
         tracker.update(make_bar_et(9, 30, 18020, 18025, 18015, 18022, date_day=4))
         # Price retraces 10 points (50%)
         tracker.update(make_bar_et(9, 35, 18022, 18022, 18010, 18012, date_day=4))
@@ -177,7 +177,7 @@ class TestGapFill:
         tracker = OvernightLevelTracker()
         # Day 1
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, 18000, date_day=3))
-        # Day 2 — gap down
+        # Day 2 -- gap down
         tracker.update(make_bar_et(9, 30, 17970, 17975, 17960, 17972, date_day=4))
         # Price rallies to fill gap
         tracker.update(make_bar_et(9, 35, 17972, 18005, 17970, 18002, date_day=4))
@@ -189,9 +189,9 @@ class TestGapFill:
         tracker = OvernightLevelTracker()
         # Day 1
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, 18000, date_day=3))
-        # Day 2 — gap up 50 points
+        # Day 2 -- gap up 50 points
         tracker.update(make_bar_et(9, 30, 18050, 18055, 18045, 18052, date_day=4))
-        # 6 more bars (simulating 30 min on 5-min bars) — gap not filled
+        # 6 more bars (simulating 30 min on 5-min bars) -- gap not filled
         minutes = [35, 40, 45, 50, 55, 59]
         for m in minutes:
             tracker.update(make_bar_et(9, m, 18050, 18060, 18048, 18055, date_day=4))
@@ -239,14 +239,14 @@ class TestEdgeCases:
         tracker = OvernightLevelTracker()
         # Day 1
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, 18000, date_day=3))
-        # Day 2 — opens 0.10 above (< 1 tick)
+        # Day 2 -- opens 0.10 above (< 1 tick)
         tracker.update(make_bar_et(9, 30, 18000.10, 18005, 17995, 18002, date_day=4))
         gap = tracker.get_gap_info(18002)
         assert gap["gap_direction"] == "NONE"
 
     def test_multiple_days_accumulate(self):
         tracker = OvernightLevelTracker()
-        # Day 1 — RTH open and close bars
+        # Day 1 -- RTH open and close bars
         tracker.update(make_bar_et(9, 30, 18000, 18050, 17960, 18010, date_day=3))
         tracker.update(make_bar_et(15, 55, 18010, 18020, 18000, 18010, date_day=3))
         # Day 2

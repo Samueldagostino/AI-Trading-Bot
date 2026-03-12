@@ -3,11 +3,11 @@
 MTF Confluence Analysis
 ========================
 Phase 1: Run 4 HTF configs (A=no HTF, B/C/D = strength gates 0.7/0.5/0.3)
-Phase 2: Kill/save matrix — classify each Config A trade vs HTF gates
+Phase 2: Kill/save matrix -- classify each Config A trade vs HTF gates
 Phase 3: Regime + time-of-day + HTF cross-analysis on best config
 Phase 4: Generate markdown report
 
-Pure analysis — no code changes, no HC filter modifications.
+Pure analysis -- no code changes, no HC filter modifications.
 """
 
 import sys, os
@@ -29,14 +29,14 @@ from data_pipeline.pipeline import DataPipeline, bardata_to_bar, bardata_to_htfb
 from main import TradingOrchestrator, HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES
 
 logging.basicConfig(
-    level=logging.WARNING,  # Quiet — we only want our summary output
+    level=logging.WARNING,  # Quiet -- we only want our summary output
     format="%(asctime)s | %(levelname)-8s | %(message)s",
     datefmt="%H:%M:%S",
 )
 
 
 # ══════════════════════════════════════════════════════════════
-#  PHASE 1 — Run 4 configurations
+#  PHASE 1 -- Run 4 configurations
 # ══════════════════════════════════════════════════════════════
 
 async def run_config_a() -> Tuple[dict, list]:
@@ -182,7 +182,7 @@ async def run_config_mtf(strength_gate: float, label: str) -> Tuple[dict, list]:
 
 
 # ══════════════════════════════════════════════════════════════
-#  PHASE 2 — Kill/Save Matrix
+#  PHASE 2 -- Kill/Save Matrix
 # ══════════════════════════════════════════════════════════════
 
 async def build_htf_replay_engine():
@@ -302,7 +302,7 @@ def compute_kill_save_matrix(config_a_trades: list, htf_snapshots: dict, gate: f
 
 
 # ══════════════════════════════════════════════════════════════
-#  PHASE 3 — Cross-Analysis
+#  PHASE 3 -- Cross-Analysis
 # ══════════════════════════════════════════════════════════════
 
 def get_session_bucket(ts: datetime) -> str:
@@ -521,7 +521,7 @@ def find_combined_filters(combined_data: list) -> list:
 
 
 # ══════════════════════════════════════════════════════════════
-#  PHASE 4 — Report Generation
+#  PHASE 4 -- Report Generation
 # ══════════════════════════════════════════════════════════════
 
 def generate_report(
@@ -775,7 +775,7 @@ async def main():
 
     # Use Config A's CLOSED trades for kill/save analysis
     closed_a = [t for t in trades_a if t.get('action') == 'trade_closed']
-    # We need entry timestamps too — pair them up
+    # We need entry timestamps too -- pair them up
     entries_a = [t for t in trades_a if t.get('action') == 'entry']
 
     # Attach entry timestamp to closed trades
