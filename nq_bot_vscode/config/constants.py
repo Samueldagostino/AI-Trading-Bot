@@ -13,12 +13,11 @@ Do not loosen these gates without new backtested evidence across the full
 
 # ── HIGH-CONVICTION FILTER ────────────────────────────────────────
 #   Rule 1 – Min signal score >= 0.75  (eliminates low-conviction noise)
-#   Rule 2 – Max stop distance <= 45 pts (caps tail risk per trade)
-#   Raised from 30pt: ATR*2.0 with ATR>15 blocked every trade.
-#   Prior forensic (Mar 6) showed blocked trades were +$1,692 profitable.
-#   UCL wide-stop recovery was never implemented, so 30pt was a dead end.
+#   Rule 2 – Max stop distance <= 30 pts (caps tail risk per trade)
+#   Reverted to 30pt to match v3 validated config (PF 2.86, 396 trades).
+#   Dollar-based stop tiers handle conviction-scaled risk within the 30pt cap.
 HIGH_CONVICTION_MIN_SCORE: float = 0.75
-HIGH_CONVICTION_MAX_STOP_PTS: float = 50.0   # Absolute safety ceiling (overridden by dollar tiers in practice)
+HIGH_CONVICTION_MAX_STOP_PTS: float = 30.0   # v3 validated: 30pt hard cap (reverted from 50pt — matches PF 2.86 backtest)
 HIGH_CONVICTION_MIN_STOP_PTS: float = 15.0   # Floor: prevents micro-stops that get clipped by noise
 
 # ── DOLLAR-BASED STOP TIERS ────────────────────────────────────────
@@ -27,7 +26,8 @@ HIGH_CONVICTION_MIN_STOP_PTS: float = 15.0   # Floor: prevents micro-stops that 
 #   Higher conviction = more room (wider stop) because the signal is stronger.
 #
 #   With 4 MNQ contracts @ $2/pt:
-#     $150 -> 18.75 pts | $200 -> 25 pts | $300 -> 37.5 pts | $400 -> 50 pts
+#     $150 -> 18.75 pts | $200 -> 25 pts | $240 -> 30 pts (HC cap)
+#     Higher tiers still exist but are capped by HC_MAX_STOP_PTS = 30.0
 #
 #   Format: (score_min, score_max, dollar_min, dollar_max)
 DOLLAR_STOP_TIERS: list = [
