@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -113,15 +114,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .chart-ohlc-bar .ohlc-dn{color:var(--red);font-weight:600}
 .chart-ohlc-bar .ohlc-flat{color:var(--text2);font-weight:600}
 .chart-ohlc-bar .vol-val{color:var(--text2);font-weight:500}
-.chart-body{position:relative;background:var(--chart-bg);cursor:crosshair;height:480px}
-.chart-body canvas{width:100%;height:100%;display:block}
-
-/* Crosshair */
-.chart-crosshair{position:absolute;pointer-events:none;display:none;z-index:10}
-.crosshair-h{position:absolute;left:0;right:56px;height:1px;background:repeating-linear-gradient(90deg,rgba(61,46,34,0.35) 0,rgba(61,46,34,0.35) 4px,transparent 4px,transparent 8px)}
-.crosshair-v{position:absolute;top:0;bottom:0;width:1px;background:repeating-linear-gradient(0deg,rgba(61,46,34,0.35) 0,rgba(61,46,34,0.35) 4px,transparent 4px,transparent 8px)}
-.crosshair-price{position:absolute;right:0;background:var(--brown-900);color:#fff;font-family:var(--mono);font-size:10px;font-weight:600;padding:4px 10px;border-radius:3px;transform:translateY(-50%);white-space:nowrap;letter-spacing:.3px}
-.crosshair-time{position:absolute;bottom:0;background:var(--brown-900);color:#fff;font-family:var(--mono);font-size:10px;font-weight:600;padding:4px 12px;border-radius:3px;transform:translateX(-50%);white-space:nowrap;letter-spacing:.3px}
+.chart-body{position:relative;background:var(--chart-bg);height:520px}
 
 /* Timeframe selector */
 .tf-selector{display:flex;gap:0;background:var(--surface-alt);border:1px solid var(--border-light);border-radius:8px;overflow:hidden}
@@ -139,9 +132,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .trade-pnl.pos{color:var(--green)}.trade-pnl.neg{color:var(--red)}.trade-pnl.flat{color:var(--text-muted)}
 .chart-idle-msg{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--text-muted);font-family:var(--mono);background:rgba(248,245,240,.92);padding:5px 16px;border-radius:8px;white-space:nowrap;backdrop-filter:blur(6px);border:1px solid var(--border-light)}
 
-/* Volume sub-chart */
-.vol-bar{height:60px;background:var(--chart-bg);border-top:1px solid var(--border-light);position:relative}
-.vol-bar canvas{width:100%;height:100%;display:block}
+/* Volume is integrated into lightweight-charts */
 
 /* ═══════════════════════════════════════════════════════
    ACTIVITY FEED — CONTINUOUS BOTTOM STREAM
@@ -329,8 +320,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   var TRADING_MODE = "OFFLINE";
   var feedExpanded = true;
 
-  // Chart state
-  var chartState = {candles:null, trade:null, allHigh:0, allLow:0, priceRange:0, pad:{top:20,bottom:32,left:8,right:68}, W:0, H:0};
+  // Chart state — Lightweight Charts
+  var lwChart = null;
+  var lwCandleSeries = null;
+  var lwVolumeSeries = null;
   var selectedTimeframe = 1;
 
   var MODE_LABELS = {
@@ -526,402 +519,193 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     return result;
   }
 
+  // Helper: convert ISO timestamp to UNIX seconds
+  function isoToUnix(iso){
+    if(!iso) return 0;
+    var d = new Date(iso);
+    return Math.floor(d.getTime() / 1000);
+  }
+
   // ═══════════════════════════════════════════════════════
-  // PREMIUM CHART ENGINE — Institutional-Grade Canvas
+  // CHART ENGINE — TradingView Lightweight Charts
+  // Zoom, pan, crosshair, volume — all built-in
   // ═══════════════════════════════════════════════════════
-  function drawChart(canvasId, volCanvasId, trade, rawCandles){
-    var canvas = $(canvasId);
-    if(!canvas || !rawCandles || rawCandles.length === 0) return;
+  function destroyChart(){
+    if(lwChart){ try{ lwChart.remove(); }catch(e){} lwChart = null; }
+    lwCandleSeries = null;
+    lwVolumeSeries = null;
+  }
+
+  function buildChart(containerId, rawCandles, trade, tradeEvents){
+    var container = $(containerId);
+    if(!container) return;
 
     var candles = aggregateCandles(rawCandles, selectedTimeframe);
+    if(!candles || candles.length === 0) return;
 
-    var dpr = window.devicePixelRatio || 1;
-    var rect = canvas.parentElement.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    canvas.style.width = rect.width + 'px';
-    canvas.style.height = rect.height + 'px';
-
-    var ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    var W = rect.width, H = rect.height;
-    var pad = {top:24, bottom:36, left:12, right:72};
-    var chartW = W - pad.left - pad.right;
-    var chartH = H - pad.top - pad.bottom;
-
-    // Calculate price range
-    var allHigh = -Infinity, allLow = Infinity;
-    candles.forEach(function(c){ if(c.h > allHigh) allHigh = c.h; if(c.l < allLow) allLow = c.l; });
-    if(trade && trade.entry_price){
-      if(trade.entry_price > allHigh) allHigh = trade.entry_price;
-      if(trade.entry_price < allLow) allLow = trade.entry_price;
-      if(trade.stop_price){
-        if(trade.stop_price < allLow) allLow = trade.stop_price;
-        if(trade.stop_price > allHigh) allHigh = trade.stop_price;
-      }
-      if(trade.target_price){
-        if(trade.target_price > allHigh) allHigh = trade.target_price;
-        if(trade.target_price < allLow) allLow = trade.target_price;
-      }
-    }
-    var priceRange = allHigh - allLow || 1;
-    allHigh += priceRange * 0.06; allLow -= priceRange * 0.06;
-    priceRange = allHigh - allLow;
-
-    // Save state for crosshair
-    chartState = {candles:candles, trade:trade, allHigh:allHigh, allLow:allLow, priceRange:priceRange, pad:pad, W:W, H:H, chartW:chartW, chartH:chartH};
-
-    function yP(p){ return pad.top + chartH * (1 - (p - allLow) / priceRange); }
-
-    // ── Background ──
-    var bgGrad = ctx.createLinearGradient(0, 0, 0, H);
-    bgGrad.addColorStop(0, '#FAF7F2');
-    bgGrad.addColorStop(1, '#F3EDE4');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, W, H);
-
-    // ── Grid ──
-    var niceStep = priceRange / 6;
-    var mag = Math.pow(10, Math.floor(Math.log10(niceStep)));
-    var residual = niceStep / mag;
-    if(residual <= 1.5) niceStep = 1 * mag;
-    else if(residual <= 3.5) niceStep = 2.5 * mag;
-    else if(residual <= 7.5) niceStep = 5 * mag;
-    else niceStep = 10 * mag;
-    niceStep = Math.max(niceStep, 0.25);
-
-    var gridStart = Math.ceil(allLow / niceStep) * niceStep;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-
-    for(var gp = gridStart; gp <= allHigh; gp += niceStep){
-      var gy = yP(gp);
-      if(gy < pad.top || gy > H - pad.bottom) continue;
-
-      // Grid line — subtle
-      ctx.strokeStyle = 'rgba(200, 188, 172, 0.35)';
-      ctx.lineWidth = 0.5;
-      ctx.setLineDash([]);
-      ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(W - pad.right, gy); ctx.stroke();
-
-      // Price label — right axis
-      ctx.fillStyle = '#A89070';
-      ctx.font = '500 10px JetBrains Mono, monospace';
-      ctx.fillText(gp.toFixed(2), W - pad.right + 64, gy);
-    }
-
-    // ── Right axis line ──
-    ctx.strokeStyle = 'rgba(200, 188, 172, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(W - pad.right, pad.top); ctx.lineTo(W - pad.right, H - pad.bottom); ctx.stroke();
-
-    // ── Candles ──
-    var gap = chartW / candles.length;
-    var barW = Math.max(3, Math.min(Math.floor(gap * 0.65), 20));
-    var wickW = barW >= 10 ? 1.5 : 1;
-
-    // Calculate max volume for vol sub-chart
-    var maxVol = 0;
-    candles.forEach(function(c){ if((c.v || 0) > maxVol) maxVol = c.v || 0; });
-
-    candles.forEach(function(c, idx){
-      var x = pad.left + idx * gap + gap / 2;
+    // Convert candles to lightweight-charts format
+    var ohlcData = [];
+    var volData = [];
+    candles.forEach(function(c){
+      var ts = isoToUnix(c.t);
+      if(!ts) return;
+      ohlcData.push({ time: ts, open: c.o, high: c.h, low: c.l, close: c.c });
       var isUp = c.c >= c.o;
-      var bodyTop = yP(Math.max(c.o, c.c));
-      var bodyBot = yP(Math.min(c.o, c.c));
-      var bodyH = Math.max(1, bodyBot - bodyTop);
-
-      var greenCol = '#2D8C4E';
-      var redCol = '#C53D1B';
-
-      // Wick
-      ctx.strokeStyle = isUp ? greenCol : redCol;
-      ctx.lineWidth = wickW;
-      ctx.beginPath(); ctx.moveTo(x, yP(c.h)); ctx.lineTo(x, yP(c.l)); ctx.stroke();
-
-      // Body — solid with subtle opacity difference
-      ctx.fillStyle = isUp ? greenCol : redCol;
-      ctx.globalAlpha = 0.92;
-      if(barW >= 6 && ctx.roundRect){
-        ctx.beginPath(); ctx.roundRect(x - barW/2, bodyTop, barW, bodyH, Math.min(2, barW/4)); ctx.fill();
-      } else {
-        ctx.fillRect(x - barW/2, bodyTop, barW, bodyH);
-      }
-      ctx.globalAlpha = 1.0;
-
-      // Hollow body for up candles when bar is wide enough
-      if(isUp && barW >= 8){
-        ctx.strokeStyle = greenCol;
-        ctx.lineWidth = 1.5;
-        if(ctx.roundRect){
-          ctx.beginPath(); ctx.roundRect(x - barW/2, bodyTop, barW, bodyH, Math.min(2, barW/4)); ctx.stroke();
-        }
-      }
+      volData.push({
+        time: ts,
+        value: c.v || 0,
+        color: isUp ? 'rgba(45,140,78,0.35)' : 'rgba(197,61,27,0.35)'
+      });
     });
 
-    // ── Entry / Stop / Target lines ──
+    if(ohlcData.length === 0) return;
+
+    destroyChart();
+
+    var rect = container.getBoundingClientRect();
+
+    lwChart = LightweightCharts.createChart(container, {
+      width: rect.width,
+      height: rect.height,
+      layout: {
+        background: { type: 'solid', color: '#FAF7F2' },
+        textColor: '#8B7355',
+        fontFamily: "'JetBrains Mono', 'Consolas', monospace",
+        fontSize: 10,
+      },
+      grid: {
+        vertLines: { color: 'rgba(200,188,172,0.25)' },
+        horzLines: { color: 'rgba(200,188,172,0.25)' },
+      },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: 'rgba(61,46,34,0.3)', width: 1, style: LightweightCharts.LineStyle.Dashed },
+        horzLine: { color: 'rgba(61,46,34,0.3)', width: 1, style: LightweightCharts.LineStyle.Dashed },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(200,188,172,0.5)',
+        scaleMargins: { top: 0.08, bottom: 0.18 },
+      },
+      timeScale: {
+        borderColor: 'rgba(200,188,172,0.5)',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 5,
+      },
+      watermark: {
+        visible: true,
+        fontSize: 14,
+        horzAlign: 'right',
+        vertAlign: 'top',
+        color: 'rgba(139,105,20,0.08)',
+        text: 'MNQ FUTURES \u00B7 ' + selectedTimeframe + 'min',
+      },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+    });
+
+    // Candlestick series
+    lwCandleSeries = lwChart.addCandlestickSeries({
+      upColor: '#2D8C4E',
+      downColor: '#C53D1B',
+      borderUpColor: '#2D8C4E',
+      borderDownColor: '#C53D1B',
+      wickUpColor: '#2D8C4E',
+      wickDownColor: '#C53D1B',
+    });
+    lwCandleSeries.setData(ohlcData);
+
+    // Volume series (histogram overlay at bottom)
+    lwVolumeSeries = lwChart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+    });
+    lwChart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.85, bottom: 0 },
+    });
+    lwVolumeSeries.setData(volData);
+
+    // Active trade lines (entry / stop / target)
     if(trade && trade.entry_price){
-      var ey = yP(trade.entry_price);
       var isLong = trade.side === 'LONG';
-
-      // Entry line
-      ctx.setLineDash([6, 4]);
-      ctx.strokeStyle = isLong ? 'rgba(45,140,78,0.8)' : 'rgba(197,61,27,0.8)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(pad.left, ey); ctx.lineTo(W - pad.right, ey); ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Entry label
-      ctx.fillStyle = isLong ? '#2D8C4E' : '#C53D1B';
-      ctx.font = 'bold 10px JetBrains Mono, monospace'; ctx.textAlign = 'left';
-      var entryLabel = (isLong ? '\u25B2' : '\u25BC') + ' ENTRY ' + trade.entry_price.toFixed(2);
-      var entryLabelW = ctx.measureText(entryLabel).width + 12;
-      // Background pill for label
-      ctx.fillStyle = isLong ? 'rgba(236,250,239,0.92)' : 'rgba(253,232,226,0.92)';
-      ctx.beginPath();
-      if(ctx.roundRect) ctx.roundRect(pad.left + 2, ey - 16, entryLabelW, 18, 4);
-      else ctx.rect(pad.left + 2, ey - 16, entryLabelW, 18);
-      ctx.fill();
-      ctx.fillStyle = isLong ? '#2D8C4E' : '#C53D1B';
-      ctx.fillText(entryLabel, pad.left + 8, ey - 4);
-
-      // Stop line
+      lwCandleSeries.createPriceLine({
+        price: trade.entry_price,
+        color: isLong ? '#2D8C4E' : '#C53D1B',
+        lineWidth: 2,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: (isLong ? '\u25B2 ' : '\u25BC ') + 'ENTRY',
+      });
       if(trade.stop_price){
-        var sy = yP(trade.stop_price);
-        ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = 'rgba(197,61,27,0.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(pad.left, sy); ctx.lineTo(W - pad.right, sy); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(253,232,226,0.85)';
-        ctx.fillRect(pad.left + 2, sy + 2, 90, 16);
-        ctx.fillStyle = '#C53D1B';
-        ctx.font = '9px JetBrains Mono, monospace';
-        ctx.fillText('STOP ' + trade.stop_price.toFixed(2), pad.left + 6, sy + 14);
-
-        // Risk zone shading
-        var zoneTop = Math.min(ey, sy);
-        var zoneBot = Math.max(ey, sy);
-        ctx.fillStyle = 'rgba(197,61,27,0.04)';
-        ctx.fillRect(pad.left, zoneTop, chartW, zoneBot - zoneTop);
+        lwCandleSeries.createPriceLine({
+          price: trade.stop_price,
+          color: '#C53D1B',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: 'STOP',
+        });
       }
-
-      // Target line
       if(trade.target_price){
-        var ty = yP(trade.target_price);
-        ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = 'rgba(45,140,78,0.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(pad.left, ty); ctx.lineTo(W - pad.right, ty); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(236,250,239,0.85)';
-        ctx.fillRect(pad.left + 2, ty - 16, 100, 16);
-        ctx.fillStyle = '#2D8C4E';
-        ctx.font = '9px JetBrains Mono, monospace';
-        ctx.fillText('TARGET ' + trade.target_price.toFixed(2), pad.left + 6, ty - 4);
-
-        // Reward zone shading
-        var rwTop = Math.min(ey, ty);
-        var rwBot = Math.max(ey, ty);
-        ctx.fillStyle = 'rgba(45,140,78,0.03)';
-        ctx.fillRect(pad.left, rwTop, chartW, rwBot - rwTop);
+        lwCandleSeries.createPriceLine({
+          price: trade.target_price,
+          color: '#2D8C4E',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: 'TARGET',
+        });
       }
     }
 
-    // ── Time axis labels ──
-    ctx.fillStyle = '#A89070';
-    ctx.font = '500 9px JetBrains Mono, monospace';
-    ctx.textAlign = 'center';
-    function shortTime(iso){
-      if(!iso) return '';
-      var dd = new Date(iso);
-      return dd.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false});
-    }
-    var numLabels = Math.min(7, candles.length);
-    var step = Math.max(1, Math.floor((candles.length - 1) / (numLabels - 1)));
-    for(var ti = 0; ti < candles.length; ti += step){
-      var tStr = candles[ti].t ? shortTime(candles[ti].t) : '';
-      if(tStr){
-        var tx = pad.left + ti * gap + gap/2;
-        // Tick mark
-        ctx.strokeStyle = 'rgba(200,188,172,0.4)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(tx, H - pad.bottom); ctx.lineTo(tx, H - pad.bottom + 4); ctx.stroke();
-        ctx.fillText(tStr, tx, H - pad.bottom + 16);
-      }
-    }
-    if(candles.length > 1){
-      var lastT = candles[candles.length-1].t || '';
-      if(lastT){
-        var ltx = pad.left + (candles.length-1)*gap + gap/2;
-        ctx.fillText(shortTime(lastT), ltx, H - pad.bottom + 16);
-      }
-    }
-
-    // ── Watermark ──
-    ctx.save();
-    ctx.font = '600 10px JetBrains Mono, monospace';
-    ctx.fillStyle = 'rgba(139,105,20,0.12)';
-    ctx.textAlign = 'right';
-    ctx.fillText('MNQ FUTURES \u00B7 ' + selectedTimeframe + 'min', W - pad.right - 8, pad.top + 14);
-    ctx.restore();
-
-    // ── Last price line ──
-    if(candles.length > 0){
-      var lastClose = candles[candles.length - 1].c;
-      var lastY = yP(lastClose);
-      var lastIsUp = candles[candles.length - 1].c >= candles[candles.length - 1].o;
-      ctx.setLineDash([2, 3]);
-      ctx.strokeStyle = lastIsUp ? 'rgba(45,140,78,0.4)' : 'rgba(197,61,27,0.4)';
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(pad.left, lastY); ctx.lineTo(W - pad.right, lastY); ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Price tag on right axis
-      ctx.fillStyle = lastIsUp ? '#2D8C4E' : '#C53D1B';
-      ctx.beginPath();
-      var tagW = 62, tagH = 20;
-      var tagX = W - pad.right + 2, tagY = lastY - tagH/2;
-      if(ctx.roundRect){ ctx.roundRect(tagX, tagY, tagW, tagH, 3); }
-      else { ctx.rect(tagX, tagY, tagW, tagH); }
-      ctx.fill();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 10px JetBrains Mono, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(lastClose.toFixed(2), tagX + tagW/2, lastY + 3.5);
-      ctx.textAlign = 'left';
-    }
-
-    // ── VOLUME SUB-CHART ──
-    var volCanvas = $(volCanvasId);
-    if(volCanvas && maxVol > 0){
-      var vRect = volCanvas.parentElement.getBoundingClientRect();
-      volCanvas.width = vRect.width * dpr;
-      volCanvas.height = vRect.height * dpr;
-      volCanvas.style.width = vRect.width + 'px';
-      volCanvas.style.height = vRect.height + 'px';
-      var vctx = volCanvas.getContext('2d');
-      vctx.scale(dpr, dpr);
-      var VW = vRect.width, VH = vRect.height;
-
-      // Vol background
-      var volBg = vctx.createLinearGradient(0, 0, 0, VH);
-      volBg.addColorStop(0, '#F5F0EA');
-      volBg.addColorStop(1, '#F0EAE0');
-      vctx.fillStyle = volBg;
-      vctx.fillRect(0, 0, VW, VH);
-
-      // Right axis line
-      vctx.strokeStyle = 'rgba(200, 188, 172, 0.5)';
-      vctx.lineWidth = 1;
-      vctx.beginPath(); vctx.moveTo(VW - pad.right, 0); vctx.lineTo(VW - pad.right, VH); vctx.stroke();
-
-      // Volume bars
-      var vPad = 4;
-      candles.forEach(function(c, idx){
-        var x = pad.left + idx * gap + gap / 2;
-        var vol = c.v || 0;
-        var vH = Math.max(1, (vol / maxVol) * (VH - vPad * 2));
-        var isUp = c.c >= c.o;
-
-        // Volume bar with gradient
-        var volGrad = vctx.createLinearGradient(0, VH - vPad - vH, 0, VH - vPad);
-        if(isUp){
-          volGrad.addColorStop(0, 'rgba(45,140,78,0.55)');
-          volGrad.addColorStop(1, 'rgba(45,140,78,0.2)');
-        } else {
-          volGrad.addColorStop(0, 'rgba(197,61,27,0.55)');
-          volGrad.addColorStop(1, 'rgba(197,61,27,0.2)');
-        }
-        vctx.fillStyle = volGrad;
-
-        var vBarW = Math.max(2, barW - 2);
-        if(vBarW >= 4 && vctx.roundRect){
-          vctx.beginPath(); vctx.roundRect(x - vBarW/2, VH - vPad - vH, vBarW, vH, [2, 2, 0, 0]); vctx.fill();
-        } else {
-          vctx.fillRect(x - vBarW/2, VH - vPad - vH, vBarW, vH);
+    // Trade markers (entries + exits from trade_events)
+    var markers = [];
+    if(tradeEvents && tradeEvents.length > 0){
+      tradeEvents.forEach(function(ev){
+        var ts = isoToUnix(ev.time);
+        if(!ts) return;
+        if(ev.type === 'ENTRY'){
+          var isL = ev.direction === 'LONG';
+          markers.push({
+            time: ts,
+            position: isL ? 'belowBar' : 'aboveBar',
+            color: isL ? '#2D8C4E' : '#C53D1B',
+            shape: isL ? 'arrowUp' : 'arrowDown',
+            text: (isL ? 'LONG' : 'SHORT') + ' @ ' + ev.price.toFixed(2) + ' (score: ' + ev.score.toFixed(2) + ')',
+          });
+        } else if(ev.type === 'EXIT'){
+          var pnl = ev.pnl || 0;
+          var isWin = pnl >= 0;
+          markers.push({
+            time: ts,
+            position: 'aboveBar',
+            color: isWin ? '#2D8C4E' : '#C53D1B',
+            shape: 'circle',
+            text: 'EXIT @ ' + ev.price.toFixed(2) + ' (' + (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toFixed(2) + ')',
+          });
         }
       });
+      markers.sort(function(a, b){ return a.time - b.time; });
+      if(markers.length > 0) lwCandleSeries.setMarkers(markers);
     }
-  }
 
-  // ─── CROSSHAIR ───
-  function initCrosshair(){
-    var body = $('chart-body');
-    if(!body) return;
-    var ch = $('chart-crosshair');
-    if(!ch) return;
-    var ohlcBar = $('chart-ohlc-bar');
+    lwChart.timeScale().fitContent();
 
-    body.addEventListener('mousemove', function(e){
-      if(!chartState.candles || chartState.candles.length === 0){ ch.style.display = 'none'; return; }
-      var rect = body.getBoundingClientRect();
-      var mx = e.clientX - rect.left;
-      var my = e.clientY - rect.top;
-      var s = chartState, pad = s.pad;
-
-      if(mx < pad.left || mx > s.W - pad.right || my < pad.top || my > pad.top + s.chartH){
-        ch.style.display = 'none'; return;
-      }
-      ch.style.display = 'block';
-
-      var priceFrac = 1 - (my - pad.top) / s.chartH;
-      var price = s.allLow + priceFrac * s.priceRange;
-
-      // Find nearest candle
-      var gapW = s.chartW / s.candles.length;
-      var idx = Math.round((mx - pad.left - gapW/2) / gapW);
-      idx = Math.max(0, Math.min(idx, s.candles.length - 1));
-      var candle = s.candles[idx];
-      var snapX = pad.left + idx * gapW + gapW / 2;
-
-      // Horizontal line
-      var hLine = ch.querySelector('.crosshair-h');
-      hLine.style.top = my + 'px';
-
-      // Vertical line
-      var vLine = ch.querySelector('.crosshair-v');
-      vLine.style.left = snapX + 'px';
-
-      // Price label
-      var pLabel = ch.querySelector('.crosshair-price');
-      pLabel.style.top = my + 'px';
-      pLabel.textContent = price.toFixed(2);
-
-      // Time label
-      var tLabel = ch.querySelector('.crosshair-time');
-      tLabel.style.left = snapX + 'px';
-      var timeStr = '';
-      if(candle && candle.t){
-        var dd = new Date(candle.t);
-        timeStr = dd.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-      } else {
-        var pctPos = idx / Math.max(1, s.candles.length - 1);
-        var minsAgo = Math.round((1 - pctPos) * s.candles.length * selectedTimeframe);
-        timeStr = minsAgo > 0 ? '-' + minsAgo + 'min' : 'now';
-      }
-      tLabel.textContent = timeStr;
-
-      // Update OHLC bar in header
-      if(ohlcBar && candle){
-        var isUp = candle.c >= candle.o;
-        var cls = isUp ? 'ohlc-up' : 'ohlc-dn';
-        var chg = candle.c - candle.o;
-        var chgStr = (chg >= 0 ? '+' : '') + chg.toFixed(2);
-        ohlcBar.innerHTML =
-          '<span class="ohlc-label">O</span><span class="'+cls+'">'+candle.o.toFixed(2)+'</span> ' +
-          '<span class="ohlc-label">H</span><span class="'+cls+'">'+candle.h.toFixed(2)+'</span> ' +
-          '<span class="ohlc-label">L</span><span class="'+cls+'">'+candle.l.toFixed(2)+'</span> ' +
-          '<span class="ohlc-label">C</span><span class="'+cls+'">'+candle.c.toFixed(2)+'</span> ' +
-          '<span class="'+cls+'" style="margin-left:8px">'+chgStr+'</span>';
+    // Resize observer
+    var ro = new ResizeObserver(function(entries){
+      if(lwChart && entries[0]){
+        var cr = entries[0].contentRect;
+        lwChart.applyOptions({ width: cr.width, height: cr.height });
       }
     });
-
-    body.addEventListener('mouseleave', function(){
-      ch.style.display = 'none';
-      if(ohlcBar) ohlcBar.innerHTML = '';
-    });
+    ro.observe(container);
   }
+
+  // Legacy wrappers for existing call sites
+  function drawChart(canvasId, volCanvasId, trade, rawCandles){
+    buildChart('chart-container', rawCandles, trade, (data && data.trade_events) || []);
+  }
+  function initCrosshair(){ /* built into lightweight-charts */ }
 
   function renderChartPanel(d){
     var trade = d.active_trade || null;
@@ -933,7 +717,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         '<span style="color:var(--accent);font-size:12px;font-weight:800;letter-spacing:1px">MNQ</span>' +
         '<span style="color:var(--text-muted);font-size:10px;font-weight:500">Micro E-mini Nasdaq-100</span>' +
         (rawCandles.length > 0 ? '<span style="color:var(--text-muted);font-size:10px;font-weight:500;opacity:.5">\u00B7 '+dispCount+' bars</span>' : '') +
-        '<span id="chart-ohlc-bar" class="chart-ohlc-bar" style="margin-left:12px"></span>' +
       '</h3>' +
       '<div class="tf-selector">' +
         '<button class="tf-btn'+(selectedTimeframe===1?' active':'')+'" onclick="window._setTF(1)">1m</button>' +
@@ -952,26 +735,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       '</div>';
     }
 
-    html += '<div class="chart-body" id="chart-body">' +
-      '<canvas id="chart-canvas"></canvas>' +
-      '<div class="chart-crosshair" id="chart-crosshair">' +
-        '<div class="crosshair-h"></div>' +
-        '<div class="crosshair-v"></div>' +
-        '<div class="crosshair-price"></div>' +
-        '<div class="crosshair-time"></div>' +
-      '</div>';
+    html += '<div class="chart-body" id="chart-container">';
 
-    if(!trade && rawCandles.length > 0){
-      html += '<div class="chart-idle-msg">No active trade \u2014 showing recent price action</div>';
-    }
     if(rawCandles.length === 0){
       html += '<div class="chart-idle-msg">Waiting for candle data...</div>';
     }
 
     html += '</div>';
-
-    // Volume sub-chart
-    html += '<div class="vol-bar" id="vol-body"><canvas id="vol-canvas"></canvas></div>';
 
     return html;
   }
@@ -979,8 +749,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   window._setTF = function(tf){
     selectedTimeframe = tf;
     if(data && data.candle_buffer && data.candle_buffer.length > 0){
-      drawChart('chart-canvas', 'vol-canvas', data.active_trade, data.candle_buffer);
-      initCrosshair();
+      buildChart('chart-container', data.candle_buffer, data.active_trade, data.trade_events || []);
     }
     var btns = document.querySelectorAll('.tf-btn');
     btns.forEach(function(b){ b.classList.remove('active'); if(b.textContent === tf+'m') b.classList.add('active'); });
@@ -1210,11 +979,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
     app.innerHTML = html;
 
-    // Post-render: draw chart + init crosshair
+    // Post-render: build lightweight chart
     if(d.candle_buffer && d.candle_buffer.length > 0){
       setTimeout(function(){
-        drawChart('chart-canvas', 'vol-canvas', d.active_trade, d.candle_buffer);
-        initCrosshair();
+        buildChart('chart-container', d.candle_buffer, d.active_trade, d.trade_events || []);
       }, 60);
     }
 
@@ -1277,16 +1045,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     tickTimestamps();
   }, 1000);
 
-  var resizeTimer;
-  window.addEventListener('resize', function(){
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function(){
-      if(data && data.candle_buffer && data.candle_buffer.length > 0){
-        drawChart('chart-canvas', 'vol-canvas', data.active_trade, data.candle_buffer);
-        initCrosshair();
-      }
-    }, 200);
-  });
+  // Resize is handled by ResizeObserver in buildChart
 
   fetchData();
 })();
