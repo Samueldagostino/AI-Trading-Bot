@@ -683,12 +683,18 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
         rel_path = OUTPUT_FILE.relative_to(ROOT_DIR)
         rel_viz_path = TRADE_VIZ_FILE.relative_to(ROOT_DIR)
 
-        # Stage the stats files
+        # Stage the stats files (separately so one missing file doesn't block the other)
         subprocess.run(
-            ["git", "add", str(rel_path), str(rel_viz_path)],
+            ["git", "add", str(rel_path)],
             cwd=str(ROOT_DIR),
             capture_output=True, text=True, timeout=30,
         )
+        if TRADE_VIZ_FILE.exists():
+            subprocess.run(
+                ["git", "add", str(rel_viz_path)],
+                cwd=str(ROOT_DIR),
+                capture_output=True, text=True, timeout=30,
+            )
 
         # Check if there are changes to commit
         result = subprocess.run(
@@ -696,7 +702,7 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
             cwd=str(ROOT_DIR), capture_output=True, timeout=30,
         )
         if result.returncode == 0:
-            logger.debug("No changes to commit")
+            logger.info("Git: no changes to commit (file unchanged)")
             return True
 
         if dry_run:
