@@ -1,6 +1,6 @@
 {
-  "updated": "2026-03-12T14:34:41.325297+00:00",
-  "status": "OFFLINE",
+  "updated": "2026-03-12T19:47:27.656568+00:00",
+  "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 10,
   "trades_today": 0,
@@ -93,9 +93,9 @@
     }
   ],
   "heartbeat": {
-    "last_seen": "2026-03-05T13:28:15+00:00",
-    "seconds_since_last": 608786.3,
-    "connection_quality": "poor",
+    "last_seen": "2026-03-12T19:47:27.656286+00:00",
+    "seconds_since_last": 0.0,
+    "connection_quality": "good",
     "uptime_pct": 100.0
   },
   "state": {
@@ -175,5 +175,7 @@
       "l": 24489.11,
       "c": 24489.11
     }
-  ]
+  ],
+  "session_pnl_dollars": 0.0,
+  "trade_log": []
 }

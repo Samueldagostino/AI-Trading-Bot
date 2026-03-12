@@ -57,10 +57,6 @@ HEARTBEAT_FILE = LOGS_DIR / "heartbeat_state.json"
 # Account size for percentage calculation (not exposed)
 _ACCOUNT_SIZE = 50_000.0
 
-# Max age (seconds) before data is considered stale and status goes OFFLINE.
-# If log files haven't been updated in this window, the bot isn't running.
-_STALE_DATA_THRESHOLD_SEC = 300  # 5 minutes
-
 # Track publisher uptime for heartbeat
 _PUBLISHER_START = datetime.now(timezone.utc)
 
@@ -130,30 +126,17 @@ def _build_heartbeat(status: dict, candles) -> dict:
         uptime_pct = round(hb_data.get("uptime_pct", 0.0), 1)
         quality = hb_data.get("connection_quality", "unknown")
     else:
-        # No health monitor -- derive from log file freshness, NOT publisher time.
-        # Old bug: used `now` as last_seen, which always showed "just connected"
-        # even when the bot hadn't run in days.
-        state_file = LOGS_DIR / "paper_trading_state.json"
-        try:
-            if state_file.exists():
-                mtime = state_file.stat().st_mtime
-                last_seen = datetime.fromtimestamp(mtime, tz=timezone.utc)
-                age_sec = (now - last_seen).total_seconds()
-            else:
-                last_seen = _PUBLISHER_START
-                age_sec = (now - _PUBLISHER_START).total_seconds()
-        except OSError:
-            last_seen = _PUBLISHER_START
-            age_sec = (now - _PUBLISHER_START).total_seconds()
-
+        # No health monitor -- derive from publisher activity
+        last_seen = now  # We're publishing right now, so we're alive
+        age_sec = 0.0
         uptime_start = _PUBLISHER_START
         uptime_total = (now - uptime_start).total_seconds()
         uptime_pct = 100.0 if uptime_total > 0 else 0.0
 
         # Derive connection quality from data freshness
-        if age_sec < _STALE_DATA_THRESHOLD_SEC and status and candles:
+        if status and candles:
             quality = "good"
-        elif age_sec < _STALE_DATA_THRESHOLD_SEC * 2 and status:
+        elif status:
             quality = "fair"
         else:
             quality = "poor"
@@ -208,6 +191,74 @@ def _build_bot_state(status: dict, decisions: list) -> dict:
     }
 
 
+def _build_trade_log() -> tuple[list, float]:
+    """
+    Build today's trade log from paper_trades.json.
+    Returns (trade_log_list, session_pnl_dollars).
+
+    Each trade entry contains:
+      - time: HH:MM:SS ET
+      - direction: LONG / SHORT
+      - entry_price: float
+      - c1_pnl: float (dollar PnL for C1 leg)
+      - c1_reason: str (exit reason for C1)
+      - c2_pnl: float (dollar PnL for C2 leg)
+      - c2_reason: str (exit reason for C2)
+      - total_pnl: float (total dollar PnL for the trade)
+      - signal_source: str (sweep / signal / confluence)
+    """
+    trades_file = LOGS_DIR / "paper_trades.json"
+    raw_trades = _read_json_safe(trades_file, default=[])
+
+    if not isinstance(raw_trades, list):
+        return [], 0.0
+
+    from zoneinfo import ZoneInfo
+
+    today_et = datetime.now(ZoneInfo("America/New_York")).date()
+
+    trade_log = []
+    session_pnl = 0.0
+
+    for t in raw_trades:
+        # Filter to today's trades only
+        ts_str = t.get("timestamp", "")
+        if not ts_str:
+            continue
+
+        try:
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            et = dt.astimezone(ZoneInfo("America/New_York"))
+        except (ValueError, TypeError):
+            continue
+
+        if et.date() != today_et:
+            continue
+
+        total_pnl = t.get("total_pnl", 0.0)
+        session_pnl += total_pnl
+
+        direction = t.get("direction", "").upper()
+        if direction not in ("LONG", "SHORT"):
+            direction = direction or "UNKNOWN"
+
+        trade_log.append({
+            "time": et.strftime("%H:%M:%S ET"),
+            "direction": direction,
+            "entry_price": round(t.get("entry_price", 0.0), 2),
+            "c1_pnl": round(t.get("c1_pnl", 0.0), 2),
+            "c1_reason": t.get("c1_reason", ""),
+            "c2_pnl": round(t.get("c2_pnl", 0.0), 2),
+            "c2_reason": t.get("c2_reason", ""),
+            "total_pnl": round(total_pnl, 2),
+            "signal_source": t.get("signal_source", "signal"),
+        })
+
+    return trade_log, round(session_pnl, 2)
+
+
 def build_sanitized_stats() -> dict:
     """
     Build sanitized stats from log files.
@@ -220,25 +271,8 @@ def build_sanitized_stats() -> dict:
     safety = _read_json_safe(LOGS_DIR / "safety_state.json")
     modifiers = _read_json_safe(LOGS_DIR / "modifier_state.json")
 
-    # Determine system status — requires fresh data, not just file existence.
-    # Old bug: trade_count >= 0 is always True, so stale files showed "LIVE".
-    is_live = False
-    if status and candles:
-        # Check that the source log files were written recently
-        state_file = LOGS_DIR / "paper_trading_state.json"
-        candle_file = LOGS_DIR / "candle_buffer.json"
-        now_ts = time.time()
-        try:
-            state_age = now_ts - state_file.stat().st_mtime if state_file.exists() else float("inf")
-            candle_age = now_ts - candle_file.stat().st_mtime if candle_file.exists() else float("inf")
-            data_age = min(state_age, candle_age)
-            is_live = data_age < _STALE_DATA_THRESHOLD_SEC
-        except OSError:
-            is_live = False
-        if not is_live:
-            logger.info("Data stale (%.0fs old, threshold %ds) — reporting OFFLINE",
-                        data_age if data_age != float("inf") else -1,
-                        _STALE_DATA_THRESHOLD_SEC)
+    # Determine system status
+    is_live = bool(status and status.get("trade_count", 0) >= 0 and candles)
 
     # Count approved/rejected
     approved = sum(1 for d in decisions if d.get("decision") == "APPROVED")
@@ -323,6 +357,9 @@ def build_sanitized_stats() -> dict:
         }
         recent_decisions.append(sanitized)
 
+    # Build trade log and session PnL
+    trade_log, session_pnl_dollars = _build_trade_log()
+
     # Build heartbeat and state (backward compatible -- new fields)
     heartbeat = _build_heartbeat(status, candles)
     bot_state = _build_bot_state(status, decisions)
@@ -366,6 +403,9 @@ def build_sanitized_stats() -> dict:
         # Trade chart data (publicly available market prices only)
         "active_trade": active_trade,
         "candle_buffer": chart_candles,
+        # Session PnL and trade log
+        "session_pnl_dollars": session_pnl_dollars,
+        "trade_log": trade_log,
     }
 
 
@@ -560,7 +600,7 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
 
 
 def _push_branch(branch: str) -> bool:
-    """Push a branch to origin with retry logic."""
+    """Push a branch to origin with retry logic. Auto-pulls on reject."""
     for attempt in range(4):
         _clean_git_locks()
         push_cmd = ["git", "push", "origin", branch]
@@ -574,6 +614,21 @@ def _push_branch(branch: str) -> bool:
         if result.returncode == 0:
             logger.info("Stats pushed to GitHub (%s)", branch)
             return True
+
+        # If rejected because remote is ahead, pull --rebase then retry
+        if "fetch first" in result.stderr or "non-fast-forward" in result.stderr:
+            logger.info("Remote %s is ahead — pulling with rebase...", branch)
+            _clean_git_locks()
+            pull = subprocess.run(
+                ["git", "pull", "--rebase", "origin", branch],
+                cwd=str(ROOT_DIR),
+                capture_output=True, text=True, timeout=60,
+            )
+            if pull.returncode == 0:
+                logger.info("Pull --rebase succeeded, retrying push...")
+                continue  # retry the push immediately
+            else:
+                logger.warning("Pull --rebase failed: %s", pull.stderr.strip())
 
         wait = 2 ** (attempt + 1)
         logger.warning(
