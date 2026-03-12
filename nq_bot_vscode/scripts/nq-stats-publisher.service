@@ -1,0 +1,29 @@
+[Unit]
+Description=NQ Trading Bot — Live Stats Publisher (GitHub Pages)
+Documentation=https://github.com/samueldagostino/AI-Trading-Bot
+After=network-online.target nq-trading-bot@%i.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/AI-Trading-Bot/nq_bot_vscode
+ExecStart=/usr/bin/python3 scripts/publish_stats.py --interval 60
+Restart=on-failure
+RestartSec=15
+StartLimitBurst=10
+StartLimitIntervalSec=300
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/%i/AI-Trading-Bot/nq_bot_vscode/.env
+
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nq-stats-publisher
+
+[Install]
+WantedBy=multi-user.target

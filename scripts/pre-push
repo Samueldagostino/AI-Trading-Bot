@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# ──────────────────────────────────────────────────────────────
+# pre-push hook — Prevents pushing broken code
+# ──────────────────────────────────────────────────────────────
+# Runs:
+#   1. Python syntax check on all changed .py files
+#   2. HC filter constants validation (ensures core gates untouched)
+#   3. Critical unit tests (fast subset, ~10s)
+#
+# Skip with:  git push --no-verify
+# ──────────────────────────────────────────────────────────────
+set -eo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+BOT_DIR="${REPO_ROOT}/nq_bot_vscode"
+FAILED=0
+
+echo "╔══════════════════════════════════════════════════╗"
+echo "║  NQ Trading Bot — Pre-Push Validation            ║"
+echo "╚══════════════════════════════════════════════════╝"
+
+# ── 1. Syntax check changed Python files ──
+echo ""
+echo "▸ Checking Python syntax..."
+CHANGED_PY=$(git diff --name-only HEAD~1..HEAD -- '*.py' 2>/dev/null || git diff --name-only --cached -- '*.py' 2>/dev/null || true)
+
+if [ -n "$CHANGED_PY" ]; then
+    SYNTAX_ERRORS=0
+    while IFS= read -r f; do
+        if [ -f "$f" ]; then
+            if ! python3 -c "import ast; ast.parse(open('$f').read())" 2>/dev/null; then
+                echo "  SYNTAX ERROR: $f"
+                SYNTAX_ERRORS=$((SYNTAX_ERRORS + 1))
+            fi
+        fi
+    done <<< "$CHANGED_PY"
+
+    if [ $SYNTAX_ERRORS -gt 0 ]; then
+        echo "  ✗ $SYNTAX_ERRORS file(s) have syntax errors"
+        FAILED=1
+    else
+        echo "  ✓ All changed files pass syntax check"
+    fi
+else
+    echo "  ✓ No Python files changed"
+fi
+
+# ── 2. Validate HC filter constants ──
+echo ""
+echo "▸ Validating HC filter constants..."
+HC_CHECK=$(python3 -c "
+import sys
+sys.path.insert(0, '${BOT_DIR}')
+from config.constants import HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS, HTF_STRENGTH_GATE
+errors = []
+if HIGH_CONVICTION_MIN_SCORE != 0.75:
+    errors.append(f'HIGH_CONVICTION_MIN_SCORE={HIGH_CONVICTION_MIN_SCORE} (expected 0.75)')
+if HIGH_CONVICTION_MAX_STOP_PTS != 30.0:
+    errors.append(f'HIGH_CONVICTION_MAX_STOP_PTS={HIGH_CONVICTION_MAX_STOP_PTS} (expected 30.0)')
+if HTF_STRENGTH_GATE != 0.3:
+    errors.append(f'HTF_STRENGTH_GATE={HTF_STRENGTH_GATE} (expected 0.3)')
+if errors:
+    print('FAIL: ' + '; '.join(errors))
+    sys.exit(1)
+else:
+    print('OK')
+" 2>&1) || true
+
+if echo "$HC_CHECK" | grep -q "^OK"; then
+    echo "  ✓ HC constants verified (score=0.75, stop=30pts, HTF=0.3)"
+else
+    echo "  ✗ HC constants CHANGED: $HC_CHECK"
+    echo "  ✗ DO NOT modify HC gates without backtest evidence!"
+    FAILED=1
+fi
+
+# ── 3. Run critical tests (fast subset) ──
+echo ""
+echo "▸ Running critical tests..."
+cd "$BOT_DIR"
+
+# Run a focused subset: critical bugs, config validator, safety rails
+TEST_OUTPUT=$(python3 -m pytest tests/test_critical_bugs.py tests/test_safety_rails.py tests/test_config_validator.py -x -q --tb=short --no-header -p no:warnings 2>&1) || true
+TEST_EXIT=$?
+
+PASSED=$(echo "$TEST_OUTPUT" | grep -oP '\d+ passed' | head -1 || echo "0 passed")
+FAILED_TESTS=$(echo "$TEST_OUTPUT" | grep -oP '\d+ failed' | head -1 || echo "")
+
+if [ -z "$FAILED_TESTS" ] && echo "$TEST_OUTPUT" | grep -q "passed"; then
+    echo "  ✓ Critical tests: $PASSED"
+else
+    echo "  ✗ Critical tests FAILED:"
+    echo "$TEST_OUTPUT" | tail -20
+    FAILED=1
+fi
+
+# ── Result ──
+echo ""
+if [ $FAILED -ne 0 ]; then
+    echo "══════════════════════════════════════════════════"
+    echo "  ✗ PUSH BLOCKED — Fix issues above before pushing"
+    echo "  (Emergency override: git push --no-verify)"
+    echo "══════════════════════════════════════════════════"
+    exit 1
+else
+    echo "══════════════════════════════════════════════════"
+    echo "  ✓ All checks passed — push allowed"
+    echo "══════════════════════════════════════════════════"
+    exit 0
+fi
