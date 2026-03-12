@@ -652,6 +652,23 @@ def write_stats(stats: dict) -> None:
             pass
 
 
+def _clean_git_locks() -> None:
+    """Remove stale git lock files (common with OneDrive sync conflicts)."""
+    git_dir = ROOT_DIR / ".git"
+    lock_files = [
+        git_dir / "HEAD.lock",
+        git_dir / "index.lock",
+        git_dir / "objects" / "maintenance.lock",
+    ]
+    for lf in lock_files:
+        try:
+            if lf.exists():
+                lf.unlink()
+                logger.info("Removed stale lock file: %s", lf.name)
+        except OSError:
+            pass  # Can't remove — another process truly holds it
+
+
 def git_commit_and_push(dry_run: bool = False) -> bool:
     """Commit and push live_stats.json to GitHub.
 
@@ -660,6 +677,9 @@ def git_commit_and_push(dry_run: bool = False) -> bool:
     If push fails due to divergence, reset to remote and re-commit.
     """
     try:
+        # Clean stale lock files before any git operation
+        _clean_git_locks()
+
         rel_path = OUTPUT_FILE.relative_to(ROOT_DIR)
         rel_viz_path = TRADE_VIZ_FILE.relative_to(ROOT_DIR)
 
