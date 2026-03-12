@@ -36,8 +36,8 @@ Port reference:
 Requires TWS / IB Gateway running with API access enabled.
 """
 
-import nest_asyncio
-nest_asyncio.apply()
+from ib_insync import util as _ib_util
+_ib_util.patchAsyncio()
 
 import argparse
 import asyncio
@@ -47,6 +47,7 @@ import logging.handlers
 import os
 import random
 import signal
+import subprocess
 import sys
 import time
 import traceback
@@ -168,7 +169,7 @@ class PaperLiveRunner:
     def __init__(
         self,
         dry_run: bool = False,
-        max_daily_loss: float = 500.0,
+        max_daily_loss: float = 1500.0,
         log_level: str = "INFO",
         port: int = 7497,
     ):
@@ -186,7 +187,7 @@ class PaperLiveRunner:
         self._safety_rails = SafetyRails(SafetyRailsConfig(
             max_daily_loss=max_daily_loss,
             max_consecutive_losses=5,
-            max_position_size=2,       # ABSOLUTE — no exceptions
+            max_position_size=4,       # v3: C1=1 + C2=1 + C3=2 = 4 contracts
             heartbeat_alert_seconds=60.0,
             heartbeat_halt_seconds=300.0,
             log_dir=str(LOGS_DIR),
@@ -1070,10 +1071,11 @@ Port reference:
   4001 = IB Gateway live trading
 
 Safety Rails:
-  - Max daily loss:       $500 (configurable via --max-daily-loss)
+  - Max daily loss:       $1,500 (configurable via --max-daily-loss)
   - Max consecutive loss: 5 trades -> HALT
-  - Max position size:    2 contracts (ABSOLUTE, not configurable)
+  - Max position size:    4 contracts (v3: C1=1, C2=1, C3=2)
   - Heartbeat timeout:    60s alert, 300s halt
+  - Config validator:     Blocks trading if config doesn't match v3 backtest
 
 All circuit breakers require manual restart after tripping.
 """,
@@ -1083,8 +1085,8 @@ All circuit breakers require manual restart after tripping.
         help="Simulate without IBKR connection (uses random synthetic data)",
     )
     parser.add_argument(
-        "--max-daily-loss", type=float, default=500.0,
-        help="Maximum daily loss before halting (default: $500)",
+        "--max-daily-loss", type=float, default=1500.0,
+        help="Maximum daily loss before halting (default: $1500)",
     )
     parser.add_argument(
         "--log-level", type=str, default="INFO",
@@ -1094,6 +1096,10 @@ All circuit breakers require manual restart after tripping.
     parser.add_argument(
         "--port", type=int, default=7497,
         help="TWS/Gateway port (default: 7497 for TWS paper)",
+    )
+    parser.add_argument(
+        "--force-config", action="store_true",
+        help="Override config validation — trade even if config mismatches v3 baseline (NOT RECOMMENDED)",
     )
     args = parser.parse_args()
 
@@ -1125,6 +1131,33 @@ All circuit breakers require manual restart after tripping.
     ))
     root_logger.addHandler(file_handler)
 
+    # ── v3 Config Validation ─────────────────────────────────────
+    from config.config_validator import print_config_table
+    config_ok = print_config_table(CONFIG, force=args.force_config)
+    if not config_ok:
+        logger.error("Config validation FAILED — exiting. Use --force-config to override.")
+        sys.exit(1)
+    # ─────────────────────────────────────────────────────────────
+
+    # ── Google Drive backup on startup ──────────────────────────
+    _gdrive_sync = script_dir / "sync_to_gdrive.ps1"
+    if sys.platform == "win32" and _gdrive_sync.exists():
+        logger.info("Backing up to Google Drive before trading...")
+        try:
+            _sync_result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(_gdrive_sync)],
+                capture_output=True, text=True, timeout=120,
+            )
+            if _sync_result.returncode == 0:
+                logger.info("Google Drive backup complete")
+            else:
+                logger.warning("Google Drive backup had warnings (non-fatal)")
+        except subprocess.TimeoutExpired:
+            logger.warning("Google Drive backup timed out (continuing without)")
+        except Exception as _e:
+            logger.warning("Google Drive backup failed: %s (continuing without)", _e)
+    # ─────────────────────────────────────────────────────────────
+
     # Use ibkr_startup flow when not in dry-run mode for automated startup
     if not args.dry_run:
         try:
@@ -1135,7 +1168,7 @@ All circuit breakers require manual restart after tripping.
                 log_level=args.log_level,
                 port=args.port,
             )
-            loop = asyncio.new_event_loop()
+            loop = asyncio.get_event_loop()
 
             def _startup_signal_handler():
                 logger.info("Shutdown signal received (SIGINT/SIGTERM)")
@@ -1152,8 +1185,6 @@ All circuit breakers require manual restart after tripping.
             except Exception:
                 logger.critical("UNHANDLED EXCEPTION:\n%s", traceback.format_exc())
                 sys.exit(1)
-            finally:
-                loop.close()
             return
         except ImportError:
             logger.info("ibkr_startup not available, falling back to direct runner")
@@ -1166,7 +1197,7 @@ All circuit breakers require manual restart after tripping.
     )
 
     # Event loop with signal handlers
-    loop = asyncio.new_event_loop()
+    loop = asyncio.get_event_loop()
 
     def _signal_handler():
         logger.info("Shutdown signal received (SIGINT/SIGTERM)")

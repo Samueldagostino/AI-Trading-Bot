@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NQ Trading Bot — Login</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>NQ Trading Bot</h1>
+            <p>Real-Time Monitoring Dashboard</p>
+            <form id="loginForm" onsubmit="return doLogin(event)">
+                <input type="password" id="tokenInput" placeholder="API Token" autocomplete="current-password" required>
+                <button type="submit">Login</button>
+            </form>
+            <div class="login-error" id="loginError">Invalid token. Please try again.</div>
+        </div>
+    </div>
+    <script>
+        async function doLogin(e) {
+            e.preventDefault();
+            const token = document.getElementById('tokenInput').value.trim();
+            if (!token) return false;
+            try {
+                const resp = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({token: token})
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    localStorage.setItem('dashboard_token', data.token);
+                    window.location.href = '/';
+                } else {
+                    document.getElementById('loginError').style.display = 'block';
+                }
+            } catch (err) {
+                document.getElementById('loginError').style.display = 'block';
+            }
+            return false;
+        }
+        // If already logged in, redirect
+        if (localStorage.getItem('dashboard_token')) {
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>

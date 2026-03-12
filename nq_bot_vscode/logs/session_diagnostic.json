@@ -1,0 +1,208 @@
+{
+  "total_trades": 884,
+  "session_breakdown": {
+    "ETH_ASIA": {
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": 0.0,
+      "profit_factor": 0.0,
+      "total_pnl": 0.0,
+      "avg_pnl_per_trade": 0.0,
+      "c1_pnl": 0.0,
+      "c2_pnl": 0.0,
+      "avg_winner": 0.0,
+      "avg_loser": 0.0,
+      "largest_winner": 0.0,
+      "largest_loser": 0.0,
+      "pct_of_total_trades": 0.0,
+      "pct_of_total_pnl": 0.0
+    },
+    "ETH_LONDON": {
+      "trades": 589,
+      "wins": 396,
+      "losses": 193,
+      "win_rate": 67.2,
+      "profit_factor": 1.67,
+      "total_pnl": 11109.08,
+      "avg_pnl_per_trade": 18.86,
+      "c1_pnl": 9753.19,
+      "c2_pnl": 1355.89,
+      "avg_winner": 69.72,
+      "avg_loser": -85.49,
+      "largest_winner": 450.92,
+      "largest_loser": -616.08,
+      "pct_of_total_trades": 66.6,
+      "pct_of_total_pnl": 66.8
+    },
+    "RTH_EARLY": {
+      "trades": 155,
+      "wins": 105,
+      "losses": 50,
+      "win_rate": 67.7,
+      "profit_factor": 1.81,
+      "total_pnl": 3733.32,
+      "avg_pnl_per_trade": 24.09,
+      "c1_pnl": 3102.05,
+      "c2_pnl": 631.27,
+      "avg_winner": 79.32,
+      "avg_loser": -91.91,
+      "largest_winner": 444.92,
+      "largest_loser": -280.58,
+      "pct_of_total_trades": 17.5,
+      "pct_of_total_pnl": 22.4
+    },
+    "RTH_LATE": {
+      "trades": 140,
+      "wins": 97,
+      "losses": 43,
+      "win_rate": 69.3,
+      "profit_factor": 1.72,
+      "total_pnl": 1798.8,
+      "avg_pnl_per_trade": 12.85,
+      "c1_pnl": 1524.9,
+      "c2_pnl": 273.9,
+      "avg_winner": 44.27,
+      "avg_loser": -58.02,
+      "largest_winner": 202.42,
+      "largest_loser": -153.58,
+      "pct_of_total_trades": 15.8,
+      "pct_of_total_pnl": 10.8
+    },
+    "POST_RTH": {
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": 0.0,
+      "profit_factor": 0.0,
+      "total_pnl": 0.0,
+      "avg_pnl_per_trade": 0.0,
+      "c1_pnl": 0.0,
+      "c2_pnl": 0.0,
+      "avg_winner": 0.0,
+      "avg_loser": 0.0,
+      "largest_winner": 0.0,
+      "largest_loser": 0.0,
+      "pct_of_total_trades": 0.0,
+      "pct_of_total_pnl": 0.0
+    }
+  },
+  "long_vs_short_by_session": {
+    "ETH_ASIA": {
+      "long_trades": 0,
+      "long_pnl": 0,
+      "short_trades": 0,
+      "short_pnl": 0
+    },
+    "ETH_LONDON": {
+      "long_trades": 289,
+      "long_pnl": 6825.58,
+      "short_trades": 300,
+      "short_pnl": 4283.5
+    },
+    "RTH_EARLY": {
+      "long_trades": 77,
+      "long_pnl": 2835.04,
+      "short_trades": 78,
+      "short_pnl": 898.28
+    },
+    "RTH_LATE": {
+      "long_trades": 69,
+      "long_pnl": 1065.98,
+      "short_trades": 71,
+      "short_pnl": 732.82
+    },
+    "POST_RTH": {
+      "long_trades": 0,
+      "long_pnl": 0,
+      "short_trades": 0,
+      "short_pnl": 0
+    }
+  },
+  "monthly_by_session": {
+    "2025-03": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 58,
+      "RTH_EARLY": 20,
+      "RTH_LATE": 4,
+      "POST_RTH": 0
+    },
+    "2025-04": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 77,
+      "RTH_EARLY": 18,
+      "RTH_LATE": 21,
+      "POST_RTH": 0
+    },
+    "2025-05": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 41,
+      "RTH_EARLY": 19,
+      "RTH_LATE": 16,
+      "POST_RTH": 0
+    },
+    "2025-06": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 37,
+      "RTH_EARLY": 14,
+      "RTH_LATE": 16,
+      "POST_RTH": 0
+    },
+    "2025-07": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 36,
+      "RTH_EARLY": 7,
+      "RTH_LATE": 6,
+      "POST_RTH": 0
+    },
+    "2025-08": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 53,
+      "RTH_EARLY": 6,
+      "RTH_LATE": 4,
+      "POST_RTH": 0
+    },
+    "2025-09": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 22,
+      "RTH_EARLY": 6,
+      "RTH_LATE": 1,
+      "POST_RTH": 0
+    },
+    "2025-10": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 43,
+      "RTH_EARLY": 10,
+      "RTH_LATE": 18,
+      "POST_RTH": 0
+    },
+    "2025-11": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 66,
+      "RTH_EARLY": 16,
+      "RTH_LATE": 9,
+      "POST_RTH": 0
+    },
+    "2025-12": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 40,
+      "RTH_EARLY": 10,
+      "RTH_LATE": 7,
+      "POST_RTH": 0
+    },
+    "2026-01": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 53,
+      "RTH_EARLY": 21,
+      "RTH_LATE": 17,
+      "POST_RTH": 0
+    },
+    "2026-02": {
+      "ETH_ASIA": 0,
+      "ETH_LONDON": 63,
+      "RTH_EARLY": 8,
+      "RTH_LATE": 21,
+      "POST_RTH": 0
+    }
+  }
+}

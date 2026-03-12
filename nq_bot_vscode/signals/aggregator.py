@@ -16,8 +16,11 @@ agreeing on direction. Discord alone NEVER triggers a trade.
 import logging
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, TYPE_CHECKING
 from enum import Enum
+
+if TYPE_CHECKING:
+    from nq_bot_vscode.ml.predictor import MLPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +74,9 @@ class SignalAggregator:
     direction and confidence. The risk engine decides sizing and approval.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, ml_predictor: Optional["MLPredictor"] = None):
         self.config = config.signals
+        self._ml_predictor = ml_predictor
         self._last_signal_time: Optional[datetime] = None
         self._signal_history: List[AggregatedSignal] = []
         self._htf_blocked_count: int = 0
@@ -99,6 +103,20 @@ class SignalAggregator:
         """
         if current_time is None:
             current_time = datetime.now(timezone.utc)
+
+        # Auto-generate ML prediction when predictor is available
+        if ml_prediction is None and self._ml_predictor is not None:
+            try:
+                pred = self._ml_predictor.predict(
+                    feature_snapshot, htf_bias,
+                )
+                if pred.direction != "neutral":
+                    ml_prediction = {
+                        "direction": pred.direction,
+                        "confidence": pred.confidence,
+                    }
+            except Exception as e:
+                logger.debug("ML prediction failed: %s", e)
 
         signals: List[IndividualSignal] = []
 

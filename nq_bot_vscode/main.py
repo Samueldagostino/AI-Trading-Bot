@@ -25,15 +25,21 @@ from zoneinfo import ZoneInfo
 from config.settings import BotConfig, CONFIG
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    HIGH_CONVICTION_MIN_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
     HTF_STRENGTH_GATE,
     UCL_FVG_CONFLUENCE_BOOST,
+    CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
+    AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
+    MIN_RR_OVERRIDE,
+    get_dollar_risk_budget,
 )
 from config.validator import validate_config
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
+from features.session_volatility import SessionVolatilityScaler
 from signals.aggregator import SignalAggregator, SignalDirection
 from signals.liquidity_sweep import LiquiditySweepDetector, SweepSignal
 from signals.fvg_detector import FVGDetector
@@ -44,6 +50,8 @@ from risk.regime_detector import RegimeDetector
 from execution.scale_out_executor import ScaleOutExecutor
 from monitoring.engine import MonitoringEngine
 from monitoring.trade_decision_logger import TradeDecisionLogger
+from monitoring.alerting import AlertManager, set_alert_manager, get_alert_manager
+from monitoring.alert_templates import AlertTemplates
 from data_pipeline.pipeline import (
     DataPipeline, BarData, MultiTimeframeIterator,
     bardata_to_bar, bardata_to_htfbar, MINUTES_TO_LABEL,
@@ -54,7 +62,11 @@ logger = logging.getLogger(__name__)
 
 
 # All HC constants imported from config.constants (single source of truth)
-MIN_RR_RATIO = 1.5  # Minimum risk/reward ratio for entry
+# ── MIN R:R GATE ─────────────────────────────────────────────────
+# Sourced from config/constants.py (single source of truth).
+# MIN_RR_OVERRIDE = 0.0 effectively disables the gate for the
+# C1 time-exit strategy where R:R is irrelevant.
+MIN_RR_RATIO = MIN_RR_OVERRIDE if MIN_RR_OVERRIDE is not None else 1.5
 
 # ── CONFIG D GATE ASSERTION ───────────────────────────────────────────
 # Both HTFBiasEngine.STRENGTH_GATE and HTF_STRENGTH_GATE now source from
@@ -111,6 +123,10 @@ class TradingOrchestrator:
         self._watch_manager = WatchStateManager()
         self._ucl_enabled = True  # Can be toggled for A/B testing
 
+        # Session Volatility Scaler — U-shaped intraday ATR adjustment
+        # Enabled via SESSION_VOLATILITY_SCALING env var (default: OFF)
+        self._session_scaler = SessionVolatilityScaler()
+
         # Institutional Modifier Layer — Phase 1
         self._institutional_engine = InstitutionalModifierEngine()
         self._modifiers_enabled = True  # Can be toggled for A/B testing
@@ -123,6 +139,13 @@ class TradingOrchestrator:
         # Execution - scale-out is the primary executor
         self.executor = ScaleOutExecutor(config)
 
+        # Alerting — real-time notifications via console/Discord/Telegram
+        self._alert_manager = AlertManager(
+            config.alerting,
+            rate_limit_seconds=config.alerting.rate_limit_seconds,
+        )
+        set_alert_manager(self._alert_manager)
+
         # Tradovate client (initialized on connect)
         self.broker_client = None
 
@@ -132,6 +155,7 @@ class TradingOrchestrator:
         self._htf_bars_processed = 0
         self._current_regime = "unknown"
         self._execution_tf = "2m"     # Default execution timeframe
+        self._last_trading_date = None  # Track session boundaries for VWAP reset
 
         # Shadow-trade rejection capture (set by ReplaySimulator)
         self._last_rejection = None   # Populated at each rejection point
@@ -139,6 +163,9 @@ class TradingOrchestrator:
         # Consecutive executor failure counter — escalates to emergency flatten
         self._executor_fail_count = 0
         self._EXECUTOR_FAIL_LIMIT = 5
+
+        # Maintenance window entry cutoff flag
+        self._maintenance_entry_blocked = False
 
     # ================================================================
     # INITIALIZATION
@@ -173,6 +200,9 @@ class TradingOrchestrator:
         logger.info(f"  Exec TF:      {self._execution_tf}")
         logger.info(f"  Sweep Det:    {'ENABLED' if self._sweep_enabled else 'DISABLED'} "
                      f"(min score {SWEEP_MIN_SCORE}, confluence +{SWEEP_CONFLUENCE_BONUS})")
+        logger.info(f"  Aggregator:   {'STANDALONE ENABLED' if AGGREGATOR_STANDALONE_ENABLED else 'CONTEXT ONLY'} "
+                     f"(min score {AGGREGATOR_STANDALONE_MIN_SCORE})")
+        logger.info(f"  Trigger Mode: {'DUAL (sweep + aggregator)' if AGGREGATOR_STANDALONE_ENABLED else 'SWEEP ONLY (PATH C)'}")
         logger.info("=" * 60)
 
         if not skip_db:
@@ -191,11 +221,20 @@ class TradingOrchestrator:
         self.monitoring.update_health("signals", "healthy")
         self.monitoring.update_health("risk", "healthy")
         self.monitoring.update_health("execution", "healthy")
+
+        # Start alert manager background worker
+        await self._alert_manager.start()
+        self._alert_manager.enqueue(AlertTemplates.startup_complete(
+            environment=self.config.environment,
+            broker=self.config.tradovate.environment,
+        ))
+
         logger.info("Orchestrator initialized")
 
     async def shutdown(self) -> None:
         """Graceful shutdown - flatten positions first."""
         logger.info("Initiating shutdown...")
+        self._alert_manager.enqueue(AlertTemplates.shutdown_initiated("orchestrator_shutdown"))
         self._running = False
 
         if self.executor.has_active_trade:
@@ -207,6 +246,7 @@ class TradingOrchestrator:
             await self.broker_client.disconnect()
 
         await self.db.close()
+        await self._alert_manager.stop()
         logger.info("Shutdown complete")
 
     # ================================================================
@@ -222,6 +262,8 @@ class TradingOrchestrator:
         self._htf_bars_processed += 1
         # Update the cached bias
         self._htf_bias = self.htf_engine.get_bias(bar.timestamp)
+        # Feed HTF bars to sweep detector for HTF-first sweep detection
+        self.sweep_detector.update_htf_bar(timeframe, htf_bar)
 
     # ================================================================
     # MAIN EXECUTION-TF BAR PROCESSING
@@ -238,6 +280,51 @@ class TradingOrchestrator:
         self._last_bar = bar
         self._last_rejection = None  # Clear previous rejection
         action_result = None
+
+        # === MAINTENANCE WINDOW CHECKS (must be FIRST — Axiom 2: Survival Precedes Profit) ===
+        from datetime import time as dt_time
+        bar_et = bar.timestamp.astimezone(ZoneInfo("America/New_York"))
+        current_time_et = bar_et.time()
+
+        # CME maintenance window: 4:45-5:00 PM ET (futures close 4:59, reopen 6:00 PM)
+        # Hard flatten at 4:50 PM ET, block processing until 6:00 PM ET
+        _in_maintenance = dt_time(16, 50) <= current_time_et <= dt_time(18, 0)
+        if _in_maintenance:
+            if self.executor.has_active_trade:
+                result = await self.executor.maintenance_flatten(
+                    bar.close, bar.timestamp
+                )
+                if result:
+                    total_pnl = result.get("total_pnl", 0.0)
+                    if not math.isfinite(total_pnl):
+                        total_pnl = 0.0
+                    self.risk_engine.record_trade_result(total_pnl, result["direction"])
+                    self.monitoring.record_trade({
+                        "action": "exit",
+                        "pnl": total_pnl,
+                        "direction": result["direction"],
+                    })
+                    self.decision_logger.log_exit(
+                        direction=result.get("direction", "UNKNOWN"),
+                        entry_price=result.get("entry_price", 0.0),
+                        exit_price=bar.close,
+                        total_pnl=total_pnl,
+                        exit_reason="EXIT_MAINTENANCE_FLATTEN",
+                    )
+                    action_result = result
+            return action_result  # No processing during CME maintenance window
+
+        # Entry cutoff at 4:30 PM ET — block new entries, continue position management
+        self._maintenance_entry_blocked = (
+            dt_time(16, 30) <= current_time_et < dt_time(16, 50)
+        )
+
+        # === SESSION BOUNDARY DETECTION — reset VWAP at new trading day ===
+        bar_date = bar_et.date()
+        if self._last_trading_date is not None and bar_date != self._last_trading_date:
+            self.feature_engine.reset_session()
+            logger.info("Session boundary: VWAP/delta reset for new day %s", bar_date)
+        self._last_trading_date = bar_date
 
         # === 0. INSTITUTIONAL MODIFIER STATE UPDATE (every bar) ===
         if self._modifiers_enabled:
@@ -348,6 +435,14 @@ class TradingOrchestrator:
 
             return action_result
 
+        # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
+        if getattr(self, '_maintenance_entry_blocked', False):
+            logger.info(
+                "BLOCKED: New entry rejected — past 4:30 PM ET cutoff "
+                "(maintenance window protection)"
+            )
+            return action_result
+
         # === 5. SIGNAL AGGREGATION (only if flat, HTF-gated) ===
         signal = self.signal_aggregator.aggregate(
             feature_snapshot=features,
@@ -356,57 +451,97 @@ class TradingOrchestrator:
             current_time=bar.timestamp,
         )
 
-        # Determine effective signal source: existing, sweep, or both
+        # === PATH C+: DUAL-TRIGGER DECISION ENGINE ===
+        # Layer 1: HTF Gate (hard filter — enforced in aggregator)
+        # Layer 2: Structural context (aggregator, OB, FVG — boost sweep score)
+        # Layer 3: Entry trigger — TWO independent paths:
+        #   PATH A: Liquidity sweep (primary) — sweeps generate trades at HC threshold
+        #   PATH B: Aggregator standalone (re-enabled Mar 2026) — high-conviction
+        #           aggregator signals trigger trades independently
+        # Layer 4: Risk calibration (downstream HC gates + risk engine)
+        #
+        # Backtest evidence: aggregator-only trades produced +$12,626 across 1,025
+        # trades.  Sweeps added +$9,896 across 338 trades.  Both paths are profitable
+        # independently — running them together maximizes opportunity capture.
         has_signal = signal and signal.should_trade
         has_sweep = (sweep_signal is not None and
                      sweep_signal.score >= SWEEP_MIN_SCORE)
 
-        # Build entry parameters from whichever signal source(s) fired
         entry_direction = None
         entry_score = 0.0
-        entry_source = None  # "signal", "sweep", "confluence"
-        sweep_stop_override = None  # sweep may provide tighter stop
+        entry_source = None  # "sweep", "aggregator", or "ucl_confirmed_*"
+        sweep_stop_override = None
 
-        if has_signal and has_sweep:
-            # Both fire: use existing signal direction, boost score
-            direction_str = "long" if signal.direction == SignalDirection.LONG else "short"
-            sweep_dir = "long" if sweep_signal.direction == "LONG" else "short"
-
-            if direction_str == sweep_dir:
-                # Same direction -> confluence bonus
-                entry_direction = direction_str
-                entry_score = signal.combined_score + SWEEP_CONFLUENCE_BONUS
-                entry_source = "confluence"
-                logger.info(
-                    f"SWEEP CONFLUENCE: {direction_str} | "
-                    f"signal={signal.combined_score:.3f} + "
-                    f"sweep={sweep_signal.score:.2f} -> "
-                    f"boosted={entry_score:.3f}"
-                )
-            else:
-                # Conflicting directions -> use existing signal only
-                entry_direction = direction_str
-                entry_score = signal.combined_score
-                entry_source = "signal"
-
-        elif has_signal:
-            # Existing signal only
-            entry_direction = "long" if signal.direction == SignalDirection.LONG else "short"
-            entry_score = signal.combined_score
-            entry_source = "signal"
-
-        elif has_sweep:
-            # Sweep-only entry
+        if has_sweep:
+            # PATH A: Sweep entry trigger (primary)
             entry_direction = "long" if sweep_signal.direction == "LONG" else "short"
             entry_score = sweep_signal.score
             entry_source = "sweep"
-            # Use sweep's stop price for tighter risk
-            sweep_stop_override = abs(bar.close - sweep_signal.stop_price)
+            # Use sweep's stop price for tighter risk — validate first
+            if sweep_signal.stop_price and sweep_signal.stop_price > 0:
+                sweep_stop_override = abs(bar.close - sweep_signal.stop_price)
+            else:
+                sweep_stop_override = None  # Fall back to ATR-based stop
+
+            # Layer 2: Contextual boosts from aggregator alignment
+            if has_signal:
+                signal_dir = "long" if signal.direction == SignalDirection.LONG else "short"
+                if signal_dir == entry_direction:
+                    entry_score += CONTEXT_AGGREGATOR_BOOST
+                    logger.info(
+                        f"CONTEXT BOOST: aggregator {signal_dir} agrees | "
+                        f"+{CONTEXT_AGGREGATOR_BOOST} -> {entry_score:.3f}"
+                    )
+
+            # Layer 2: Structural context boosts from feature snapshot
+            if features:
+                if entry_direction == "long":
+                    if getattr(features, 'near_bullish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bullish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+                elif entry_direction == "short":
+                    if getattr(features, 'near_bearish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bearish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+
+            stop_str = f"{sweep_stop_override:.1f}pts" if sweep_stop_override else "ATR-based"
             logger.info(
                 f"SWEEP SIGNAL: {entry_direction} | "
-                f"Score: {sweep_signal.score:.2f} | "
+                f"Score: {entry_score:.3f} (base {sweep_signal.score:.2f}) | "
                 f"Levels: {', '.join(sweep_signal.swept_levels)} | "
-                f"Stop: {sweep_stop_override:.1f}pts"
+                f"Stop: {stop_str}"
+            )
+
+        elif has_signal and AGGREGATOR_STANDALONE_ENABLED:
+            # PATH B: Aggregator standalone trigger (re-enabled Mar 2026)
+            # Only fires when aggregator hits high conviction on its own
+            if signal.combined_score >= AGGREGATOR_STANDALONE_MIN_SCORE:
+                entry_direction = "long" if signal.direction == SignalDirection.LONG else "short"
+                entry_score = signal.combined_score
+                entry_source = "aggregator"
+                # Aggregator uses ATR-based stops (no sweep stop override)
+                sweep_stop_override = None
+                logger.info(
+                    f"AGGREGATOR STANDALONE: {entry_direction} | "
+                    f"Score: {entry_score:.3f} (threshold {AGGREGATOR_STANDALONE_MIN_SCORE}) | "
+                    f"Source: aggregator high-conviction"
+                )
+            else:
+                agg_dir = "long" if signal.direction == SignalDirection.LONG else "short"
+                logger.debug(
+                    f"AGGREGATOR BELOW THRESHOLD: {agg_dir} "
+                    f"score={signal.combined_score:.3f} < {AGGREGATOR_STANDALONE_MIN_SCORE} "
+                    f"— no standalone trade"
+                )
+
+        elif has_signal:
+            # AGGREGATOR_STANDALONE_ENABLED is False — context only (legacy PATH C)
+            agg_dir = "long" if signal.direction == SignalDirection.LONG else "short"
+            logger.debug(
+                f"CONTEXT ONLY (no sweep): aggregator {agg_dir} "
+                f"score={signal.combined_score:.3f} — no trade (standalone disabled)"
             )
 
         # ── Shadow rejection helper ──────────────────────────────────
@@ -507,7 +642,7 @@ class TradingOrchestrator:
                 entry_score += UCL_FVG_CONFLUENCE_BOOST
                 logger.info(
                     f"FVG confluence: +{UCL_FVG_CONFLUENCE_BOOST} boost, "
-                    f"score {old_score:.3f} → {entry_score:.3f}"
+                    f"score {old_score:.3f} -> {entry_score:.3f}"
                 )
 
         # === 5d. UCL v2 — PROCESS CONFIRMED SIGNALS ===
@@ -526,10 +661,37 @@ class TradingOrchestrator:
                 sweep_stop_override = abs(bar.close - cs.metadata["sweep_low"])
             logger.info(
                 f"UCL wide-stop conversion: {entry_direction} via {cs.setup_type} | "
-                f"original stop {cs.metadata.get('original_stop', '?')}pt → "
+                f"original stop {cs.metadata.get('original_stop', '?')}pt -> "
                 f"confirmed stop {sweep_stop_override or '?'}pt | "
                 f"boosted={cs.boosted_score:.3f} | bars={cs.bars_to_confirm}"
             )
+
+        # -- HTF DIRECTIONAL GATE (softened: score penalty instead of hard block) --
+        # A sweep IS a reversal signal — HTF bias disagreement is expected
+        # at the moment of reversal. Penalize score by 0.10 instead of blocking.
+        if entry_direction is not None and htf_bias is not None:
+            htf_disagrees = False
+            if entry_direction == "long" and not htf_bias.htf_allows_long:
+                htf_disagrees = True
+            if entry_direction == "short" and not htf_bias.htf_allows_short:
+                htf_disagrees = True
+            if htf_disagrees:
+                entry_score -= 0.10
+                logger.info(
+                    "HTF BIAS PENALTY: %s entry penalized -0.10 — HTF %s (strength %.2f) "
+                    "disagrees [source=%s, new_score=%.2f]",
+                    entry_direction, htf_bias.consensus_direction,
+                    htf_bias.consensus_strength, entry_source, entry_score,
+                )
+        elif entry_direction is not None and htf_bias is None:
+            # Fail-safe: no HTF data -> block all trades
+            logger.warning(
+                "HTF GATE BLOCK: %s entry blocked — no HTF data available "
+                "[source=%s]", entry_direction, entry_source,
+            )
+            _set_rejection(entry_direction, entry_score, None,
+                           features.atr_14, "No HTF data — fail-safe block", 1)
+            return None
 
         # -- HIGH-CONVICTION GATE 1: Signal Score --
         if entry_direction is not None and entry_score < HIGH_CONVICTION_MIN_SCORE:
@@ -552,10 +714,14 @@ class TradingOrchestrator:
             if structural_stop_dist <= 0:
                 structural_stop_dist = None
 
+        # Session-aware ATR scaling for stop/target calculation.
+        # C2 trail uses raw ATR (adapts in real-time, not locked to entry session).
+        scaled_atr = self._session_scaler.scale_atr(features.atr_14, bar.timestamp)
+
         risk_assessment = self.risk_engine.evaluate_trade(
             direction=entry_direction,
             entry_price=bar.close,
-            atr=features.atr_14,
+            atr=scaled_atr,
             vix=features.vix_level or 0,
             current_time=bar.timestamp,
             structural_stop_distance=structural_stop_dist,
@@ -577,8 +743,25 @@ class TradingOrchestrator:
                            features.atr_14, "NaN stop distance", 4)
             return None
 
-        # -- HIGH-CONVICTION GATE 2: Stop Distance Cap --
-        if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+        # -- MINIMUM STOP FLOOR (prevents micro-stops from structural noise) --
+        if HIGH_CONVICTION_MIN_STOP_PTS > 0 and raw_stop < HIGH_CONVICTION_MIN_STOP_PTS:
+            logger.info(
+                "Stop floor applied: %.1f pts -> %.1f pts (min %s)",
+                raw_stop, HIGH_CONVICTION_MIN_STOP_PTS, HIGH_CONVICTION_MIN_STOP_PTS,
+            )
+            raw_stop = HIGH_CONVICTION_MIN_STOP_PTS
+
+        # -- HIGH-CONVICTION GATE 2: Dollar-Tiered Stop Cap --
+        # Conviction score determines max dollar risk -> max stop in points.
+        dollar_budget = get_dollar_risk_budget(entry_score)
+        num_contracts = self.config.scale_out.total_contracts
+        dollar_max_stop = self.risk_engine.dollar_budget_to_max_stop_pts(
+            dollar_budget, num_contracts
+        )
+        # Use the tighter of dollar-tier cap and absolute safety ceiling
+        effective_max_stop = min(dollar_max_stop, HIGH_CONVICTION_MAX_STOP_PTS)
+
+        if raw_stop > effective_max_stop:
             # UCL v2: route wide-stop sweeps to watch state for post-sweep confirmation
             if (self._ucl_enabled and entry_source == "sweep"
                     and entry_direction is not None):
@@ -593,20 +776,27 @@ class TradingOrchestrator:
                 )
                 _set_rejection(entry_direction, entry_score, raw_stop,
                                features.atr_14,
-                               "Max stop exceeded — routed to UCL watch", 5)
+                               f"Dollar stop cap ${dollar_budget:.0f} -> {effective_max_stop:.1f}pts exceeded -- routed to UCL watch", 5)
                 return None
 
             logger.debug(
                 f"HC REJECT: stop {raw_stop:.1f} pts "
-                f"> {HIGH_CONVICTION_MAX_STOP_PTS} (too wide, wait for tighter entry)"
+                f"> {effective_max_stop:.1f} (${dollar_budget:.0f} budget @ {num_contracts} contracts)"
             )
             _set_rejection(entry_direction, entry_score, raw_stop,
-                           features.atr_14, "Max stop exceeded", 5)
+                           features.atr_14,
+                           f"Dollar stop cap exceeded (${dollar_budget:.0f}/{effective_max_stop:.1f}pts)", 5)
             return None
 
-        # -- Min R:R Check --
-        target_distance = features.atr_14 * self.config.risk.atr_multiplier_target
-        if raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
+        logger.info(
+            "Dollar tier: score=%.2f -> $%.0f budget -> %.1f pts max stop (raw=%.1f pts)",
+            entry_score, dollar_budget, effective_max_stop, raw_stop,
+        )
+
+        # -- Min R:R Check (disabled when MIN_RR_RATIO=0.0 for C1 time-exit) --
+        # Uses session-scaled ATR (consistent with stop calculation)
+        target_distance = scaled_atr * self.config.risk.atr_multiplier_target
+        if MIN_RR_RATIO > 0 and raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
             logger.debug(
                 f"HC REJECT: R:R {target_distance / raw_stop:.2f} "
                 f"< {MIN_RR_RATIO} (unfavorable risk/reward)"
@@ -627,6 +817,8 @@ class TradingOrchestrator:
             # Applied AFTER all gates pass, BEFORE trade execution.
             # Adjusts position size, stop width, C2 runner trail.
             modifier_result = None
+            # C2 trail uses RAW ATR (not session-scaled) — the trail needs to
+            # adapt to real-time conditions, not be locked to entry session vol.
             atr_for_entry = features.atr_14
             if self._modifiers_enabled:
                 htf_dir = htf_bias.consensus_direction if htf_bias else None
@@ -636,7 +828,7 @@ class TradingOrchestrator:
                         htf_bias_direction=htf_dir,
                     )
                 except Exception as e:
-                    # GRACEFUL DEGRADATION: modifier failure → use 1.0x multipliers
+                    # GRACEFUL DEGRADATION: modifier failure -> use 1.0x multipliers
                     logger.warning(
                         "Modifier engine calculate() failed — using 1.0x multipliers: %s", e
                     )
@@ -654,14 +846,14 @@ class TradingOrchestrator:
                     raw_stop *= modifier_result.stop_multiplier
                     atr_for_entry = features.atr_14 * modifier_result.runner_multiplier
 
-                # Re-check HC max stop after modifier widening
-                if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+                # Re-check dollar-tier stop cap after modifier widening
+                if raw_stop > effective_max_stop:
                     logger.info(
-                        "HC REJECT post-modifier: stop %.1f pts > %.1f (modifier widened)",
-                        raw_stop, HIGH_CONVICTION_MAX_STOP_PTS,
+                        "HC REJECT post-modifier: stop %.1f pts > %.1f ($%.0f budget, modifier widened)",
+                        raw_stop, effective_max_stop, dollar_budget,
                     )
                     _set_rejection(entry_direction, entry_score, raw_stop,
-                                   features.atr_14, "Max stop exceeded after modifier", 5)
+                                   features.atr_14, "Dollar stop cap exceeded after modifier", 5)
                     return None
 
                 if (modifier_result
@@ -687,6 +879,7 @@ class TradingOrchestrator:
                 atr=atr_for_entry,
                 signal_score=entry_score,
                 regime=self._current_regime,
+                timestamp=bar.timestamp,
             )
 
             if trade:
@@ -705,6 +898,8 @@ class TradingOrchestrator:
                     "regime": self._current_regime,
                     "htf_bias": htf_dir,
                     "htf_strength": round(htf_str, 3),
+                    "dollar_risk_budget": dollar_budget,
+                    "dollar_max_stop_pts": effective_max_stop,
                 }
                 # Attach institutional modifier metadata
                 if modifier_result is not None:
@@ -716,7 +911,7 @@ class TradingOrchestrator:
                     action_result["inst_fomc_window"] = modifier_result.details.get(
                         "fomc", {}).get("window", "n/a")
                 # Attach sweep metadata if applicable
-                if entry_source in ("sweep", "confluence") and sweep_signal:
+                if entry_source == "sweep" and sweep_signal:
                     action_result["sweep_levels"] = sweep_signal.swept_levels
                     action_result["sweep_score"] = sweep_signal.score
                     action_result["sweep_depth_pts"] = sweep_signal.sweep_depth_pts

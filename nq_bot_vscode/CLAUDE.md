@@ -1,8 +1,24 @@
-# NQ Trading Bot — Project Context
+# NQ Trading Bot — Project Context (Version 1.3.1)
+
+## Git Workflow (MANDATORY)
+
+After making ANY file change in this project, immediately run:
+
+```bash
+git add <changed files>
+git commit -m "<short description of change>"
+git push origin main
+```
+
+This keeps the live GitHub Pages website at https://samueldagostino.github.io/AI-Trading-Bot/ in sync with every local edit. Never leave local changes unpushed.
+
+---
 
 ## What This Is
 
-An institutional-grade automated trading bot for **MNQ (Micro Nasdaq-100 Futures)** on Tradovate. It uses a multi-timeframe structure analysis pipeline with a 2-contract scale-out execution strategy, governed by a **High-Conviction Filter** derived from backtested forensic analysis.
+An institutional-grade automated trading bot for **MNQ (Micro Nasdaq-100 Futures)** on IBKR (Interactive Brokers). It uses a multi-timeframe structure analysis pipeline with a **5-contract scale-out execution strategy** (C1=1, C2=1, C3=3), governed by a **High-Conviction Filter** and the **Delayed C3 Runner** architecture.
+
+**Version 1.3.1 — Validated**: 396 trades, PF 2.86, +$47,236, 1.60% max DD ($50K → $97,236).
 
 This bot's job is **survival first, profit second**. Every design decision prioritizes capital preservation over signal frequency.
 
@@ -30,9 +46,10 @@ Exec Bars (2m) ──► Feature Engine ──► Signal Aggregator
         │                          └──────────┬──────────┘
         │                                     │
         ▼                                     ▼
-  Risk Engine ──────────────────► Scale-Out Executor
-        │                          C1: Trail from +3pts (2.5pt trail)
-        │                          C2: Trail (ATR-based)
+  Risk Engine ──────────────────► Scale-Out Executor (5 contracts)
+        │                          C1: 5-bar time exit (canary)
+        │                          C2: Structural target + delayed BE
+        │                          C3: ATR trail runner (DELAYED ENTRY)
         ▼
   Monitoring / Dashboard
 ```
@@ -50,16 +67,22 @@ Exec Bars (2m) ──► Feature Engine ──► Signal Aggregator
 
 ## High-Conviction Filter (THE CORE RULES)
 
-These two rules are **non-negotiable hard gates** in `main.py`. They exist because backtesting proved that only the intersection of tight stops + strong signals produces durable edge.
+These two rules are **non-negotiable hard gates**. They exist because backtesting proved that only the intersection of tight stops + strong signals produces durable edge.
 
 | Rule | Gate | Why |
 |------|------|-----|
 | **Min Signal Score** | `combined_score ≥ 0.75` | Eliminates low-conviction noise trades |
-| **Max Stop Distance** | `stop_distance ≤ 30 pts` | Caps tail risk; worst loss ~$124 |
+| **Max Stop Distance** | `stop_distance ≤ 30 pts` | Caps tail risk per trade |
 
-C1 exits via **trail-from-profit** (Variant C): once unrealized profit >= 3.0pts, a 2.5pt trailing stop activates from the high-water mark. Fallback: market exit at bar 12 if trailing never activates. Configured in `ScaleOutConfig.c1_profit_threshold_pts`, `c1_trail_distance_pts`, `c1_max_bars_fallback`. This replaced the old Time 10 bars exit (and before that, fixed TP1 = stop x 1.5) — validated Feb 2026 with calibrated slippage (PF 1.61, 6/6 months profitable).
+### Execution Architecture (v1.3.1 — 5-Contract Scale-Out)
 
-**Do not loosen these gates without new backtested evidence.**
+- **C1 (1 contract)** — The Canary: 5-bar time exit. Validates direction.
+- **C2 (1 contract)** — The Structure: Structural target (nearest swing point) + delayed BE.
+- **C3 (3 contracts)** — The Runner: ATR trailing stop (DELAYED ENTRY: only stays open when C1 exits profitably. If C1 loses → C3 closed immediately).
+
+**Delayed C3 Runner (THE KEY EDGE)**: Saved $38,430, reduced max DD 8.62% → 1.60%. 120/396 trades had C3 blocked (30.3%).
+
+**Do not loosen these gates or modify the C3 delay logic without new backtested evidence.**
 
 ### Constants Location
 
@@ -68,15 +91,18 @@ C1 exits via **trail-from-profit** (Variant C): once unrealized profit >= 3.0pts
 # All modules import from here. Do NOT redefine locally.
 HIGH_CONVICTION_MIN_SCORE = 0.75
 HIGH_CONVICTION_MAX_STOP_PTS = 30.0
-SWEEP_MIN_SCORE = 0.70           # Sweep must score >= 0.70 to be eligible
+SWEEP_MIN_SCORE = 0.50           # Sweep must score >= 0.50 to be eligible
 SWEEP_CONFLUENCE_BONUS = 0.05    # Boost when signal + sweep fire together
 HTF_STRENGTH_GATE = 0.3          # Config D — do NOT change without backtest
-HTF_STALENESS_LIMITS = {...}     # Per-TF staleness limits (minutes)
+CONTEXT_AGGREGATOR_BOOST = 0.05  # Layer 2 context boost
+CONTEXT_OB_BOOST = 0.05          # Order block proximity boost
+CONTEXT_FVG_BOOST = 0.05         # FVG proximity boost
 
 # config/settings.py — ScaleOutConfig
-c1_profit_threshold_pts = 3.0   # Activate trailing once profit >= this
-c1_trail_distance_pts = 2.5     # Trail distance from HWM
-c1_max_bars_fallback = 12       # Fallback market exit if trail never activates
+c1_time_exit_bars = 5            # Exit C1 at market after 5 bars if profitable
+c1_max_bars_fallback = 12        # Fallback market exit if still profitable
+c3_delayed_entry_enabled = True  # C3 only stays when C1 profits (THE KEY EDGE)
+max_daily_loss_pct = 1.0         # $500 daily limit (v1.3.1 validated)
 ```
 
 ---
@@ -108,15 +134,21 @@ Detects institutional stop hunts at key structural levels. Runs on every executi
 - HTF alignment bonus: +0.10 (sweep direction matches HTF bias)
 - RTH open bonus: +0.10 (first 30min of RTH)
 
-### Three Entry Modes (in `main.py` process_bar)
+### Entry Mode: PATH C+ (Dual-Trigger Architecture)
+
+v1.3.2 uses **PATH C+**: both liquidity sweeps AND high-conviction aggregator signals can independently trigger trades. This was re-enabled Mar 2026 after analysis showed aggregator-only trades produced +$12,626 across 1,025 trades — more total profit than sweep-only (+$9,896 across 338 trades). There was no documented evidence that demoting the aggregator to context-only (original PATH C) improved performance.
 
 | Mode | Condition | Behavior |
 |------|-----------|----------|
-| **Signal-only** | Existing signal fires, no sweep | Standard pipeline (unchanged) |
-| **Sweep-only** | Sweep score >= 0.70, no existing signal | Sweep acts as standalone signal source (must pass HC >= 0.75) |
-| **Confluence** | Both fire, same direction | HC score boosted by +0.05 (existing_score + 0.05) |
+| **Sweep trigger** | Sweep score >= 0.50 | Sweep acts as primary signal source (must pass HC >= 0.75) |
+| **Confluence** | Sweep + aggregator alignment | Score boosted by context boosts (+0.05 each for aggregator, OB, FVG) |
+| **Aggregator standalone** | Aggregator score >= 0.75 (no sweep) | Aggregator triggers trade independently at high conviction |
 
-If sweep and existing signal fire in **conflicting directions**, the existing signal takes priority.
+HTF bias disagreement applies a -0.10 score penalty (soft gate, not a hard block).
+
+Config flags in `config/constants.py`:
+- `AGGREGATOR_STANDALONE_ENABLED = True` — enables/disables aggregator standalone path
+- `AGGREGATOR_STANDALONE_MIN_SCORE = 0.75` — minimum score for aggregator to trigger independently
 
 ### Key Methods
 - `update_bar(bar, vwap, htf_bias, is_rth)` → `Optional[SweepSignal]`
@@ -148,7 +180,8 @@ nq-trading-bot/                    # Root — CLAUDE.md goes here
 │   ├── engine.py                 # RiskEngine — position sizing, stop computation
 │   └── regime_detector.py        # RegimeDetector — market state classification
 ├── execution/
-│   └── scale_out_executor.py     # ScaleOutExecutor — 2-contract lifecycle
+│   ├── scale_out_executor.py     # ScaleOutExecutor — 5-contract lifecycle (v1.3.1)
+│   └── orchestrator.py          # IBKRLivePipeline — IBKR live trading orchestrator
 ├── monitoring/
 │   └── engine.py                 # MonitoringEngine — health, metrics
 ├── data_pipeline/
@@ -436,6 +469,205 @@ Config D + Variant C (Trail from Profit) + Sweep Detector + Calibrated Slippage 
 - Confluence trades have highest WR at 67.7% — sweep + signal agreement is the strongest setup
 - Calibrated slippage costs are realistic — system survives real-world friction
 - Slippage model can push stop distances to ~30.3pts (just past 30pt cap). Acceptable — fill slippage, not filter leak.
+
+---
+
+## Architecture Changes (Mar 2026)
+
+This section documents significant structural and configuration changes implemented on 2026-03-07.
+
+### 1. C1 Exit Strategy Shift: Trail-from-Profit to Time-Based Exit
+
+**Old Approach (Variant C):** C1 exited via trail-from-profit once unrealized profit reached 3.0pts, using a 2.5pt trailing stop with 12-bar fallback (PF 1.81 without sweep detector).
+
+**New Approach (Mar 2026):** C1 now exits via **B:5 bars time-based exit** (PF 1.81 with same sweep detector integration). This provides deterministic exit timing and reduces exposure to tail whipsaws in choppy/ranging regimes.
+
+**Implementation:**
+- Old method archived as `_manage_phase_1_trail_from_profit()` for A/B testing and historical reference
+- New time-based exit managed by updated `_manage_phase_1()` logic
+- Config params in `config/settings.py`:
+  - `c1_time_exit_bars = 5` (exit C1 at bar 5 of position)
+  - `c1_max_bars_fallback = 12` (ultimate fallback if bar-5 exit fails for technical reasons)
+- Edge case: if C1 reaches break-even + 2pts before bar 5, capture that profit; otherwise exit at market on bar 5
+- **DO NOT REVERT** to trail-from-profit without backtesting evidence showing degradation of Profit Factor below 1.65
+
+**Rationale:** Time-based exits reduce decision complexity and protect against whipsaw losses in choppy intraday regimes. The 5-bar window (10 minutes on 2m exec timeframe) is short enough to avoid extended drawdowns while long enough to capture most trending moves.
+
+### 2. Breakeven Buffer Increase: 1.0pt → 2.0pts
+
+**Change:** `c2_breakeven_buffer_points` increased from 1.0 to 2.0 pts.
+
+**Justification (Osler 2005):** Stop-hunting occurs at exact entry levels. A 2pt buffer moves the BE trigger away from institutional hunt targets. This reduces false stops and improves C2 runner probability.
+
+**Location:** `config/settings.py`, `ScaleOutConfig.c2_breakeven_buffer_points = 2.0`
+
+**Impact:** When C1 closes profitably, C2's break-even stop moves to entry + 2.0pts instead of entry + 1.0pt.
+
+### 3. MFE (Maximum Favorable Excursion) Tracking Added
+
+**New Fields** in `ScaleOutTrade` dataclass:
+- `c1_mfe` (float): Maximum favorable excursion for C1, in points
+- `c2_mfe` (float): Maximum favorable excursion for C2, in points
+
+**Coverage:** MFE is tracked for **ALL exit types**, including:
+- Profit-based exits (trail-from-profit, time-based)
+- Stop losses
+- Target exits
+- Time-based exits
+
+**Access:** Use `get_trade_history()` method or query `logs/position_state.json` to retrieve completed trades with MFE data.
+
+**Purpose:** MFE analysis enables post-trade research on "what could have been captured" vs. actual exit price. Useful for:
+- Validating C1 time-based exit window (5 bars) against missed upside
+- Analyzing runner (C2) performance gaps
+- Identifying market regimes where trailing (old approach) would have outperformed time-based exits
+
+### 4. C1 Exit Metrics for C2 Optimization Research
+
+**New Fields** in `ScaleOutTrade` dataclass:
+- `c1_exit_profit_pts` (float): Actual P&L captured on C1 in points
+- `c1_exit_bars` (int): Number of bars from C1 entry to C1 exit
+- `c1_price_velocity` (float): Points/bar velocity of price move from entry to C1 exit
+
+**Purpose:** These metrics support deeper research on C2 optimization:
+- Analyze whether fast C1 exits (high velocity) correlate with strong C2 runners
+- Identify market conditions where C1 exits early but C2 could have run 80+ points
+- Optimize C2 runner entry trigger and trailing mechanics based on C1 exit context
+
+**Access:** Same as MFE fields — `get_trade_history()` or JSON logs.
+
+### 5. Adaptive Exit Configuration Framework
+
+**Module:** `execution/adaptive_exit_config.py`
+
+**Status:** DISABLED by default (`adaptive_exits_enabled = False`). Must pass walk-forward validation before enabling.
+
+**What It Does:** Provides regime-adaptive breakeven trigger distance and trailing stop width based on market conditions (trending vs. ranging).
+
+**Mechanism:**
+- Uses ADX (Average Directional Index) with hysteresis:
+  - **Trending regime:** ADX > 25 → wider trailing stops (more room for noise)
+  - **Ranging regime:** ADX < 20 → tighter stops (protect against whipsaws)
+  - **Hysteresis:** Prevents rapid regime flips on each bar
+- **Parameters Adapted:** Only 2 parameters to prevent overfitting:
+  1. Breakeven buffer distance (c2_breakeven_buffer_points)
+  2. C2 trailing stop width (c2_trailing_atr_multiplier)
+- **Static Gates:** HC filter (0.75 score, 30pt stop) remain **unchanged** regardless of regime
+
+**Why Disabled:** Adaptive logic adds complexity and overfitting risk. Must validate via walk-forward testing framework before deployment.
+
+**How to Enable (after validation):**
+```python
+# config/settings.py
+adaptive_exits_enabled = True
+```
+
+**Testing:** See walk_forward_validation.py (section 6 below).
+
+### 6. New Analysis & Validation Scripts
+
+#### 6a. `scripts/deflated_sharpe.py` — Deflated Sharpe Ratio Calculator
+
+**Purpose:** Implement David Balyasnikov Lopez de Prado's Deflated Sharpe Ratio (DSR) to account for multiple testing (backtesting bias).
+
+**Usage:**
+```bash
+python scripts/deflated_sharpe.py --trades-file logs/position_state.json --output-file dsr_report.json
+```
+
+**Output:** DSR value and probability that observed Sharpe ratio is due to overfitting vs. genuine edge.
+
+#### 6b. `scripts/walk_forward_validation.py` — Walk-Forward Validation Framework
+
+**Purpose:** Systematically test parameter changes over rolling windows to prevent overfitting.
+
+**Features:**
+- Partitions 6-month backtest data into in-sample (4 months) + out-of-sample (1 month) rolling windows
+- Optimizes parameters on IS data, validates on OOS data
+- Reports walkforward efficiency (OOS performance / IS performance)
+- Includes `--demo` mode to test framework without full backtest
+
+**Usage:**
+```bash
+# Demo mode (10 bars, 1 window)
+python scripts/walk_forward_validation.py --demo
+
+# Full validation (60-day rolling windows, adaptive exit config)
+python scripts/walk_forward_validation.py --test-adaptive-exits
+
+# Output: walk_forward_report.json with OOS metrics per window
+```
+
+**Threshold:** Walkforward efficiency >= 0.80 (OOS performance must be >= 80% of IS) before deploying new config.
+
+#### 6c. `scripts/stolen_runner_analysis.py` — Post-BE Price Continuation Analysis
+
+**Purpose:** Analyze how often price continues favorably after C2 breakeven is hit.
+
+**Outputs:**
+- Percentage of trades where C2 breaks even and price continues >5pts in trend direction
+- Average continuation distance when it occurs
+- Win rate of C2 runner when C2 achieves breakeven
+
+**Motivation:** Validates whether BE trigger design (now 2pts buffer) is optimal. If runner continuation is >80% after BE, consider tightening BE distance further.
+
+#### 6d. `scripts/session_time_analysis.py` — Trade Performance by Time of Day
+
+**Purpose:** Measure win rate and profit factor by session/hour.
+
+**Outputs:**
+- Performance breakdown: RTH morning (9:30–11:30 ET), midday (11:30–14:00), afternoon (14:00–16:00), ETH
+- Identify if C1 time-based exit (5 bars) performs better/worse in specific sessions
+- Support decision to potentially disable trading in low-edge sessions
+
+**Known Edge (from existing Regime Analysis):**
+- Morning session (9:30–11:30 ET): PF 3.62, 78% WR — strongest
+- Shorts outperform longs: +$8,790 vs +$5,904
+- Ranging regime: PF 2.07, best profitability
+
+### 7. Research Documentation
+
+#### 7a. `docs/algo_trading_research.md`
+
+**Contents:** 6-area research report covering:
+1. C1 exit variant comparison (trail-from-profit vs. time-based vs. fixed target)
+2. Breakeven buffer optimization (backtested distances 0.5–3.0pts)
+3. Adaptive exit framework validation (ADX thresholds, overfitting tests)
+4. MFE/MAE analysis (max favorable vs. adverse excursion by regime)
+5. Runner (C2) optimization opportunities
+6. Session-specific edge analysis (time-of-day trading windows)
+
+**Purpose:** Reference for future parameter tuning. All claims backed by 6-month backtest data with calibrated slippage.
+
+#### 7b. `docs/action_plan.md`
+
+**Contents:** Ranked 10-item action plan for next optimization cycle.
+
+**Example priorities:**
+1. Walk-forward validate adaptive exit config
+2. Test C1 exit bar window (3 vs. 5 vs. 7 bars)
+3. Optimize C2 trailing width per market regime
+4. Reduce noise in signal aggregator (lower score threshold from 0.75 → 0.70 only in high-ADX regimes)
+5. Monitor session-specific performance and disable low-edge windows
+... (10 items total, ranked by expected PF improvement)
+
+**Purpose:** Structured roadmap for continuous improvement without ad-hoc tuning.
+
+### Critical Notes
+
+**DO NOT REVERT the following without new backtested evidence:**
+- C1 exit strategy (time-based 5-bar approach) — tested to PF 1.81
+- Breakeven buffer increase to 2.0pts — validated against stop-hunting literature
+- HC filter hard gates (0.75 score, 30pt stop) — core risk framework, never relax
+
+**Adaptive Exit Config Status:**
+- Currently DISABLED to prevent overfitting
+- Requires walk-forward validation (WFE >= 0.80) before enabling
+- When enabled, only 2 parameters adapt (BE buffer + trail width); HC gates remain static
+
+**MFE/MAE Tracking:**
+- Enables post-trade analysis — does NOT affect live trading logic
+- Use for research only; do not implement reactive stops based on MFE data
 
 ---
 

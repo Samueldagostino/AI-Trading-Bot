@@ -1,12 +1,12 @@
 """
-NQ Trading Bot — Master Configuration
-======================================
+NQ Trading Bot — Master Configuration v1.3.1
+=============================================
 CONFIGURED FOR:
 - Broker: Tradovate (paper -> live)
 - Instrument: MNQ (Micro Nasdaq-100)
-- Strategy: 2-contract scale-out
+- Strategy: 5-contract scale-out with delayed C3 runner
 - Account: $50,000
-- Discord: MikesTrades #alerts
+- Validated: 396 trades, PF 2.86, +$47,236, 1.60% max DD
 """
 
 from dataclasses import dataclass, field
@@ -126,9 +126,18 @@ class TradovateConfig:
     def order_ws_url(self) -> str:
         return "wss://live.tradovate.com/v1/websocket" if self.environment == "live" else "wss://demo.tradovate.com/v1/websocket"
     
-    # Current front-month MNQ — UPDATE QUARTERLY
-    # H=Mar, M=Jun, U=Sep, Z=Dec + 2-digit year
-    symbol: str = "MNQM5"
+    # Front-month MNQ — resolved dynamically at startup via ContractRoller.
+    # Fallback value used only if ContractRoller import fails.
+    symbol: str = "MNQM6"
+
+    @staticmethod
+    def resolve_front_month(base: str = "MNQ") -> str:
+        """Resolve current front-month symbol using ContractRoller."""
+        try:
+            from Broker.contract_roller import ContractRoller
+            return ContractRoller.get_front_month(base)
+        except Exception:
+            return "MNQM6"  # Fallback
     
     replay_period_days: int = 30
     max_requests_per_second: int = 5
@@ -139,54 +148,73 @@ class TradovateConfig:
 @dataclass
 class ScaleOutConfig:
     """
-    2-Contract Scale-Out — THE BREAD AND BUTTER.
+    4-Contract Scale-Out v3 — Delayed C3 Runner Architecture.
 
-    Contract 1: Trail-from-profit exit (Variant C)
-      Once unrealized profit >= c1_profit_threshold_pts, activate a trailing
-      stop c1_trail_distance_pts behind the high-water mark. If profit never
-      reaches threshold within c1_max_bars_fallback bars, exit at market.
-    Contract 2: Runner, stop to breakeven+1 after C1 exits, then trail
+    C1 (1): 5-bar time exit — the "canary" that validates direction.
+    C2 (1): Structural target — exits at nearest swing point.
+    C3 (2): ATR trailing runner — DELAYED ENTRY (only stays open when
+            C1 exits profitably. If C1 loses, C3 closed immediately).
 
-    Win-win architecture:
-      Best:  C1 trails a big move + C2 runs big  -> $40+ + $200 = $240+
-      Good:  C1 trails small move + C2 at BE     -> $10  + $2   = $12
-      Worst: Both at initial stop                -> Controlled loss (~$60-80)
+    Win architecture:
+      Best:  C1 wins, C3 trails big move           -> $20 + $800+  = $820+
+      Good:  C1 wins, C2/C3 at breakeven            -> $20 + $0     = $20
+      Ok:    C1 loses, C3 blocked, C2 at stop        -> -$80 (2 contracts only)
+      Worst: All hit initial stop (Phase 1)          -> -$160 (4 contracts)
     """
-    total_contracts: int = 2
+    total_contracts: int = 4              # Max contracts: C1=1, C2=1, C3=2
 
-    # Contract 1 — Trail-from-profit (Variant C, validated Feb 2026)
+    # Contract 1 — The Scalp (B:5 bars time exit, PF 1.81 validated)
     c1_contracts: int = 1
-    c1_profit_threshold_pts: float = 3.0    # Activate trailing once profit >= this
-    c1_trail_distance_pts: float = 2.5      # Trail distance from HWM
-    c1_max_bars_fallback: int = 12          # Fallback market exit if trail never activates
+    c1_time_exit_bars: int = 5             # Exit C1 at market after N bars if profitable
+    c1_max_bars_fallback: int = 12         # Fallback: exit at market if still profitable after N bars
 
-    # Legacy: Time-based exit (archived, use for A/B testing only)
-    c1_time_exit_bars: int = 10             # Old: exit C1 after N bars if profitable
+    # Legacy: Trail-from-profit params (archived, use for A/B testing only)
+    c1_profit_threshold_pts: float = 3.0   # Archived: trailing activation threshold
+    c1_trail_distance_pts: float = 2.5     # Archived: trail distance from HWM
 
-    # Contract 2 — Runner
+    # Contract 2 — The Medium (15-bar time exit, captures follow-through)
     c2_contracts: int = 1
+    c2_time_exit_bars: int = 15            # Exit C2 at market after N bars post-C1 exit
     c2_move_stop_to_breakeven: bool = True
-    c2_breakeven_buffer_points: float = 1.0   # Entry + 1pt = guaranteed small win
+    c2_breakeven_buffer_points: float = 2.0   # Entry + 2pts = avoids stop-hunting at exact entry (Osler 2005)
     c2_trailing_stop_enabled: bool = True
     c2_trailing_stop_type: str = "atr"        # "atr", "fixed", "swing"
     c2_trailing_atr_multiplier: float = 2.0
     c2_trailing_fixed_points: float = 30.0
     c2_max_target_points: float = 150.0
     c2_time_stop_minutes: int = 120
-    
-    c2_be_trigger: str = "c1_exited"           # Move stop to BE when C1 exits (time or stop)
+
+    # C2 Breakeven Variant (optimized Feb 2026 — run scripts/c2_be_optimizer.py to validate)
+    # "A" = No BE: C2 keeps initial stop; ATR trail provides sole protection
+    # "B" = Delayed: BE moves only after C2 MFE >= c2_be_delay_multiplier × stop_distance
+    # "C" = Partial: BE at midpoint between initial stop and entry (entry - stop/2)
+    # "D" = Current/immediate: BE at entry+1 the instant C1 exits (original behavior)
+    c2_be_variant: str = "B"                  # Default: delayed BE to prevent stolen runners
+    c2_be_delay_multiplier: float = 1.5       # Variant B: MFE threshold = stop_distance × this (raised back: give runner more room before BE)
+
+    # ── C3 Runner (THE KEY EDGE) ─────────────────────────────────
+    # C3 only stays open when C1 exits profitably.
+    # If C1 loses → C3 is closed immediately at market.
+    # Backtest: saved $38,430, reduced max DD 8.62% → 1.60%.
+    c3_contracts: int = 2                     # v3: 2 runner contracts
+    c3_delayed_entry_enabled: bool = True
+
+    # Adaptive Exit Configuration (regime-aware parameters)
+    # Requires walk-forward validation before enabling in production.
+    # Research: Kaminski & Lo (2014), Nystrup et al. (2017) — 2-param adaptation optimal
+    adaptive_exits_enabled: bool = False      # Enable regime-adaptive BE + trail (requires walk-forward validation)
 
 
 @dataclass
 class RiskConfig:
     """Tuned for $50K, 2x MNQ."""
     account_size: float = 50_000.0
-    max_risk_per_trade_pct: float = 1.0      # $500 max risk per trade
-    max_daily_loss_pct: float = 3.0          # $1,500 daily limit
+    max_risk_per_trade_pct: float = 0.8      # $400 max risk per trade (tighter per-trade cap)
+    max_daily_loss_pct: float = 3.0          # $1,500 daily limit (room for multiple trades)
     max_weekly_loss_pct: float = 5.0
     max_total_drawdown_pct: float = 10.0     # $5,000 = kill switch
     
-    max_contracts_micro: int = 2
+    max_contracts_micro: int = 4              # v3: C1=1 + C2=1 + C3=2
     max_contracts_mini: int = 0
     use_micro: bool = True
     
@@ -216,6 +244,30 @@ class RiskConfig:
     kill_switch_enabled: bool = True
     kill_switch_max_consecutive_losses: int = 5
     kill_switch_cooldown_minutes: int = 60
+
+    def get_point_value(self, instrument: str = "MNQ") -> float:
+        """Get point value for an instrument, falling back to MNQ defaults."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).point_value
+        except Exception:
+            return self.nq_point_value_micro if self.use_micro else self.nq_point_value_mini
+
+    def get_tick_size(self, instrument: str = "MNQ") -> float:
+        """Get tick size for an instrument, falling back to MNQ defaults."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).tick_size
+        except Exception:
+            return 0.25
+
+    def get_commission(self, instrument: str = "MNQ") -> float:
+        """Get commission per contract for an instrument."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(instrument).commission_per_contract
+        except Exception:
+            return self.commission_per_contract
 
 
 @dataclass
@@ -260,6 +312,16 @@ class SignalConfig:
 
 
 @dataclass
+class AlertConfig:
+    """Real-time alerting configuration."""
+    enabled_channels: List[str] = field(default_factory=lambda: ["console"])
+    discord_webhook_url: str = os.getenv("ALERT_DISCORD_WEBHOOK_URL", "")
+    telegram_bot_token: str = os.getenv("ALERT_TELEGRAM_BOT_TOKEN", "")
+    telegram_chat_id: str = os.getenv("ALERT_TELEGRAM_CHAT_ID", "")
+    rate_limit_seconds: int = 300  # 5 min per event type (EMERGENCY bypasses)
+
+
+@dataclass
 class DataPipelineConfig:
     """
     Primary: Tradovate WebSocket live bars
@@ -285,9 +347,35 @@ class BotConfig:
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     signals: SignalConfig = field(default_factory=SignalConfig)
     data_pipeline: DataPipelineConfig = field(default_factory=DataPipelineConfig)
+    alerting: AlertConfig = field(default_factory=AlertConfig)
     log_level: str = "INFO"
     environment: str = "paper"
     heartbeat_interval_seconds: int = 5
+    instrument: str = "MNQ"  # Supported: MNQ, MES, MYM, M2K
+
+    @property
+    def instrument_spec(self):
+        """Get the InstrumentSpec for the configured instrument."""
+        from config.instruments import InstrumentSpec
+        return InstrumentSpec.from_symbol(self.instrument)
+
+    @property
+    def point_value(self) -> float:
+        """Instrument point value (delegates to InstrumentSpec if available)."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(self.instrument).point_value
+        except Exception:
+            return self.risk.nq_point_value_micro
+
+    @property
+    def tick_size(self) -> float:
+        """Instrument tick size."""
+        try:
+            from config.instruments import InstrumentSpec
+            return InstrumentSpec.from_symbol(self.instrument).tick_size
+        except Exception:
+            return 0.25
 
 
 CONFIG = BotConfig()

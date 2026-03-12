@@ -4,27 +4,31 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NQ Forensic Trade Dashboard — Config D</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
-    body { background: #080b12; color: #8892a4; font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace; }
+    body { background: #FDFBF9; color: #3D2E22; font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; }
     .dash-header {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 6px 16px; background: #0c1018; border-bottom: 1px solid #1a2030;
-      font-size: 12px; position: relative; z-index: 10;
+      padding: 8px 20px; background: #FFFFFF; border-bottom: 1px solid #F0EAE3;
+      font-size: 12px; position: relative; z-index: 10; box-shadow: 0 1px 3px rgba(61,46,34,0.04);
     }
-    .dash-header a { color: #58a6ff; text-decoration: none; font-size: 11px; }
+    .dash-header a { color: #8B6914; text-decoration: none; font-size: 11px; font-family: 'Inter', system-ui, sans-serif; font-weight: 600; }
     .dash-header a:hover { text-decoration: underline; }
-    .dash-header .title { font-size: 13px; font-weight: 700; color: #e8ecf4; letter-spacing: 0.5px; }
-    .dash-header .filter-badge { background: #111620; border: 1px solid #232d40; padding: 2px 8px; border-radius: 3px; font-size: 9px; color: #8892a4; }
-    #app { height: calc(100vh - 34px); }
+    .dash-header .title { font-family: 'Inter', system-ui, sans-serif; font-size: 13px; font-weight: 700; color: #3D2E22; letter-spacing: 0.5px; }
+    .dash-header .filter-badge { background: #FAF7F4; border: 1px solid #E8DDD3; padding: 2px 8px; border-radius: 3px; font-size: 9px; color: #8B7355; }
+    #app { height: calc(100vh - 38px); }
   </style>
 </head>
 <body>
   <div class="dash-header">
     <div style="display:flex;align-items:center;gap:16px;">
       <span class="title">NQ Forensic Trade Dashboard</span>
-      <a href="index.html">← Back to Overview</a>
+      <a href="index.html">← Overview</a>
+      <a href="analyzer.html" style="margin-left:12px">Analyzer</a>
     </div>
     <div id="filter-indicator" class="filter-badge">Loading...</div>
   </div>
@@ -43,21 +47,21 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 // ═══════════════════════════════════════════════════════════════
 // ── THEME ──────────────────────────────────────────────────────
 const T = {
-  bg: "#080b12", bgPanel: "#0c1018", bgCard: "#111620",
-  bgHover: "#161d2a", bgActive: "#1a2332",
-  border: "#1a2030", borderLight: "#232d40",
-  grid: "#141c28", gridMajor: "#1a2435",
-  text: "#8892a4", textMuted: "#556178", textBright: "#c8d0e0",
-  textWhite: "#e8ecf4",
-  green: "#00c087", greenDim: "#00c08730", greenBg: "#00c08712",
-  red: "#e5334b", redDim: "#e5334b30", redBg: "#e5334b12",
-  blue: "#3b82f6", blueDim: "#3b82f620",
-  amber: "#f59e0b", amberDim: "#f59e0b20",
-  purple: "#a855f7", purpleDim: "#a855f720",
-  cyan: "#06b6d4",
-  maintenanceShade: "#f59e0b08", maintenanceBorder: "#f59e0b15",
-  crosshair: "#3b82f650",
-  selection: "#3b82f620",
+  bg: "#FDFBF9", bgPanel: "#FFFFFF", bgCard: "#FAF7F4",
+  bgHover: "#F5ECD7", bgActive: "#EDE5DA",
+  border: "#E8DDD3", borderLight: "#F0EAE3",
+  grid: "#F0EAE3", gridMajor: "#E8DDD3",
+  text: "#8B7355", textMuted: "#B8A48E", textBright: "#5C4333",
+  textWhite: "#3D2E22",
+  green: "#2D8C4E", greenDim: "#2D8C4E30", greenBg: "#ECFAEF",
+  red: "#C53D1B", redDim: "#C53D1B30", redBg: "#FDE8E2",
+  blue: "#5B7BA8", blueDim: "#5B7BA820",
+  amber: "#B08515", amberDim: "#B0851520",
+  purple: "#8B6DB0", purpleDim: "#8B6DB020",
+  cyan: "#4A9A8E",
+  maintenanceShade: "#B0851508", maintenanceBorder: "#B0851515",
+  crosshair: "#8B691450",
+  selection: "#8B691420",
 };
 // ── DATA LOADING ──────────────────────────────────────────────
 // Loads viz_data.json produced by dashboard/data_adapter.py

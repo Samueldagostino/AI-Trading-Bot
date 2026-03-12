@@ -1,5 +1,7 @@
 {
-    "_comment": "Backtest baseline — Config D + Variant C + Sweep Detector + Calibrated Slippage. Source: CLAUDE.md OOS results (Sep 2025 - Feb 2026, FirstRate 1m).",
+    "_comment": "Backtest baseline — Config D + Variant C + Sweep Detector + Calibrated Slippage. Source: CLAUDE.md OOS results (Sep 2025 - Feb 2026, FirstRate 1m). Updated 2026-03-07 with architecture decisions: C1 exit to B:5 bars, c1_time_exit_bars=5, c2_breakeven_buffer_points=2.0. Performance numbers pending revalidation.",
+    "pending_revalidation": true,
+    "revalidation_note": "PF, WR, and PNL numbers are from previous config (2026-02-XX). New architecture parameters require backtest re-run to validate performance impact.",
     "profit_factor": 1.73,
     "win_rate_pct": 61.9,
     "trades_per_month": 254,
@@ -16,6 +18,13 @@
     "hc_filter": {
         "min_score": 0.75,
         "max_stop_pts": 30.0
+    },
+    "c1_exit": {
+        "description": "B:5 bars time-based",
+        "c1_time_exit_bars": 5
+    },
+    "c2_params": {
+        "c2_breakeven_buffer_points": 2.0
     },
     "monthly": [
         {"month": "2025-09", "trades": 240, "wr": 56.7, "pf": 1.79, "pnl": 3608},

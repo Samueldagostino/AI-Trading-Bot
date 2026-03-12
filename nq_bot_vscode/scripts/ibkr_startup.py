@@ -27,8 +27,8 @@ Port reference:
 SECURITY: No IBKR credentials are stored in code.
 """
 
-import nest_asyncio
-nest_asyncio.apply()
+from ib_insync import util as _ib_util
+_ib_util.patchAsyncio()
 
 import argparse
 import asyncio
@@ -76,7 +76,7 @@ LOGS_DIR = project_dir / "logs"
 # TWS CONNECTION CHECKER
 # ═══════════════════════════════════════════════════════════════
 
-def check_tws_connection(host: str = "127.0.0.1", port: int = 7497, client_id: int = 1) -> dict:
+async def check_tws_connection(host: str = "127.0.0.1", port: int = 7497, client_id: int = 1) -> dict:
     """
     Check if TWS / IB Gateway is running and accepting connections.
 
@@ -89,8 +89,8 @@ def check_tws_connection(host: str = "127.0.0.1", port: int = 7497, client_id: i
         from Broker.ibkr_client import IBKRClient
 
         client = IBKRClient(host=host, port=port, client_id=client_id)
-        client._ib.connect(host, port, clientId=client_id)
-        if client._ib.isConnected():
+        connected = await client.connect()
+        if connected:
             result = {
                 "connected": True,
                 "account_type": None,
@@ -143,7 +143,11 @@ class StartupChecklist:
         self._items: list = []
 
     def add(self, label: str, status: str, detail: str = "") -> None:
-        """Add a checklist item. status: 'OK', 'FAIL', 'WARN'."""
+        """Add a checklist item. status: 'OK', 'FAIL', 'WARN'.
+        If an OK entry replaces a previous FAIL for the same label, remove the FAIL."""
+        if status == "OK":
+            self._items = [(l, s, d) for l, s, d in self._items
+                           if not (l == label and s == "FAIL")]
         self._items.append((label, status, detail))
 
     def print_checklist(self) -> None:
@@ -467,8 +471,8 @@ Port reference:
         help="Simulate without IBKR connection (uses synthetic data)",
     )
     parser.add_argument(
-        "--max-daily-loss", type=float, default=500.0,
-        help="Maximum daily loss before halting (default: $500)",
+        "--max-daily-loss", type=float, default=1500.0,
+        help="Maximum daily loss before halting (default: $1500)",
     )
     parser.add_argument(
         "--log-level", type=str, default="INFO",

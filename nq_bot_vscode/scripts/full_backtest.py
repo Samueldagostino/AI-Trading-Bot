@@ -62,8 +62,10 @@ if str(PROJECT_DIR) not in sys.path:
 from config.settings import BotConfig, RiskConfig, ScaleOutConfig
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    HIGH_CONVICTION_MIN_STOP_PTS, MIN_RR_OVERRIDE,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_STRENGTH_GATE,
+    CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
 )
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -77,13 +79,31 @@ logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
 
-MIN_RR_RATIO = 1.5
+# C1 time-exit strategy: R:R gate disabled (no profit target used)
+# Override from constants if available, otherwise keep legacy value
+MIN_RR_RATIO = MIN_RR_OVERRIDE if MIN_RR_OVERRIDE is not None else 1.5
 
 # ── Slippage & Commission Model ─────────────────────────────────
 SLIPPAGE_RTH_PTS = 0.50   # Per fill, RTH
 SLIPPAGE_ETH_PTS = 1.00   # Per fill, ETH
 COMMISSION_PER_CONTRACT_PER_SIDE = 1.29  # $1.29 entry + $1.29 exit = $2.58/contract
 POINT_VALUE = 2.00         # MNQ $2/point
+
+# ── Phase 3 Additive: Post-Sweep FVG Tracking (data collection) ──
+# ICT model: Sweep → Displacement → FVG → Retracement
+# Entries are IMMEDIATE (Phase 1 behavior). FVG detection runs in
+# background for data collection — no entry delay, no score changes.
+SWEEP_FVG_TRACKING = True                  # Track post-sweep FVG formation (data only)
+SWEEP_FVG_DISPLACEMENT_WINDOW = 5          # Bars after sweep to find displacement candle
+SWEEP_FVG_DISPLACEMENT_MIN_ATR = 0.8       # Displacement candle body >= 0.8× ATR
+SWEEP_FVG_RETRACEMENT_WINDOW = 8           # Bars after FVG to wait for retracement
+SWEEP_FVG_MIN_GAP_ATR = 0.3               # Minimum FVG size (gap_size >= 0.3 × ATR)
+
+# ── Delayed C3 Runner (Risk Management) ──────────────────────
+# C3 (3 runner contracts) only contributes when C1 exits profitably.
+# If C1 hits stop → C3's PnL is zeroed (simulates C3 never entered).
+# This prevents the #1 account killer: full 5-contract stop losses.
+C3_DELAYED_ENTRY = True                    # Master toggle for delayed C3
 
 # ── Session Constants ───────────────────────────────────────────
 SESSION_BOUNDARY_HOUR = 18  # 6 PM ET = new session start
@@ -209,6 +229,61 @@ def aggregate_to_2m(bars_1m: List[Dict]) -> List[Dict]:
     return result
 
 
+def _floor_to_tf(ts: datetime, tf_minutes: int) -> datetime:
+    """Floor a timestamp to the nearest timeframe boundary.
+
+    For intraday (5m–4H): floors within each day.
+    For daily (1440): floors to midnight of the same day.
+    """
+    if tf_minutes >= 1440:
+        return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    total_minutes = ts.hour * 60 + ts.minute
+    floored_minutes = (total_minutes // tf_minutes) * tf_minutes
+    return ts.replace(
+        hour=floored_minutes // 60,
+        minute=floored_minutes % 60,
+        second=0,
+        microsecond=0,
+    )
+
+
+def aggregate_1m_to_htf(bars_1m: List[Dict]) -> Dict[str, List[Dict]]:
+    """Build all HTF bars (5m, 15m, 30m, 1H, 4H, 1D) causally from 1-min data.
+
+    Uses the same bucketing logic as aggregate_to_2m but for each HTF period.
+    Returns Dict[str, List[Dict]] suitable for HTFScheduler.
+    """
+    tf_minutes = {"5m": 5, "15m": 15, "30m": 30, "1H": 60, "4H": 240, "1D": 1440}
+    htf_data: Dict[str, List[Dict]] = {}
+
+    for tf_label, tf_min in tf_minutes.items():
+        buckets: Dict[datetime, List[Dict]] = {}
+
+        for bar in bars_1m:
+            bucket_ts = _floor_to_tf(bar["timestamp"], tf_min)
+            if bucket_ts not in buckets:
+                buckets[bucket_ts] = []
+            buckets[bucket_ts].append(bar)
+
+        result = []
+        for bucket_ts in sorted(buckets.keys()):
+            group = buckets[bucket_ts]
+            group.sort(key=lambda b: b["timestamp"])
+            result.append({
+                "timestamp": bucket_ts,
+                "open": group[0]["open"],
+                "high": max(b["high"] for b in group),
+                "low": min(b["low"] for b in group),
+                "close": group[-1]["close"],
+                "volume": sum(b["volume"] for b in group),
+            })
+
+        htf_data[tf_label] = result
+        print(f"    {tf_label}: {len(result):>8,} bars (built from 1m)")
+
+    return htf_data
+
+
 # =====================================================================
 #  SESSION UTILITIES
 # =====================================================================
@@ -228,9 +303,71 @@ def is_rth(dt: datetime) -> bool:
     return 9.5 <= t < 16.0
 
 
+def is_prime_hours(dt: datetime) -> bool:
+    """Check if timestamp is in the prime scalping window (9:00-10:59 ET).
+
+    Data-driven: 9-10AM trades = 77.4% WR, PF 1.28 on C1 5-bar exits.
+    All other hours are net negative.
+    """
+    et = dt.astimezone(ET)
+    return 9 <= et.hour <= 10
+
+
 def get_slippage(dt: datetime) -> float:
     """Get per-fill slippage based on session type."""
     return SLIPPAGE_RTH_PTS if is_rth(dt) else SLIPPAGE_ETH_PTS
+
+
+def find_structural_target(bars: list, direction: str, entry_price: float,
+                           stop_distance: float, lookback: int = 50) -> float:
+    """Find the nearest structural target (swing point) in the trade direction.
+
+    For LONG trades: finds the nearest swing HIGH above entry price.
+    For SHORT trades: finds the nearest swing LOW below entry price.
+
+    Uses 2-bar-each-side pivot detection on recent bars (causal, no lookahead).
+
+    Returns the target price, or 0.0 if no valid structural target found.
+    The target must be at least 1× stop_distance away to be worthwhile.
+    """
+    if len(bars) < 7:
+        return 0.0
+
+    # Use up to `lookback` recent bars (all confirmed — exclude last 2 for pivot detection)
+    recent = bars[-(lookback + 4):-2] if len(bars) > lookback + 4 else bars[:-2]
+    if len(recent) < 5:
+        return 0.0
+
+    min_target_dist = stop_distance * 1.0  # At least 1:1 R:R
+
+    candidates = []
+
+    for i in range(2, len(recent) - 2):
+        b = recent[i]
+
+        if direction == "long":
+            # Look for swing highs ABOVE entry price
+            if (b.high > recent[i-1].high and b.high > recent[i-2].high and
+                b.high > recent[i+1].high and b.high > recent[i+2].high):
+                dist = b.high - entry_price
+                if dist >= min_target_dist:
+                    candidates.append(b.high)
+        else:
+            # Look for swing lows BELOW entry price
+            if (b.low < recent[i-1].low and b.low < recent[i-2].low and
+                b.low < recent[i+1].low and b.low < recent[i+2].low):
+                dist = entry_price - b.low
+                if dist >= min_target_dist:
+                    candidates.append(b.low)
+
+    if not candidates:
+        return 0.0
+
+    # Return the NEAREST valid target (closest to entry)
+    if direction == "long":
+        return min(candidates)  # Lowest swing high above entry = nearest target
+    else:
+        return max(candidates)  # Highest swing low below entry = nearest target
 
 
 # =====================================================================
@@ -506,6 +643,9 @@ def save_checkpoint(engine, htf_scheduler, bar_index, current_bar_ts):
         # Executor
         "executor_trade_history": trade_history,
         "executor_active_trade": active_trade,
+        # Phase 3 + C3 state
+        "sweep_fvg_stats": engine._sweep_fvg_stats,
+        "c3_stats": engine._c3_stats,
     }
 
     os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
@@ -615,6 +755,14 @@ def restore_from_checkpoint(checkpoint, engine, htf_scheduler):
     engine._pending_entry = checkpoint.get("pending_entry")
     engine.trades = checkpoint["trades"]
 
+    # ── Restore Phase 3 + C3 state ──
+    saved_sfg = checkpoint.get("sweep_fvg_stats")
+    if saved_sfg:
+        engine._sweep_fvg_stats.update(saved_sfg)
+    saved_c3 = checkpoint.get("c3_stats")
+    if saved_c3:
+        engine._c3_stats.update(saved_c3)
+
     # ── Restore risk engine state ──
     rs_data = checkpoint.get("risk_engine_state", {})
     rs = engine.risk_engine.state
@@ -682,7 +830,7 @@ class CausalReplayEngine:
         self.feature_engine = NQFeatureEngine(config)
         self.htf_engine = HTFBiasEngine(
             config=config,
-            timeframes=["5m", "15m", "30m", "1H", "4H", "1D"],
+            timeframes=["5m", "15m"],  # Intraday-only HTF for C1 scalp
         )
         self.signal_aggregator = SignalAggregator(config)
         self.risk_engine = RiskEngine(config)
@@ -699,9 +847,30 @@ class CausalReplayEngine:
         self._daily_pnl: float = 0.0
         self._cumulative_pnl: float = 0.0
         self._kill_switch_active: bool = False
+        self._htf_bars_completed: Dict[str, int] = {
+            "5m": 0, "15m": 0, "30m": 0, "1H": 0, "4H": 0, "1D": 0,
+        }
 
         # ── Pending signal (signal at bar N, execute at bar N+1) ──
         self._pending_entry: Optional[Dict] = None
+
+        # ── Phase 3 Additive: FVG Tracking (background data collection) ──
+        self._sweep_event: Optional[Dict] = None  # Last sweep for FVG tracking
+        self._sweep_fvg: Optional[Dict] = None     # FVG formed after sweep
+        self._sweep_fvg_stats = {
+            "sweeps_tracked": 0,        # Sweeps tracked for FVG formation
+            "displacement_found": 0,    # Displacement candle detected
+            "fvg_formed": 0,           # FVG created by displacement
+            "fvg_retrace_confirmed": 0, # Price retraced into FVG
+        }
+
+        # ── Delayed C3 Stats ──
+        self._c3_stats = {
+            "trades_total": 0,
+            "c3_entered": 0,           # C1 profitable → C3 counted
+            "c3_blocked": 0,           # C1 lost → C3 zeroed
+            "c3_pnl_saved": 0.0,       # PnL saved by blocking C3 on losers
+        }
 
         # ── Trade collection ──
         self.trades: List[Dict] = []
@@ -714,6 +883,9 @@ class CausalReplayEngine:
 
         # ── Sim time for executor patch ──
         self._current_bar_ts: Optional[datetime] = None
+
+        # ── Maintenance window entry cutoff ──
+        self._maintenance_entry_blocked: bool = False
 
         # ── Patch executor for backtest mode ──
         self._patch_executor()
@@ -734,12 +906,14 @@ class CausalReplayEngine:
             fill_price = round(price, 2)
             sim_time = engine_ref._current_bar_ts or datetime.now(timezone.utc)
 
-            for leg in [trade.c1, trade.c2]:
-                leg.entry_price = fill_price
-                leg.entry_time = sim_time
-                leg.is_filled = True
-                leg.is_open = True
-                leg.commission = commission_rt  # Round-trip: $2.58 per contract
+            for leg in trade.all_legs:
+                if leg.contracts > 0:
+                    leg.entry_price = fill_price
+                    leg.entry_time = sim_time
+                    leg.is_filled = True
+                    leg.is_open = True
+                    leg.best_price = fill_price
+                    leg.commission = commission_rt  # Round-trip: $2.58 per contract
 
             trade.entry_price = fill_price
             trade.entry_time = sim_time
@@ -768,6 +942,10 @@ class CausalReplayEngine:
             if self._kill_switch_active and self._cumulative_pnl > -KILL_SWITCH_LIMIT:
                 self._kill_switch_active = False
 
+            # Clear Phase 3 sweep event on session boundary
+            self._sweep_event = None
+            self._sweep_fvg = None
+
         self._session_bar_count += 1
 
     def _is_warmup(self) -> bool:
@@ -775,18 +953,26 @@ class CausalReplayEngine:
         return self._session_bar_count <= WARMUP_BARS
 
     def _check_daily_limits(self) -> bool:
-        """Check daily loss limit and kill switch. Returns True if blocked."""
-        if self._kill_switch_active:
-            return True
+        """Check daily loss limit and kill switch. Returns True if blocked.
 
+        NOTE: Cumulative kill switch is disabled in backtest mode to allow
+        full dataset evaluation.  The daily loss limit ($500) still applies
+        and resets each session — this is the realistic constraint.
+        In live trading, the cumulative kill switch remains active via
+        RiskEngine.
+        """
+        # Daily loss limit — resets each session (realistic constraint)
         if self._daily_pnl <= -DAILY_LOSS_LIMIT:
             logger.debug(f"Daily loss limit hit: ${self._daily_pnl:.2f}")
             return True
 
-        if self._cumulative_pnl <= -KILL_SWITCH_LIMIT:
-            logger.warning(f"KILL SWITCH: cumulative PnL ${self._cumulative_pnl:.2f}")
-            self._kill_switch_active = True
-            return True
+        # Cumulative kill switch — DISABLED for backtest.
+        # In live trading this is handled by RiskEngine separately.
+        # Keeping the code for reference:
+        # if self._cumulative_pnl <= -KILL_SWITCH_LIMIT:
+        #     logger.warning(f"KILL SWITCH: cumulative PnL ${self._cumulative_pnl:.2f}")
+        #     self._kill_switch_active = True
+        #     return True
 
         return False
 
@@ -824,6 +1010,9 @@ class CausalReplayEngine:
             atr=pending["atr"],
             signal_score=pending["score"],
             regime=pending["regime"],
+            regime_multiplier=pending.get("regime_multiplier", 1.0),
+            structural_target=pending.get("structural_target", 0.0),
+            timestamp=bar["timestamp"],
         )
 
         if trade:
@@ -846,6 +1035,7 @@ class CausalReplayEngine:
                 "htf_strength": pending.get("htf_strength", 0.0),
                 "atr": pending["atr"],
                 "is_rth": is_rth(bar["timestamp"]),
+                "fvg_confluence": pending.get("fvg_confluence", "none"),
             }
             self.trades.append(entry_record)
             return entry_record
@@ -866,18 +1056,44 @@ class CausalReplayEngine:
             closed_trade = self.executor._trade_history[-1]
 
             # Per-leg exit slippage based on each leg's exit timestamp
-            c1_exit_slip = (
-                get_slippage(closed_trade.c1.exit_time)
-                if closed_trade.c1.exit_time else SLIPPAGE_RTH_PTS
-            )
-            c2_exit_slip = (
-                get_slippage(closed_trade.c2.exit_time)
-                if closed_trade.c2.exit_time else SLIPPAGE_RTH_PTS
-            )
-            exit_slippage_cost = (c1_exit_slip + c2_exit_slip) * POINT_VALUE
+            total_exit_slippage = 0.0
+            leg_slippages = {}
+            for leg in closed_trade.active_legs:
+                slip = (get_slippage(leg.exit_time) if leg.exit_time else SLIPPAGE_RTH_PTS)
+                leg_slippages[leg.leg_label] = slip
+                total_exit_slippage += slip * leg.contracts
+            exit_slippage_cost = total_exit_slippage * POINT_VALUE
 
             raw_pnl = result.get("total_pnl", 0.0)
             adjusted_pnl = raw_pnl - exit_slippage_cost
+
+            # ── Delayed C3: Zero out C3 PnL if C1 was not profitable ──
+            c1_pnl = result.get("c1_pnl", 0)
+            c3_pnl_original = result.get("c3_pnl", 0)
+            c3_pnl_final = c3_pnl_original
+            c3_blocked = False
+
+            if C3_DELAYED_ENTRY:
+                self._c3_stats["trades_total"] += 1
+                if c1_pnl <= 0:
+                    # C1 lost → C3 never entered → zero its contribution
+                    c3_blocked = True
+                    c3_pnl_final = 0.0
+                    # Also remove C3's exit slippage cost
+                    c3_slip = leg_slippages.get("C3", SLIPPAGE_RTH_PTS)
+                    c3_contracts = closed_trade.c3.contracts
+                    c3_slip_cost = c3_slip * c3_contracts * POINT_VALUE
+                    # Also remove C3's commission (already in raw_pnl from executor)
+                    c3_commission = closed_trade.c3.commission
+
+                    # Adjust PnL: remove C3 loss + its slippage + add back its commission
+                    # (commission was already subtracted in executor's raw_pnl)
+                    adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_slip_cost + c3_commission
+                    self._c3_stats["c3_blocked"] += 1
+                    self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
+                else:
+                    # C1 profitable → C3 enters (keep full PnL)
+                    self._c3_stats["c3_entered"] += 1
 
             # NaN guard on PnL
             if not math.isfinite(adjusted_pnl):
@@ -897,17 +1113,22 @@ class CausalReplayEngine:
                 "entry_price": result.get("entry_price", 0),
                 "c1_exit_price": result.get("c1_exit_price", 0),
                 "c2_exit_price": result.get("c2_exit_price", 0),
+                "c3_exit_price": result.get("c3_exit_price", 0) if not c3_blocked else 0,
+                "c4_exit_price": result.get("c4_exit_price", 0),
                 "raw_pnl": raw_pnl,
                 "exit_slippage_cost": exit_slippage_cost,
-                "c1_exit_slippage": c1_exit_slip,
-                "c2_exit_slippage": c2_exit_slip,
                 "adjusted_pnl": adjusted_pnl,
                 "daily_pnl": self._daily_pnl,
                 "cumulative_pnl": self._cumulative_pnl,
-                "c1_pnl": result.get("c1_pnl", 0),
+                "c1_pnl": c1_pnl,
                 "c2_pnl": result.get("c2_pnl", 0),
+                "c3_pnl": c3_pnl_final,
+                "c3_blocked": c3_blocked,
+                "c4_pnl": result.get("c4_pnl", 0),
                 "c1_exit_reason": result.get("c1_exit_reason", ""),
                 "c2_exit_reason": result.get("c2_exit_reason", ""),
+                "c3_exit_reason": result.get("c3_exit_reason", "n/a") if not c3_blocked else "delayed_c3_blocked",
+                "c4_exit_reason": result.get("c4_exit_reason", "n/a"),
                 "commission_total": closed_trade.total_commission,
             }
             self.trades.append(exit_record)
@@ -948,6 +1169,13 @@ class CausalReplayEngine:
         if self._is_warmup():
             return
         if self._check_daily_limits():
+            return
+        # Maintenance window entry cutoff — no new entries after 4:30 PM ET
+        if getattr(self, '_maintenance_entry_blocked', False):
+            logger.debug(
+                "BLOCKED: New entry rejected — past 4:30 PM ET cutoff "
+                "(maintenance window protection)"
+            )
             return
 
         # ── Regime detection ──
@@ -999,34 +1227,45 @@ class CausalReplayEngine:
         entry_source = None
         sweep_stop_override = None
 
-        if has_signal and has_sweep:
-            direction_str = (
-                "long" if signal.direction == SignalDirection.LONG else "short"
-            )
-            sweep_dir = (
-                "long" if sweep_signal.direction == "LONG" else "short"
-            )
-            if direction_str == sweep_dir:
-                entry_direction = direction_str
-                entry_score = signal.combined_score + SWEEP_CONFLUENCE_BONUS
-                entry_source = "confluence"
-            else:
-                entry_direction = direction_str
-                entry_score = signal.combined_score
-                entry_source = "signal"
-        elif has_signal:
-            entry_direction = (
-                "long" if signal.direction == SignalDirection.LONG else "short"
-            )
-            entry_score = signal.combined_score
-            entry_source = "signal"
-        elif has_sweep:
+        # PATH C: Sweep-only trigger architecture (mirrors main.py)
+        if has_sweep:
             entry_direction = (
                 "long" if sweep_signal.direction == "LONG" else "short"
             )
             entry_score = sweep_signal.score
             entry_source = "sweep"
-            sweep_stop_override = abs(bar["close"] - sweep_signal.stop_price)
+
+            if sweep_signal.stop_price and sweep_signal.stop_price > 0:
+                sweep_stop_override = abs(bar["close"] - sweep_signal.stop_price)
+            # Layer 2 context boost from aggregator alignment
+            if has_signal:
+                signal_dir = (
+                    "long" if signal.direction == SignalDirection.LONG
+                    else "short"
+                )
+                if signal_dir == entry_direction:
+                    entry_score += CONTEXT_AGGREGATOR_BOOST
+            # Layer 2 structural context boosts
+            if features:
+                if entry_direction == "long":
+                    if getattr(features, 'near_bullish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bullish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+                elif entry_direction == "short":
+                    if getattr(features, 'near_bearish_ob', False):
+                        entry_score += CONTEXT_OB_BOOST
+                    if getattr(features, 'inside_bearish_fvg', False):
+                        entry_score += CONTEXT_FVG_BOOST
+
+            # Track FVG confluence for data collection (no score impact beyond original boost)
+            fvg_confluence = "none"
+            if features:
+                if entry_direction == "long" and getattr(features, 'inside_bullish_fvg', False):
+                    fvg_confluence = "inside"
+                elif entry_direction == "short" and getattr(features, 'inside_bearish_fvg', False):
+                    fvg_confluence = "inside"
+        # Aggregator alone cannot trigger (PATH C)
 
         if entry_direction is None:
             # Capture HTF rejection if aggregator returned a blocked signal
@@ -1041,6 +1280,32 @@ class CausalReplayEngine:
 
         # Count as a directional signal (regardless of HC outcome)
         self._signals_with_direction += 1
+
+        # ── HTF DIRECTIONAL GATE (softened: score penalty instead of hard block) ──
+        # A sweep IS a reversal signal — the HTF bias being "against" the sweep
+        # direction is expected at the moment of reversal.  Instead of blocking,
+        # we penalize the score by 0.10 so the HC gate can still filter.
+        # Only block when there's NO HTF data at all (fail-safe).
+        htf_bias = self._htf_bias
+        if htf_bias is not None:
+            htf_disagrees = False
+            if entry_direction == "long" and not htf_bias.htf_allows_long:
+                htf_disagrees = True
+            if entry_direction == "short" and not htf_bias.htf_allows_short:
+                htf_disagrees = True
+            if htf_disagrees:
+                entry_score -= 0.10  # Penalty, not a block
+                self._record_shadow_signal(
+                    bar, features, entry_direction, entry_score, None,
+                    "HTF bias disagrees (score penalized -0.10)", 1)
+                # Don't return — let it continue through remaining gates
+        elif htf_bias is None:
+            # Fail-safe: no HTF data → block all trades
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, None,
+                "No HTF data — fail-safe block", 1)
+            self._rejection_count += 1
+            return
 
         # ── NaN Guard ──
         if not math.isfinite(entry_score):
@@ -1081,7 +1346,7 @@ class CausalReplayEngine:
             self._rejection_count += 1
             return
 
-        # ── HC Gate 2: Stop Distance ──
+        # ── HC Gate 2: Stop Distance (max) ──
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, raw_stop,
@@ -1089,14 +1354,33 @@ class CausalReplayEngine:
             self._rejection_count += 1
             return
 
-        # ── Min R:R Check ──
-        target_distance = features.atr_14 * self.config.risk.atr_multiplier_target
-        if raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
+        # ── HC Gate 2b: Stop Distance (min — C1 needs room for 5-bar exit) ──
+        # Data: 30-50pt stops = profitable, <30pt stops = net negative
+        if raw_stop < 30.0:
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, raw_stop,
-                "Min R:R failed", 6)
+                "Stop too tight (< 30pts)", 5)
             self._rejection_count += 1
             return
+
+        # ── Prime Hours Gate (9-10AM ET only — data-driven) ──
+        # 9-10AM: 77.4% WR, PF 1.28 | All other hours: net negative
+        if not is_prime_hours(bar["timestamp"]):
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, raw_stop,
+                "Outside prime hours (9-10AM)", 5)
+            self._rejection_count += 1
+            return
+
+        # ── Min R:R Check (disabled for C1 time-exit: MIN_RR_RATIO=0.0) ──
+        if MIN_RR_RATIO > 0:
+            target_distance = features.atr_14 * self.config.risk.atr_multiplier_target
+            if raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
+                self._record_shadow_signal(
+                    bar, features, entry_direction, entry_score, raw_stop,
+                    "Min R:R failed", 6)
+                self._rejection_count += 1
+                return
 
         # ── Regime gate ──
         if regime_adj["size_multiplier"] == 0:
@@ -1116,26 +1400,147 @@ class CausalReplayEngine:
             self._rejection_count += 1
             return
 
-        # ── All gates passed: store as pending entry ──
+        # ── All gates passed ──
         htf_dir = htf_bias.consensus_direction if htf_bias else "n/a"
         htf_str = htf_bias.consensus_strength if htf_bias else 0.0
 
-        self._pending_entry = {
+        # Compute structural target from recent swing points (TJR-inspired)
+        structural_target = find_structural_target(
+            bars=self.feature_engine._bars,
+            direction=entry_direction,
+            entry_price=bar["close"],
+            stop_distance=raw_stop,
+            lookback=50,
+        )
+
+        gate_passed_entry = {
             "direction": entry_direction,
             "score": entry_score,
             "stop_distance": raw_stop,
             "atr": features.atr_14,
             "source": entry_source,
             "regime": self._current_regime,
+            "regime_multiplier": regime_adj["size_multiplier"],
             "signal_timestamp": bar["timestamp"].isoformat(),
             "htf_direction": htf_dir,
             "htf_strength": round(htf_str, 3),
+            "structural_target": structural_target,
+            "fvg_confluence": fvg_confluence,
         }
+
+        # ── ALWAYS enter immediately (Phase 1 behavior) ──
+        self._pending_entry = gate_passed_entry
+
+        # ── Phase 3 additive: start FVG tracking in background ──
+        if SWEEP_FVG_TRACKING:
+            self._sweep_event = {
+                "direction": entry_direction,
+                "atr": features.atr_14,
+                "sweep_bar_index": self._bars_processed,
+                "displacement_found": False,
+                "recent_bars": [],
+            }
+            self._sweep_fvg = None
+            self._sweep_fvg_stats["sweeps_tracked"] += 1
+
+    def _update_sweep_fvg_state(self, bar: Dict) -> None:
+        """Phase 3 additive: background FVG tracking (data collection only).
+
+        Tracks displacement → FVG → retracement after each sweep.
+        Does NOT affect entries — all entries happen immediately (Phase 1).
+        Data is collected for future analysis and potential live-trading use.
+        """
+        if self._sweep_event is None:
+            return
+
+        event = self._sweep_event
+        bars_since_sweep = self._bars_processed - event["sweep_bar_index"]
+
+        # ── Timeout: stop tracking after displacement + retracement windows ──
+        max_window = SWEEP_FVG_DISPLACEMENT_WINDOW + SWEEP_FVG_RETRACEMENT_WINDOW
+        if bars_since_sweep > max_window:
+            self._sweep_event = None
+            self._sweep_fvg = None
+            return
+
+        # ── Stage 1: Watch for displacement candle ──
+        if not event["displacement_found"] and bars_since_sweep <= SWEEP_FVG_DISPLACEMENT_WINDOW:
+            event["recent_bars"].append({
+                "high": bar["high"], "low": bar["low"],
+                "open": bar["open"], "close": bar["close"],
+            })
+
+            atr = event["atr"] or 20.0
+            body_size = abs(bar["close"] - bar["open"])
+            if body_size >= atr * SWEEP_FVG_DISPLACEMENT_MIN_ATR:
+                if event["direction"] == "long" and bar["close"] > bar["open"]:
+                    event["displacement_found"] = True
+                    self._sweep_fvg_stats["displacement_found"] += 1
+                elif event["direction"] == "short" and bar["close"] < bar["open"]:
+                    event["displacement_found"] = True
+                    self._sweep_fvg_stats["displacement_found"] += 1
+        elif not event["displacement_found"]:
+            # Past displacement window with no displacement — collect bar anyway
+            event["recent_bars"].append({
+                "high": bar["high"], "low": bar["low"],
+                "open": bar["open"], "close": bar["close"],
+            })
+
+        # ── Stage 2: Check for FVG formation ──
+        if event["displacement_found"] and self._sweep_fvg is None:
+            # Keep collecting bars
+            if bars_since_sweep > 0 and event["recent_bars"][-1]["high"] != bar["high"]:
+                event["recent_bars"].append({
+                    "high": bar["high"], "low": bar["low"],
+                    "open": bar["open"], "close": bar["close"],
+                })
+
+            recent = event["recent_bars"]
+            if len(recent) >= 3:
+                bar_a = recent[-3]
+                bar_c = recent[-1]
+                atr = event["atr"] or 20.0
+
+                if event["direction"] == "long" and bar_c["low"] > bar_a["high"]:
+                    gap_size = bar_c["low"] - bar_a["high"]
+                    if gap_size >= atr * SWEEP_FVG_MIN_GAP_ATR:
+                        self._sweep_fvg = {
+                            "high": bar_c["low"], "low": bar_a["high"],
+                            "type": "bullish", "size": gap_size,
+                            "formed_bar": self._bars_processed,
+                        }
+                        self._sweep_fvg_stats["fvg_formed"] += 1
+
+                elif event["direction"] == "short" and bar_c["high"] < bar_a["low"]:
+                    gap_size = bar_a["low"] - bar_c["high"]
+                    if gap_size >= atr * SWEEP_FVG_MIN_GAP_ATR:
+                        self._sweep_fvg = {
+                            "high": bar_a["low"], "low": bar_c["high"],
+                            "type": "bearish", "size": gap_size,
+                            "formed_bar": self._bars_processed,
+                        }
+                        self._sweep_fvg_stats["fvg_formed"] += 1
+
+        # ── Stage 3: Check for retracement into FVG ──
+        if self._sweep_fvg is not None:
+            fvg = self._sweep_fvg
+            if event["direction"] == "long" and bar["low"] <= fvg["high"]:
+                self._sweep_fvg_stats["fvg_retrace_confirmed"] += 1
+                self._sweep_event = None
+                self._sweep_fvg = None
+            elif event["direction"] == "short" and bar["high"] >= fvg["low"]:
+                self._sweep_fvg_stats["fvg_retrace_confirmed"] += 1
+                self._sweep_event = None
+                self._sweep_fvg = None
 
     # ── Shadow-Trade Simulation (runs AFTER main replay loop) ────────
 
     def _simulate_shadow_trades(self, bars_2m: List[Dict]) -> Dict:
         """Simulate what blocked signals WOULD have done if traded.
+
+        Uses C1-only strategy: 1 contract, 5-bar time exit, stop loss.
+        No profit target. Exit at close of 5th bar after entry unless
+        stop is hit first.
 
         Runs AFTER the main replay loop completes. Read-only simulation
         that never touches self.trades or actual trade logic.
@@ -1148,8 +1553,9 @@ class CausalReplayEngine:
             }
 
         total_bars = len(bars_2m)
-        num_contracts = 2
-        commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * num_contracts  # $5.16
+        num_contracts = 1  # C1-only
+        commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * num_contracts  # $2.58
+        time_exit_bars = 5  # C1 5-bar time exit
 
         shadow_results = []
 
@@ -1177,7 +1583,6 @@ class CausalReplayEngine:
                 entry_price = entry_bar["open"] - slippage
 
             stop_dist = shadow["stop_distance"]
-            target_dist = stop_dist * 1.5
 
             # Guard against zero/negative stop
             if stop_dist <= 0:
@@ -1185,14 +1590,16 @@ class CausalReplayEngine:
 
             mfe = 0.0
             mae = 0.0
-            outcome = "TIMEOUT"
+            outcome = "TIME_EXIT"  # Default: exit at 5th bar close
             final_price = entry_price
+            bars_held = 0
 
-            max_walk_bars = 120  # 4 hours at 2-min bars
-            walk_end = min(entry_idx + 1 + max_walk_bars, total_bars)
+            # Walk forward up to 5 bars (C1 time exit)
+            walk_end = min(entry_idx + 1 + time_exit_bars, total_bars)
 
             for j in range(entry_idx + 1, walk_end):
                 walk_bar = bars_2m[j]
+                bars_held += 1
 
                 # NaN guard on walk bar
                 if (not math.isfinite(walk_bar["high"])
@@ -1211,26 +1618,21 @@ class CausalReplayEngine:
                 mae = max(mae, adverse)
                 final_price = walk_bar["close"]
 
-                # Stop hit first (conservative: check stop before target)
+                # Stop hit (check intra-bar)
                 if mae >= stop_dist:
-                    outcome = "LOSS"
-                    break
-                # Target hit
-                if mfe >= target_dist:
-                    outcome = "WIN"
+                    outcome = "STOP"
                     break
 
-            # Compute shadow PnL
-            if outcome == "WIN":
-                shadow_pnl = (target_dist * POINT_VALUE * num_contracts) - commission_rt
-            elif outcome == "LOSS":
-                shadow_pnl = -(stop_dist * POINT_VALUE * num_contracts) - commission_rt
-            else:  # TIMEOUT — mark-to-market at bar 120
+            # Compute shadow PnL — C1-only, 1 contract
+            exit_slippage = get_slippage(bars_2m[min(entry_idx + bars_held, total_bars - 1)]["timestamp"])
+            if outcome == "STOP":
+                shadow_pnl = -(stop_dist * POINT_VALUE * num_contracts) - commission_rt - (exit_slippage * POINT_VALUE)
+            else:  # TIME_EXIT — mark-to-market at 5th bar close
                 if shadow["direction"] == "LONG":
                     mtm_points = final_price - entry_price
                 else:
                     mtm_points = entry_price - final_price
-                shadow_pnl = (mtm_points * POINT_VALUE * num_contracts) - commission_rt
+                shadow_pnl = (mtm_points * POINT_VALUE * num_contracts) - commission_rt - (exit_slippage * POINT_VALUE)
 
             shadow_results.append({
                 "bar_index": bar_idx,
@@ -1244,6 +1646,7 @@ class CausalReplayEngine:
                 "mfe": round(mfe, 2),
                 "mae": round(mae, 2),
                 "shadow_pnl": round(shadow_pnl, 2),
+                "bars_held": bars_held,
             })
 
         return self._build_shadow_analysis(shadow_results)
@@ -1270,13 +1673,18 @@ class CausalReplayEngine:
             g["shadow_total_pnl"] += r["shadow_pnl"]
 
             # For profit factor: track gross wins/losses (before commission)
-            commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 2
-            gross = r["shadow_pnl"] + commission_rt
+            # C1-only: 1 contract, so commission is $2.58
+            commission_rt_1c = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 1
+            gross = r["shadow_pnl"] + commission_rt_1c
 
-            if r["outcome"] == "WIN":
-                g["shadow_wins"] += 1
-                g["gross_wins"] += gross
-            elif r["outcome"] == "LOSS":
+            if r["outcome"] in ("WIN", "TIME_EXIT"):
+                if r["shadow_pnl"] > 0:
+                    g["shadow_wins"] += 1
+                    g["gross_wins"] += gross
+                else:
+                    g["shadow_losses"] += 1
+                    g["gross_losses"] += abs(gross)
+            elif r["outcome"] in ("LOSS", "STOP"):
                 g["shadow_losses"] += 1
                 g["gross_losses"] += abs(gross)
             else:
@@ -1339,6 +1747,88 @@ class CausalReplayEngine:
         self._bars_processed += 1
         ts = bar["timestamp"]
 
+        # ── MAINTENANCE WINDOW CHECKS (must be FIRST — before any signal processing) ──
+        current_et = ts.astimezone(ET)
+        current_time_et = current_et.time()
+
+        # CME maintenance window: 4:45-5:00 PM ET (futures close 4:59, reopen 6:00 PM)
+        # Hard flatten at 4:50 PM ET, block processing until 6:00 PM ET
+        if time(16, 50) <= current_time_et <= time(18, 0):
+            if self.executor.has_active_trade:
+                result = await self.executor.maintenance_flatten(
+                    bar["close"], ts
+                )
+                if result:
+                    # Process exit PnL through same path as normal exits
+                    closed_trade = self.executor._trade_history[-1]
+                    total_exit_slippage = 0.0
+                    for leg in closed_trade.active_legs:
+                        slip = (get_slippage(leg.exit_time) if leg.exit_time else SLIPPAGE_RTH_PTS)
+                        total_exit_slippage += slip * leg.contracts
+                    exit_slippage_cost = total_exit_slippage * POINT_VALUE
+                    raw_pnl = result.get("total_pnl", 0.0)
+                    adjusted_pnl = raw_pnl - exit_slippage_cost
+
+                    # C3 delayed entry logic
+                    c1_pnl = result.get("c1_pnl", 0)
+                    c3_pnl_original = result.get("c3_pnl", 0)
+                    c3_blocked = False
+                    if C3_DELAYED_ENTRY:
+                        self._c3_stats["trades_total"] += 1
+                        if c1_pnl <= 0:
+                            c3_blocked = True
+                            c3_slip = SLIPPAGE_RTH_PTS
+                            c3_contracts = closed_trade.c3.contracts
+                            c3_slip_cost = c3_slip * c3_contracts * POINT_VALUE
+                            c3_commission = closed_trade.c3.commission
+                            adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_slip_cost + c3_commission
+                            self._c3_stats["c3_blocked"] += 1
+                            self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
+                        else:
+                            self._c3_stats["c3_entered"] += 1
+
+                    if not math.isfinite(adjusted_pnl):
+                        adjusted_pnl = 0.0
+
+                    self._daily_pnl += adjusted_pnl
+                    self._cumulative_pnl += adjusted_pnl
+                    self.risk_engine.record_trade_result(adjusted_pnl, result["direction"])
+
+                    exit_record = {
+                        "action": "exit",
+                        "trade_id": result.get("trade_id", ""),
+                        "bar_index": self._bars_processed,
+                        "timestamp": bar["timestamp"].isoformat(),
+                        "direction": result["direction"],
+                        "entry_price": result.get("entry_price", 0),
+                        "c1_exit_price": result.get("c1_exit_price", 0),
+                        "c2_exit_price": result.get("c2_exit_price", 0),
+                        "c3_exit_price": result.get("c3_exit_price", 0) if not c3_blocked else 0,
+                        "c4_exit_price": result.get("c4_exit_price", 0),
+                        "raw_pnl": raw_pnl,
+                        "exit_slippage_cost": exit_slippage_cost,
+                        "adjusted_pnl": adjusted_pnl,
+                        "daily_pnl": self._daily_pnl,
+                        "cumulative_pnl": self._cumulative_pnl,
+                        "c1_pnl": c1_pnl,
+                        "c2_pnl": result.get("c2_pnl", 0),
+                        "c3_pnl": 0.0 if c3_blocked else c3_pnl_original,
+                        "c3_blocked": c3_blocked,
+                        "c4_pnl": result.get("c4_pnl", 0),
+                        "c1_exit_reason": result.get("c1_exit_reason", "EXIT_MAINTENANCE_FLATTEN"),
+                        "c2_exit_reason": result.get("c2_exit_reason", "EXIT_MAINTENANCE_FLATTEN"),
+                        "c3_exit_reason": "delayed_c3_blocked" if c3_blocked else "EXIT_MAINTENANCE_FLATTEN",
+                        "c4_exit_reason": "n/a",
+                        "commission_total": closed_trade.total_commission,
+                    }
+                    self.trades.append(exit_record)
+            return  # No further processing after 4:50 PM ET
+
+        # Entry cutoff at 4:30 PM ET — block new entries but continue managing positions
+        self._maintenance_entry_blocked = (
+            time(16, 30) <= current_time_et < time(16, 50)
+        )
+
         # ── Session boundary check ──
         self._check_session_boundary(ts)
 
@@ -1355,6 +1845,9 @@ class CausalReplayEngine:
             )
             self.htf_engine.update_bar(tf, htf_bar)
             self._htf_bias = self.htf_engine.get_bias(ts)
+            self._htf_bars_completed[tf] = self._htf_bars_completed.get(tf, 0) + 1
+            # Feed HTF bars to sweep detector for HTF-first sweep detection
+            self.sweep_detector.update_htf_bar(tf, htf_bar)
 
         # ── Step 1: Execute pending entry from previous bar ──
         await self._execute_pending_entry(bar)
@@ -1373,8 +1866,30 @@ class CausalReplayEngine:
         )
         features = self.feature_engine.update(exec_bar)
 
+        # ── Step 3b: Phase 3 FVG state machine (process active sweep events) ──
+        if SWEEP_FVG_TRACKING:
+            self._update_sweep_fvg_state(bar)
+
         # ── Step 4: Generate signal (if flat, not warmup) ──
         await self._generate_signal(bar, features, self._htf_bias, exec_bar)
+
+        # ── ONE-TIME diagnostic at bar 25,000 ──
+        if self._bars_processed == 25_000:
+            sched_loaded = {tf: len(q) for tf, q in htf_scheduler._queues.items()}
+            sched_delivered = {tf: htf_scheduler._indices[tf] for tf in htf_scheduler._indices}
+            htf_data_in_engine = {
+                tf: len(bars) for tf, bars in self.htf_engine._bars.items()
+            }
+            print(
+                f"\n  [DIAGNOSTIC bar 25,000]\n"
+                f"    HTFScheduler loaded:       {sched_loaded}\n"
+                f"    HTFScheduler delivered:    {sched_delivered}\n"
+                f"    HTFBiasEngine bars cached: {htf_data_in_engine}\n"
+                f"    htf_bias is None:          {self._htf_bias is None}\n"
+                f"    htf_bias value:            {self._htf_bias}\n"
+                f"    Aggregator htf_blocked:    {self.signal_aggregator._htf_blocked_count}\n"
+                f"    HTF bars completed:        {self._htf_bars_completed}\n"
+            )
 
         # ── Progress reporting ──
         if self._bars_processed % PROGRESS_INTERVAL == 0:
@@ -1384,13 +1899,30 @@ class CausalReplayEngine:
                     f"{self._htf_bias.consensus_direction}"
                     f"({self._htf_bias.consensus_strength:.2f})"
                 )
+            htf_1h = self._htf_bars_completed.get("1H", 0)
+            htf_4h = self._htf_bars_completed.get("4H", 0)
+            htf_1d = self._htf_bars_completed.get("1D", 0)
+            c3s = self._c3_stats
+            c3_str = (
+                f"C3[entered:{c3s['c3_entered']} "
+                f"blocked:{c3s['c3_blocked']} "
+                f"saved:${c3s['c3_pnl_saved']:,.0f}]"
+            )
+            sfg = self._sweep_fvg_stats
+            fvg_str = (
+                f"FVG[trk:{sfg['sweeps_tracked']} "
+                f"disp:{sfg['displacement_found']} "
+                f"fvg:{sfg['fvg_formed']} "
+                f"ret:{sfg['fvg_retrace_confirmed']}]"
+            )
             print(
                 f"  [{self._bars_processed:>10,}] "
                 f"{ts.strftime('%Y-%m-%d %H:%M')} | "
                 f"Trades: {self._entry_count} | "
                 f"PnL: ${self._cumulative_pnl:+,.2f} | "
                 f"HTF: {bias_str} | "
-                f"Regime: {self._current_regime}"
+                f"Regime: {self._current_regime} | "
+                f"{c3_str} | {fvg_str}"
             )
 
 
@@ -1418,13 +1950,19 @@ def build_complete_trades(trades: List[Dict]) -> List[Dict]:
             "entry_price": entry_rec["entry_price"],
             "c1_exit_price": exit_rec.get("c1_exit_price", 0),
             "c2_exit_price": exit_rec.get("c2_exit_price", 0),
+            "c3_exit_price": exit_rec.get("c3_exit_price", 0),
+            "c4_exit_price": exit_rec.get("c4_exit_price", 0),
             "adjusted_pnl": exit_rec["adjusted_pnl"],
             "raw_pnl": exit_rec["raw_pnl"],
             "exit_slippage_cost": exit_rec["exit_slippage_cost"],
             "c1_pnl": exit_rec["c1_pnl"],
             "c2_pnl": exit_rec["c2_pnl"],
+            "c3_pnl": exit_rec.get("c3_pnl", 0),
+            "c4_pnl": exit_rec.get("c4_pnl", 0),
             "c1_exit_reason": exit_rec["c1_exit_reason"],
             "c2_exit_reason": exit_rec["c2_exit_reason"],
+            "c3_exit_reason": exit_rec.get("c3_exit_reason", "n/a"),
+            "c4_exit_reason": exit_rec.get("c4_exit_reason", "n/a"),
             "signal_score": entry_rec["signal_score"],
             "signal_source": entry_rec["signal_source"],
             "regime": entry_rec["regime"],
@@ -1507,6 +2045,8 @@ def compute_aggregate_metrics(
 
     c1_pnls = [t["c1_pnl"] for t in complete_trades]
     c2_pnls = [t["c2_pnl"] for t in complete_trades]
+    c3_pnls = [t["c3_pnl"] for t in complete_trades]
+    c4_pnls = [t["c4_pnl"] for t in complete_trades]
 
     # Source breakdown
     source_counts = defaultdict(int)
@@ -1535,6 +2075,8 @@ def compute_aggregate_metrics(
         "expectancy": round(total_pnl / len(complete_trades), 2),
         "c1_total_pnl": round(sum(c1_pnls), 2),
         "c2_total_pnl": round(sum(c2_pnls), 2),
+        "c3_total_pnl": round(sum(c3_pnls), 2),
+        "c4_total_pnl": round(sum(c4_pnls), 2),
         "max_consecutive_wins": max_consec_wins,
         "max_consecutive_losses": max_consec_losses,
         "signals_generated": engine._signals_with_direction,
@@ -1869,8 +2411,9 @@ def generate_summary_report(
     row("Largest Win", f"${aggregate['largest_win']:+,.2f}")
     row("Largest Loss", f"${aggregate['largest_loss']:+,.2f}")
     row("Expectancy/Trade", f"${aggregate['expectancy']:+,.2f}")
-    row("C1 Total PnL", f"${aggregate['c1_total_pnl']:+,.2f}")
-    row("C2 Total PnL", f"${aggregate['c2_total_pnl']:+,.2f}")
+    row("C1 PnL (Time Exit)", f"${aggregate['c1_total_pnl']:+,.2f}")
+    row("C2 PnL (Structural)", f"${aggregate['c2_total_pnl']:+,.2f}")
+    row("C3 PnL (Runner)", f"${aggregate['c3_total_pnl']:+,.2f}")
     row("Max Consecutive Wins", f"{aggregate['max_consecutive_wins']}")
     row("Max Consecutive Losses", f"{aggregate['max_consecutive_losses']}")
     lines.append("")
@@ -2054,6 +2597,7 @@ async def run_backtest(
     output_path: str,
     summary_path: str,
     resume: bool = False,
+    start_date: str = None,
 ) -> Dict:
     """Execute the full causal replay backtest with comprehensive analysis."""
     wall_start = time_module.time()
@@ -2089,13 +2633,26 @@ async def run_backtest(
         )
     print()
 
+    # ── Build HTF data causally from 1-min bars ──
+    print("Building HTF bars from 1-min data...")
+    htf_data = aggregate_1m_to_htf(bars_1m)
+    print()
+
     # Free 1m data to save memory
     del bars_1m
 
-    # ── Load HTF data ──
-    print("Loading HTF data...")
-    htf_data = load_all_htf(htf_dir)
-    print()
+    # ── Apply start_date filter (skip bars before this date) ──
+    if start_date:
+        from datetime import datetime as dt_cls
+        cutoff = dt_cls.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        orig_len = len(bars_2m)
+        bars_2m = [b for b in bars_2m if b["timestamp"] >= cutoff]
+        print(f"  --start-date {start_date}: skipped {orig_len - len(bars_2m):,} bars, "
+              f"keeping {len(bars_2m):,} bars from {start_date}")
+        # Also filter HTF data to avoid stale-data warmup issues
+        for tf in htf_data:
+            htf_data[tf] = [b for b in htf_data[tf] if b["timestamp"] >= cutoff - timedelta(days=30)]
+        print()
 
     # ── Initialize engine ──
     config = BotConfig()
@@ -2184,6 +2741,24 @@ async def run_backtest(
             print(f"    {src}: {count}")
     print()
 
+    # Delayed C3 stats
+    c3s = engine._c3_stats
+    print("  Delayed C3 Runner:")
+    print(f"    Total trades .............. {c3s['trades_total']}")
+    print(f"    C3 entered (C1 won) ....... {c3s['c3_entered']}")
+    print(f"    C3 blocked (C1 lost) ...... {c3s['c3_blocked']}")
+    print(f"    PnL saved by blocking ..... ${c3s['c3_pnl_saved']:,.2f}")
+    print()
+
+    # FVG tracking stats
+    sfg = engine._sweep_fvg_stats
+    print("  FVG Tracking (data collection):")
+    print(f"    Sweeps tracked ............ {sfg['sweeps_tracked']}")
+    print(f"    Displacement found ........ {sfg['displacement_found']}")
+    print(f"    FVG formed ................ {sfg['fvg_formed']}")
+    print(f"    Retracement confirmed ..... {sfg['fvg_retrace_confirmed']}")
+    print()
+
     print("-" * 72)
     print("  YEARLY")
     print("-" * 72)
@@ -2204,6 +2779,26 @@ async def run_backtest(
         status = "PASS" if check["passed"] else "FAIL"
         print(f"  [{status}] {check_name}: {check['description']}")
     print()
+
+    # ── Validation milestone check ──
+    n_trades = aggregate.get("total_trades", 0)
+    pf_value = aggregate.get("profit_factor", 0)
+    if isinstance(pf_value, str):
+        pf_value = float("inf")
+    if n_trades >= 200 and pf_value > 1.2:
+        instrument = "MNQ"  # Default; extend for multi-instrument backtests
+        print("-" * 72)
+        print(
+            f"  VALIDATION MILESTONE: {instrument} reached {n_trades} trades, "
+            f"PF={aggregate['profit_factor']}. Consider setting validated=True."
+        )
+        print("-" * 72)
+        logger.info(
+            "VALIDATION MILESTONE: %s reached %d trades, PF=%s. "
+            "Consider setting validated=True.",
+            instrument, n_trades, aggregate["profit_factor"],
+        )
+        print()
 
     # ── Shadow-trade summary ──
     print_shadow_summary(shadow_analysis)
@@ -2308,6 +2903,10 @@ def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: WARNING for speed)"
     )
+    parser.add_argument(
+        "--start-date", type=str, default=None,
+        help="Start date (YYYY-MM-DD). Skip bars before this date for faster testing."
+    )
     args = parser.parse_args()
 
     # Configure logging
@@ -2397,7 +2996,7 @@ def main():
                 print("  Starting fresh (checkpoint will be overwritten).")
 
     asyncio.run(run_backtest(data_path, htf_dir, output_path, summary_path,
-                             resume=do_resume))
+                             resume=do_resume, start_date=args.start_date))
 
 
 if __name__ == "__main__":

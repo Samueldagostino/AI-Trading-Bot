@@ -1,16 +1,16 @@
 """
-IBKR Order Execution Adapter
-==============================
+IBKR Order Execution Adapter — v1.3.1 (5-Contract Scale-Out)
+================================================================
 Places MNQ orders through the IBKR Client Portal Gateway REST API.
 
 Supports:
   - Market and Limit orders
-  - 2-contract scale-out: C1 (fixed target) + C2 (runner with trailing stop)
+  - 5-contract scale-out: C1 (1, canary) + C2 (1, structural) + C3 (3, delayed runner)
   - Paper trading mode only (live raises NotImplementedError)
 
 Safety rails — HARD BLOCKS that cannot be overridden:
-  1. Max 2 contracts per order (MNQ)
-  2. Max 4 open positions at any time
+  1. Max 5 contracts per order (MNQ) — matches validated backtest architecture
+  2. Max 8 open positions at any time (supports full 5-contract group + partial second)
   3. No orders outside RTH unless config explicitly allows ETH
   4. Daily loss limit check before every order ($500 default)
   5. Kill switch: daily P&L hits -$1000 -> halt all trading, cancel open orders
@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from Broker.ibkr_client_portal import IBKRClient, IBKRConfig, SessionType, get_session_type
+from monitoring.execution_analytics import ExecutionAnalytics
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +40,8 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 # SAFETY CONSTANTS — DO NOT CHANGE
 # ═══════════════════════════════════════════════════════════════
-MAX_CONTRACTS_PER_ORDER = 2
-MAX_OPEN_POSITIONS = 4
+MAX_CONTRACTS_PER_ORDER = 5      # v1.3.1: C1(1) + C2(1) + C3(3) = 5
+MAX_OPEN_POSITIONS = 8           # Full 5-contract group + room for partial second
 DAILY_LOSS_LIMIT_DOLLARS = 500.0
 KILL_SWITCH_THRESHOLD_DOLLARS = 1000.0
 MNQ_POINT_VALUE = 2.0       # $2.00 per point for Micro E-mini Nasdaq
@@ -147,11 +149,13 @@ class IBKROrderExecutor:
         self,
         client: IBKRClient,
         config: Optional[ExecutorConfig] = None,
+        execution_analytics: Optional[ExecutionAnalytics] = None,
     ):
         self._client = client
         self._config = config or ExecutorConfig()
         self._state = ExecutorState()
         self._on_fill: Optional[Callable] = None
+        self._analytics = execution_analytics
         # Persistent order log file
         self._log_dir = Path(__file__).resolve().parent.parent / "logs"
         self._log_dir.mkdir(parents=True, exist_ok=True)
@@ -186,6 +190,22 @@ class IBKROrderExecutor:
             record.state = OrderState.REJECTED
             self._state.daily_blocked += 1
             self._log_order(record)
+            # Analytics: record rejection (non-blocking)
+            if self._analytics:
+                record.broker_order_id = record.broker_order_id or f"REJECTED-{int(time.time() * 1000)}"
+                self._analytics.record_order_sent(
+                    order_id=record.broker_order_id,
+                    side=request.side.value,
+                    size=request.contracts,
+                    expected_price=request.limit_price,
+                    timestamp=record.timestamp,
+                    order_type=request.order_type.value.lower(),
+                )
+                self._analytics.record_rejection(
+                    order_id=record.broker_order_id,
+                    reason=rejection,
+                    timestamp=record.timestamp,
+                )
             return record
 
         # ── ROUTE TO PAPER OR LIVE ──
@@ -200,14 +220,33 @@ class IBKROrderExecutor:
         limit_price: float = 0.0,
         stop_loss: float = 0.0,
         c1_take_profit: float = 0.0,
+        c3_contracts: int = 3,
+        instrument: str = "MNQ",
     ) -> Dict[str, OrderRecord]:
         """
-        Place the standard 2-contract scale-out entry.
+        Place the 5-contract scale-out entry (v1.3.1).
 
-        C1: 1 contract with fixed take-profit target.
-        C2: 1 contract as runner (trailing stop managed externally).
-        Both share the same initial stop-loss.
+        C1: 1 contract — canary with 5-bar time exit.
+        C2: 1 contract — structural target (swing point exit).
+        C3: 3 contracts — delayed runner (ATR trailing stop).
+             C3 enters with the group but is closed immediately
+             by the orchestrator if C1 exits at a loss.
+
+        All three share the same initial stop-loss.
         """
+        # ── INSTRUMENT VALIDATION GATE ──
+        rejection = self._check_instrument_validated(instrument)
+        if rejection:
+            now = datetime.now(timezone.utc)
+            rejected = OrderRecord(
+                timestamp=now, side=direction, order_type="MKT",
+                contracts=5, price=limit_price, tag="BLOCKED",
+                accepted=False, rejection_reason=rejection,
+                state=OrderState.REJECTED,
+            )
+            self._log_order(rejected)
+            return {"c1": rejected, "c2": rejected, "c3": rejected}
+
         side = OrderSide.BUY if direction == "long" else OrderSide.SELL
         order_type = (IBKROrderType.LIMIT if limit_price > 0
                       else IBKROrderType.MARKET)
@@ -230,27 +269,51 @@ class IBKROrderExecutor:
             take_profit=0.0,
             tag="C2",
         )
+        c3_request = OrderRequest(
+            side=side,
+            order_type=order_type,
+            contracts=c3_contracts,
+            limit_price=limit_price,
+            stop_loss=stop_loss,
+            take_profit=0.0,
+            tag="C3",
+        )
 
         c1_record = await self.place_order(c1_request)
-        # Only place C2 if C1 was accepted
+        # Only place C2 + C3 if C1 was accepted
         if c1_record.accepted:
             c2_record = await self.place_order(c2_request)
+            c3_record = await self.place_order(c3_request)
         else:
-            # Mirror the rejection for C2
+            # Mirror the rejection for C2 and C3
+            now = datetime.now(timezone.utc)
+            reason = f"C1 rejected: {c1_record.rejection_reason}"
             c2_record = OrderRecord(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=now,
                 side=side.value,
                 order_type=order_type.value,
                 contracts=1,
                 price=limit_price,
                 tag="C2",
                 accepted=False,
-                rejection_reason=f"C1 rejected: {c1_record.rejection_reason}",
+                rejection_reason=reason,
+                state=OrderState.REJECTED,
+            )
+            c3_record = OrderRecord(
+                timestamp=now,
+                side=side.value,
+                order_type=order_type.value,
+                contracts=c3_contracts,
+                price=limit_price,
+                tag="C3",
+                accepted=False,
+                rejection_reason=reason,
                 state=OrderState.REJECTED,
             )
             self._log_order(c2_record)
+            self._log_order(c3_record)
 
-        return {"c1": c1_record, "c2": c2_record}
+        return {"c1": c1_record, "c2": c2_record, "c3": c3_record}
 
     async def modify_stop(
         self, broker_order_id: str, new_stop_price: float
@@ -266,10 +329,17 @@ class IBKROrderExecutor:
             "LIVE modify_stop NOT IMPLEMENTED — paper trading only."
         )
 
-    async def cancel_order(self, broker_order_id: str) -> bool:
+    async def cancel_order(self, broker_order_id: str, reason: str = "manual") -> bool:
         """Cancel a single open order."""
         if self._config.paper_mode:
             logger.info("PAPER cancel_order order_id=%s", broker_order_id)
+            # Analytics: record cancellation (non-blocking)
+            if self._analytics:
+                self._analytics.record_cancel(
+                    order_id=broker_order_id,
+                    reason=reason,
+                    timestamp=datetime.now(timezone.utc),
+                )
             return True
 
         raise NotImplementedError(
@@ -478,6 +548,20 @@ class IBKROrderExecutor:
             else self._get_last_price()
         )
 
+        # Analytics: record order sent (non-blocking)
+        if self._analytics:
+            expected = request.limit_price if request.limit_price > 0 else record.fill_price
+            direction = self._infer_direction(request.side.value, request.tag)
+            self._analytics.record_order_sent(
+                order_id=record.broker_order_id,
+                side=request.side.value,
+                size=request.contracts,
+                expected_price=expected,
+                timestamp=record.timestamp,
+                order_type=request.order_type.value.lower(),
+                direction=direction,
+            )
+
         self._state.daily_trades += 1
         self._state.open_positions.append(
             OpenPosition(
@@ -498,6 +582,15 @@ class IBKROrderExecutor:
             request.tag,
             record.broker_order_id,
         )
+
+        # Analytics: record fill (non-blocking)
+        if self._analytics:
+            self._analytics.record_fill(
+                order_id=record.broker_order_id,
+                fill_price=record.fill_price,
+                fill_size=request.contracts,
+                fill_timestamp=datetime.now(timezone.utc),
+            )
 
         if self._on_fill:
             self._on_fill(record)
@@ -526,6 +619,41 @@ class IBKROrderExecutor:
     # HELPERS
     # ──────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _check_instrument_validated(instrument: str) -> Optional[str]:
+        """
+        Check if an instrument has been backtested and validated.
+
+        Returns None if clear, or a rejection reason string.
+        Instruments without 200+ trade backtest validation are blocked
+        unless ALLOW_UNVALIDATED=true is set (for paper testing only).
+        """
+        try:
+            from config.instruments import InstrumentSpec
+            spec = InstrumentSpec.from_symbol(instrument)
+        except (ValueError, ImportError):
+            return f"UNKNOWN_INSTRUMENT: '{instrument}' not found in InstrumentSpec registry"
+
+        if not spec.validated:
+            if os.getenv("ALLOW_UNVALIDATED", "false").lower() == "true":
+                logger.warning(
+                    "OVERRIDE: %s is unvalidated but ALLOW_UNVALIDATED=true. "
+                    "Use for PAPER TESTING ONLY.", instrument
+                )
+                return None
+            logger.error(
+                "BLOCKED: %s has not been backtested. "
+                "Run 200+ trade validation before deploying. "
+                "Set ALLOW_UNVALIDATED=true to override (PAPER ONLY).",
+                instrument,
+            )
+            return (
+                f"UNVALIDATED_INSTRUMENT: {instrument} has not been backtested. "
+                f"Run 200+ trade validation before deploying. "
+                f"Set ALLOW_UNVALIDATED=true to override (PAPER ONLY)."
+            )
+        return None
+
     def _schedule_cancel_all(self) -> None:
         """Schedule cancel_all_open_orders on the event loop.
 
@@ -548,6 +676,16 @@ class IBKROrderExecutor:
         if prices:
             return prices.get("last", 0.0)
         return 0.0
+
+    @staticmethod
+    def _infer_direction(side: str, tag: str) -> str:
+        """Infer order direction for analytics from side and tag."""
+        tag_lower = tag.lower()
+        side_upper = side.upper()
+        if "exit" in tag_lower or "close" in tag_lower:
+            return "long_exit" if side_upper == "SELL" else "short_exit"
+        else:
+            return "long_entry" if side_upper == "BUY" else "short_entry"
 
     def _log_order(self, record: OrderRecord) -> None:
         """Log every order attempt (accepted or rejected) to file and memory."""

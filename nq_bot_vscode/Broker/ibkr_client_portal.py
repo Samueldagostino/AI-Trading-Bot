@@ -927,6 +927,7 @@ class IBKRClient:
         self._authenticated: bool = False
         self._account_id: str = ""
         self._contract: Optional[ContractInfo] = None
+        self._last_resolution_strategy: int = 0
 
         # Background tasks
         self._keepalive_task: Optional[asyncio.Task] = None
@@ -1041,8 +1042,24 @@ class IBKRClient:
         The user must have already logged in via the CP Gateway web UI.
         """
         data = await self._get("/iserver/auth/status")
+        logger.info("Auth status response: %s", data)
         if data is None:
-            return False
+            # Try without /v1/api prefix (some gateway versions differ)
+            logger.info("Trying auth check without /v1/api prefix...")
+            try:
+                url = f"https://{self.config.gateway_host}:{self.config.gateway_port}/iserver/auth/status"
+                async with self._session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        logger.info("Auth status (no prefix): %s", data)
+                    else:
+                        body = await resp.text()
+                        logger.info("Auth status (no prefix) [%d]: %s", resp.status, body[:300])
+            except Exception as e:
+                logger.info("Auth check (no prefix) error: %s", e)
+
+            if data is None:
+                return False
 
         authenticated = data.get("authenticated", False)
         competing = data.get("competing", False)
@@ -1128,31 +1145,81 @@ class IBKRClient:
 
     async def _resolve_front_month(self, symbol: str) -> Optional[ContractInfo]:
         """
-        Resolve the continuous front-month futures contract.
+        Resolve the continuous front-month futures contract using multiple
+        strategies. Each strategy is tried in order; the first to succeed wins.
 
-        1. Search via /iserver/secdef/search (POST body: {"symbol": "..."} only)
-        2. Find the FUT section in the response and parse available months
-        3. Determine front-month from the months string (e.g. "MAR26;JUN26;...")
-        4. Get specific contract details via /iserver/contract/info
-
-        Expected response format:
-        [{"conid": "362687422", "companyHeader": "...", "symbol": "MNQ",
-          "sections": [{"secType": "FUT", "months": "MAR26;JUN26;...",
-                        "exchange": "CME"}]}]
+        Strategy 1: POST /iserver/secdef/search  {"symbol": "MNQ"}
+        Strategy 2: GET  /iserver/secdef/info     (direct contract lookup)
+        Strategy 3: GET  /trsrv/futures?symbols=MNQ
+        Strategy 4: Hardcoded fallback for known 2026 MNQ contracts
         """
-        # Step 1: Search for the symbol — ONLY send {"symbol": ...}
-        # The /iserver/secdef/search endpoint returns 500 if extra fields
-        # (secType, exchange, name, etc.) are included in the POST body.
+        for strategy_num, strategy_fn in [
+            (1, self._resolve_strategy_search),
+            (2, self._resolve_strategy_secdef_info),
+            (3, self._resolve_strategy_trsrv_futures),
+            (4, self._resolve_strategy_hardcoded),
+        ]:
+            try:
+                logger.info(
+                    "CONTRACT RESOLUTION: Trying strategy %d for %s",
+                    strategy_num, symbol,
+                )
+                result = await strategy_fn(symbol)
+                if result:
+                    logger.info(
+                        "CONTRACT RESOLUTION: Strategy %d SUCCEEDED — "
+                        "conid=%s, symbol=%s, expiry=%s, exchange=%s",
+                        strategy_num, result.conid, result.symbol,
+                        result.expiry, result.exchange,
+                    )
+                    self._last_resolution_strategy = strategy_num
+                    return result
+                logger.warning(
+                    "CONTRACT RESOLUTION: Strategy %d returned no result for %s",
+                    strategy_num, symbol,
+                )
+            except Exception as e:
+                logger.error(
+                    "CONTRACT RESOLUTION: Strategy %d FAILED for %s — %s",
+                    strategy_num, symbol, e,
+                )
+
+        # All strategies failed
+        logger.critical(
+            "CONTRACT RESOLUTION: ALL 4 strategies failed for %s. "
+            "Likely cause: CME market data subscription not active or "
+            "not propagated to paper account. Verify in IBKR Account "
+            "Management: Market Data Subscriptions -> CME Real-Time (NP,L1).",
+            symbol,
+        )
+        # Log gateway auth status for diagnostics
+        auth_status = await self._get("/iserver/auth/status")
+        logger.critical(
+            "CONTRACT RESOLUTION: Gateway auth status at time of failure: %s",
+            auth_status,
+        )
+        return None
+
+    async def _resolve_strategy_search(self, symbol: str) -> Optional[ContractInfo]:
+        """
+        Strategy 1 — Minimal search: POST /iserver/secdef/search
+        Body: {"symbol": "MNQ"} — NO extra fields (secType, exchange, etc.)
+        Extra fields cause 500 errors on the Client Portal Gateway.
+        """
         search_data = await self._post(
             "/iserver/secdef/search",
-            {"symbol": symbol}
+            {"symbol": symbol},
         )
 
         if not search_data or not isinstance(search_data, list):
-            logger.error("Contract search returned no results for %s", symbol)
+            logger.warning(
+                "Strategy 1: POST /iserver/secdef/search returned %s "
+                "(type=%s) for %s",
+                search_data, type(search_data).__name__, symbol,
+            )
             return None
 
-        # Step 2: Find the entry whose sections contain secType "FUT"
+        # Find FUT section
         futures_entry = None
         fut_section = None
         for entry in search_data:
@@ -1165,12 +1232,10 @@ class IBKRClient:
                 break
 
         if not futures_entry:
-            # Fallback: use first result
             futures_entry = search_data[0]
             fut_section = None
 
         conid = futures_entry.get("conid", 0)
-        # conid may be returned as a string from the API
         if isinstance(conid, str):
             try:
                 conid = int(conid)
@@ -1183,21 +1248,16 @@ class IBKRClient:
             months = fut_section.get("months", "")
             exchange = fut_section.get("exchange", "")
 
-        # Step 3: Parse front-month from the months string (e.g. "MAR26;JUN26;SEP26")
         front_month = ""
         if months:
             month_list = [m.strip() for m in months.split(";") if m.strip()]
             if month_list:
-                # The first month in the list is the front-month (nearest expiry)
                 front_month = month_list[0]
                 logger.info(
-                    "Contract search: %s has %d expiries, front-month: %s",
+                    "Strategy 1: %s has %d expiries, front-month: %s",
                     symbol, len(month_list), front_month,
                 )
 
-        # Step 4: Build ContractInfo from search result data directly.
-        # Note: /iserver/contract/info returns 404 on Client Portal Gateway;
-        # the search result already contains everything we need.
         if conid:
             return ContractInfo(
                 conid=conid,
@@ -1207,6 +1267,153 @@ class IBKRClient:
                 description=futures_entry.get("companyHeader", ""),
             )
 
+        return None
+
+    async def _resolve_strategy_secdef_info(self, symbol: str) -> Optional[ContractInfo]:
+        """
+        Strategy 2 — Direct contract lookup via secdef info endpoint.
+        GET /iserver/secdef/info?conid=0&secType=FUT&symbol=MNQ&exchange=CME
+        """
+        data = await self._get(
+            "/iserver/secdef/info",
+            params={
+                "conid": "0",
+                "secType": "FUT",
+                "symbol": symbol,
+                "exchange": "CME",
+            },
+        )
+
+        if not data:
+            return None
+
+        # Response may be a dict or list
+        entries = data if isinstance(data, list) else [data]
+
+        for entry in entries:
+            conid = entry.get("conid", 0)
+            if isinstance(conid, str):
+                try:
+                    conid = int(conid)
+                except (ValueError, TypeError):
+                    continue
+            if conid:
+                return ContractInfo(
+                    conid=conid,
+                    symbol=entry.get("symbol", symbol),
+                    exchange=entry.get("exchange", "CME"),
+                    expiry=entry.get("maturityDate", ""),
+                    description=entry.get("companyName", ""),
+                )
+
+        return None
+
+    async def _resolve_strategy_trsrv_futures(self, symbol: str) -> Optional[ContractInfo]:
+        """
+        Strategy 3 — Futures lookup via /trsrv/futures endpoint.
+        GET /trsrv/futures?symbols=MNQ
+        Returns all available contracts with expiry dates.
+        """
+        data = await self._get(
+            "/trsrv/futures",
+            params={"symbols": symbol},
+        )
+
+        if not data:
+            return None
+
+        # Response format: {"MNQ": [{"conid": ..., "symbol": ..., ...}, ...]}
+        contracts = None
+        if isinstance(data, dict):
+            contracts = data.get(symbol, data.get(symbol.upper()))
+        elif isinstance(data, list):
+            contracts = data
+
+        if not contracts or not isinstance(contracts, list):
+            return None
+
+        # Sort by expiry to find front-month (nearest future date)
+        best = None
+        for contract in contracts:
+            conid = contract.get("conid", 0)
+            if isinstance(conid, str):
+                try:
+                    conid = int(conid)
+                except (ValueError, TypeError):
+                    continue
+
+            if conid:
+                expiry = contract.get("expirationDate", "")
+                if best is None or expiry < best.get("expirationDate", ""):
+                    best = contract
+
+        if best:
+            conid = best.get("conid", 0)
+            if isinstance(conid, str):
+                conid = int(conid)
+            return ContractInfo(
+                conid=conid,
+                symbol=best.get("symbol", symbol),
+                exchange=best.get("exchange", "CME"),
+                expiry=best.get("expirationDate", ""),
+                description=best.get("companyName", ""),
+            )
+
+        return None
+
+    async def _resolve_strategy_hardcoded(self, symbol: str) -> Optional[ContractInfo]:
+        """
+        Strategy 4 — Hardcoded fallback for known 2026 MNQ contracts.
+        LAST RESORT: uses known expiry dates and attempts to find conid
+        via /iserver/contract/rules. If that fails too, returns None
+        (we need a valid conid for order placement).
+        """
+        from datetime import date as _date
+        from Broker.contract_roller import ContractRoller
+
+        roller = ContractRoller()
+        front_month_symbol = roller.get_front_month(symbol)
+        _base, month_code, year_digit = roller.parse_symbol(front_month_symbol)
+        expiry = roller.get_expiry_date(month_code, year_digit)
+
+        month_names = {"H": "MAR", "M": "JUN", "U": "SEP", "Z": "DEC"}
+        full_year = 2020 + year_digit
+        expiry_str = f"{month_names[month_code]}{str(full_year)[2:]}"
+
+        logger.info(
+            "Strategy 4: Hardcoded lookup for %s — front-month %s, "
+            "expiry %s (%s)",
+            symbol, front_month_symbol, expiry, expiry_str,
+        )
+
+        # Try /iserver/contract/rules to get a valid conid
+        rules_data = await self._get(
+            "/iserver/contract/rules",
+            params={"conid": "0", "exchange": "CME"},
+        )
+
+        if rules_data and isinstance(rules_data, dict):
+            conid = rules_data.get("conid", 0)
+            if isinstance(conid, str):
+                try:
+                    conid = int(conid)
+                except (ValueError, TypeError):
+                    conid = 0
+            if conid:
+                return ContractInfo(
+                    conid=conid,
+                    symbol=symbol,
+                    exchange="CME",
+                    expiry=expiry_str,
+                    description=f"{symbol} {expiry_str} (hardcoded fallback)",
+                )
+
+        # Cannot resolve without a valid conid — do not fabricate one
+        logger.error(
+            "Strategy 4: Could not obtain conid for %s via any endpoint. "
+            "CONTRACT RESOLUTION BLOCKED — likely CME data subscription issue.",
+            symbol,
+        )
         return None
 
     async def check_contract_rollover(self) -> Optional[ContractInfo]:

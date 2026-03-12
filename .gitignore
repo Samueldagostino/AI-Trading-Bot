@@ -43,19 +43,25 @@ data/firstrate/historical/
 # Large data files
 docs/viz_data_full.json
 
+# Large raw historical data text files
+Historical Data/
+
 # Log directories
 logs/
 
-# Website live stats (allowed — sanitized, no sensitive data)
-!Website/data/
+# Cowork orchestration prompts (not for repo)
+prompts/
 
-# TradingView raw data exports
-data/tradingview/*.txt
-data/tradingview/*.csv
-*.txt
+# Build artifacts & local-only dirs
+.vertx/
+bin/
+root/
+data/replay_week/
+doc/
 
-# Quant Data API credentials (NEVER commit)
+# Credentials / tokens
 config/quantdata_token.txt
 config/quantdata_instance_id.txt
-logs/gamma_levels.json
-logs/modifier_diagnostics.json
+
+# Archived files (old/unused, kept locally for reference)
+_archive/

@@ -121,7 +121,10 @@ class MultiTimeframeIterator:
     }
 
     def __init__(self, merged: List[Tuple[str, 'BarData']]):
-        self._items = merged
+        self._items = sorted(
+            merged,
+            key=lambda x: (x[1].timestamp, self._TF_PRIORITY.get(x[0], 999)),
+        )
 
     def __len__(self) -> int:
         return len(self._items)

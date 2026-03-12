@@ -10,8 +10,8 @@ Usage:
     python scripts/run_with_dashboard.py --dry-run --dashboard-port 9090
 """
 
-import nest_asyncio
-nest_asyncio.apply()
+from ib_insync import util as _ib_util
+_ib_util.patchAsyncio()
 
 import argparse
 import signal
@@ -38,7 +38,7 @@ def main():
     )
     parser.add_argument("--dry-run", action="store_true", help="Run bot in dry-run mode (synthetic data)")
     parser.add_argument("--port", type=int, default=7497, help="TWS/Gateway port for bot (default: 7497)")
-    parser.add_argument("--max-daily-loss", type=float, default=500.0, help="Max daily loss (default: $500)")
+    parser.add_argument("--max-daily-loss", type=float, default=1500.0, help="Max daily loss (default: $1500)")
     parser.add_argument("--log-level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING"])
     parser.add_argument("--dashboard-port", type=int, default=8080, help="Dashboard HTTP port (default: 8080)")
     parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")

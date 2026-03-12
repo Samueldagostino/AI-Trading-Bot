@@ -21,17 +21,19 @@ Env vars:
 SECURITY: This module NEVER logs credentials or account numbers.
 """
 
-import nest_asyncio
-nest_asyncio.apply()
-
 import asyncio
 import logging
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 
 from ib_insync import IB, Contract, Future, MarketOrder, LimitOrder, StopOrder, util
+
+# Use ib_insync's own patcher instead of nest_asyncio — fixes
+# "Future attached to a different loop" on Windows Python 3.10+
+util.patchAsyncio()
 
 from features.engine import Bar
 
@@ -146,7 +148,7 @@ class IBKRClient:
         cid = client_id or self._client_id
 
         try:
-            self._ib.connect(h, p, clientId=cid)
+            await self._ib.connectAsync(h, p, clientId=cid)
             self._reconnect_attempts = 0
             self._last_heartbeat = time.monotonic()
             logger.info("Connected to TWS at %s:%d (clientId=%d)", h, p, cid)
@@ -180,7 +182,7 @@ class IBKRClient:
 
     def get_contract(self, symbol: str = "MNQ", exchange: str = "CME") -> Contract:
         """
-        Get MNQ futures contract definition.
+        Get futures contract definition for any supported CME Micro instrument.
         Requests all available expiries via reqContractDetails, then picks the
         front month (nearest lastTradeDateOrContractMonth) to avoid the
         "Ambiguous contract" error from TWS.
@@ -220,7 +222,7 @@ class IBKRClient:
         exchange: str = "CME",
     ) -> bool:
         """
-        Subscribe to real-time bars for MNQ.
+        Subscribe to real-time bars for a CME Micro futures instrument.
 
         Uses reqRealTimeBars for 5-second bars.
         Each completed bar fires on_bar_update callbacks.
@@ -381,6 +383,29 @@ class IBKRClient:
         return summary
 
     # ──────────────────────────────────────────────────────
+    # HEALTH STATE (for health monitor / publish_stats)
+    # ──────────────────────────────────────────────────────
+
+    def get_health_state(self) -> dict:
+        """
+        Return connection health metrics for the health monitor.
+        SECURITY: No sensitive data (no account numbers, no credentials).
+        """
+        now = time.monotonic()
+        last_bar_age = (now - self._last_heartbeat) if self._last_heartbeat > 0 else -1
+
+        return {
+            "connected": self.is_connected(),
+            "last_bar_age_sec": round(last_bar_age, 1),
+            "bars_flowing": 0 < last_bar_age < 60,
+            "reconnect_attempts": self._reconnect_attempts,
+            "host": self._host,
+            "port": self._port,
+            "client_id": self._client_id,
+            "contract_resolved": self._contract is not None,
+        }
+
+    # ──────────────────────────────────────────────────────
     # CALLBACKS
     # ──────────────────────────────────────────────────────
 
@@ -458,7 +483,7 @@ class IBKRClient:
             await asyncio.sleep(delay)
 
             try:
-                self._ib.connect(
+                await self._ib.connectAsync(
                     self._host, self._port, clientId=self._client_id
                 )
                 if self._ib.isConnected():

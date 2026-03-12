@@ -1,10 +1,15 @@
 """
 MNQ Contract Rollover Manager
-==============================
 Automatically switches from the expiring MNQ contract to the next front month
 before expiry. Rolls 5 trading days before expiration.
 
 MNQ expiry cycle: H (March), M (June), U (September), Z (December)
+CME Micro Futures Contract Rollover Manager
+Automatically switches from the expiring contract to the next front month
+before expiry. Rolls 5 trading days before expiration.
+
+Supported instruments: MNQ, MES, MYM, M2K (any CME quarterly futures).
+Expiry cycle: H (March), M (June), U (September), Z (December)
 Expiry = 3rd Friday of the expiry month.
 
 Safety rules:
@@ -17,6 +22,7 @@ Safety rules:
 import logging
 from datetime import date, timedelta
 from typing import Optional
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -180,11 +186,16 @@ class ContractRoller:
     """
     Manages automatic MNQ contract rollover.
 
+    Manages automatic contract rollover for CME Micro futures.
+
+    Supports MNQ, MES, MYM, M2K and any symbol using the HMUZ quarterly cycle.
     Rolls 5 trading days before the 3rd Friday of the expiry month.
     Uses the H→M→U→Z quarterly cycle with year rollover on Z→H.
     """
 
     def __init__(self):
+    def __init__(self, instrument: str = "MNQ"):
+        self._instrument = instrument.upper()
         self._current_symbol: Optional[str] = None
         self._roll_executed: bool = False
 
@@ -241,6 +252,11 @@ class ContractRoller:
         """
         if today is None:
             today = date.today()
+
+        # ROLLOVER_OVERRIDE=true skips the roll check (for backtesting or manual control)
+        if os.environ.get("ROLLOVER_OVERRIDE", "").lower() == "true":
+            logger.info("Roll check: ROLLOVER_OVERRIDE=true — skipping roll check")
+            return False
 
         _base, month_code, year_digit = self.parse_symbol(current_symbol)
         roll_date = self.get_roll_date(month_code, year_digit)
@@ -461,6 +477,47 @@ class ContractRoller:
         self._roll_executed = True
         return True
 
+    @staticmethod
+    def build_symbol(base: str, month_code: str, year_digit: int) -> str:
+        """
+        Build a contract symbol from components.
+
+        Examples:
+            build_symbol("MES", "H", 6) -> "MESH6"
+            build_symbol("M2K", "M", 6) -> "M2KM6"
+        """
+        return f"{base}{month_code}{year_digit}"
+
+    @staticmethod
+    def get_front_month(base: str, ref_date: Optional[date] = None) -> str:
+        """
+        Determine the current front-month symbol for any instrument.
+
+        Args:
+            base: Instrument base symbol (e.g., "MNQ", "MES", "MYM", "M2K")
+            ref_date: Reference date (default: today)
+
+        Returns:
+            Front-month symbol, e.g., "MNQM6"
+        """
+        if ref_date is None:
+            ref_date = date.today()
+
+        # Find the nearest quarterly expiry that hasn't passed the roll date
+        for year_offset in range(2):
+            year = ref_date.year + year_offset
+            year_digit = year % 10
+            for code in CYCLE_ORDER:
+                month = MONTH_CODES[code]
+                expiry = third_friday(year, month)
+                roll_date = subtract_trading_days(expiry, ROLL_DAYS_BEFORE_EXPIRY)
+                if ref_date < roll_date:
+                    return f"{base}{code}{year_digit}"
+
+        # Fallback: should not reach here
+        year_digit = ref_date.year % 10
+        return f"{base}{CYCLE_ORDER[0]}{year_digit + 1}"
+
     def get_roll_schedule(self, symbol: str) -> dict:
         """
         Return the roll schedule for a given contract symbol.
@@ -482,3 +539,27 @@ class ContractRoller:
             "next_contract": next_contract,
             "next_expiry": next_expiry,
         }
+
+    @staticmethod
+    def get_roll_schedule_next_4_quarters(start_symbol: str) -> list:
+        """
+        Return roll schedule for the next 4 quarters starting from start_symbol.
+
+        Returns list of dicts with: current, next, roll_date, expiry.
+        Used for display in terminal dashboard and startup logging.
+        """
+        schedule = []
+        current = start_symbol
+        for _ in range(4):
+            base, month_code, year_digit = ContractRoller.parse_symbol(current)
+            expiry = ContractRoller.get_expiry_date(month_code, year_digit)
+            roll_date = ContractRoller.get_roll_date(month_code, year_digit)
+            next_contract = ContractRoller.get_next_contract(current)
+            schedule.append({
+                "current": current,
+                "next": next_contract,
+                "roll_date": roll_date,
+                "expiry": expiry,
+            })
+            current = next_contract
+        return schedule

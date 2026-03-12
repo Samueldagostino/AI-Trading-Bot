@@ -409,13 +409,17 @@ class NQFeatureEngine:
         
         Validation: The displacement away from the OB must exceed min ATR multiplier.
         """
-        if len(self._bars) < 5 or snapshot.atr_14 == 0:
+        # CAUSALITY FIX (Mar 2026): Shifted range by -1 so the displacement
+        # bar (bar_after = bars[i+2]) is always a COMPLETED bar, never the
+        # current bar being processed. An OB is now detected one bar after
+        # its 3-bar pattern fully forms, matching live behavior exactly.
+        if len(self._bars) < 6 or snapshot.atr_14 == 0:
             return
 
-        lookback = min(self.config.ob_lookback_bars, len(self._bars) - 3)
+        lookback = min(self.config.ob_lookback_bars, len(self._bars) - 4)
         min_displacement = snapshot.atr_14 * self.config.ob_min_displacement_atr
 
-        for i in range(len(self._bars) - 3, max(len(self._bars) - lookback - 3, 2), -1):
+        for i in range(len(self._bars) - 4, max(len(self._bars) - lookback - 4, 2), -1):
             candidate = self._bars[i]
             next_bar = self._bars[i + 1]
             bar_after = self._bars[i + 2] if i + 2 < len(self._bars) else None
@@ -477,14 +481,17 @@ class NQFeatureEngine:
         IFVG: A previously respected FVG that price returns through,
         inverting its polarity.
         """
-        if len(self._bars) < 4:
+        # CAUSALITY FIX (Mar 2026): Use bars[-4], [-3], [-2] instead of
+        # [-3], [-2], [-1] so the FVG pattern is detected one bar AFTER
+        # it fully forms. bars[-1] is the current bar being processed —
+        # using it as bar_3 would be look-ahead bias (the candle hasn't
+        # closed yet in live trading when features are computed mid-bar).
+        if len(self._bars) < 5:
             return
 
-        # Check the 3-candle pattern ending at the second-to-last bar
-        # (we need the current bar to confirm, but the FVG is from prior bars)
-        bar_1 = self._bars[-3]  # Candle 1
-        bar_2 = self._bars[-2]  # Candle 2 (middle — the "impulse")
-        bar_3 = self._bars[-1]  # Candle 3 (current)
+        bar_1 = self._bars[-4]  # Candle 1 (fully completed)
+        bar_2 = self._bars[-3]  # Candle 2 — impulse (fully completed)
+        bar_3 = self._bars[-2]  # Candle 3 — confirmation (fully completed)
 
         min_gap = self.config.fvg_min_gap_ticks * 0.25  # Convert ticks to NQ points
 

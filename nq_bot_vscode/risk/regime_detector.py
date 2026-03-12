@@ -17,6 +17,9 @@ import numpy as np
 from datetime import datetime, timezone
 from typing import Optional, List
 
+from monitoring.alerting import get_alert_manager
+from monitoring.alert_templates import AlertTemplates
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +40,8 @@ class RegimeDetector:
         self.config = config
         self._atr_history: List[float] = []
         self._vix_history: List[float] = []
+        self._last_regime: str = "unknown"
+        self._high_vix_alerted: bool = False
 
     def classify(
         self,
@@ -68,35 +73,71 @@ class RegimeDetector:
         # 1. CRASH — extreme conditions
         if current_vix > 40 or price_change_pct < -3.0:
             logger.warning(f"CRASH regime detected: VIX={current_vix}, change={price_change_pct:.1f}%")
+            self._fire_regime_alerts("crash", current_vix)
             return "crash"
 
         # 2. EVENT_DRIVEN — near major news
         if near_news_event:
+            self._fire_regime_alerts("event_driven", current_vix)
             return "event_driven"
 
         # 3. LOW_LIQUIDITY — overnight or thin volume
         if is_overnight and current_volume < avg_volume * 0.3:
+            self._fire_regime_alerts("low_liquidity", current_vix)
             return "low_liquidity"
 
         # 4. HIGH_VOLATILITY — elevated VIX or ATR expansion
         avg_atr = np.mean(self._atr_history[-20:]) if len(self._atr_history) >= 20 else current_atr
         atr_expansion = current_atr / avg_atr if avg_atr > 0 else 1.0
-        
+
         if current_vix > 25 or atr_expansion > 1.5:
+            self._fire_regime_alerts("high_volatility", current_vix)
             return "high_volatility"
 
         # 5. TRENDING — strong directional momentum
         if trend_strength > 0.5:
             if trend_direction == "up":
+                self._fire_regime_alerts("trending_up", current_vix)
                 return "trending_up"
             elif trend_direction == "down":
+                self._fire_regime_alerts("trending_down", current_vix)
                 return "trending_down"
 
         # 6. RANGING — low trend strength, contained moves
         if trend_strength < 0.3 and atr_expansion < 1.2:
-            return "ranging"
+            regime = "ranging"
+        else:
+            regime = "unknown"
 
-        return "unknown"
+        # Fire alerts on regime change or high VIX
+        self._fire_regime_alerts(regime, current_vix)
+        return regime
+
+    def _fire_regime_alerts(self, regime: str, current_vix: float) -> None:
+        """Fire alerts on regime change or high VIX threshold crossing."""
+        mgr = get_alert_manager()
+        if not mgr:
+            return
+
+        # Alert on regime change (rate-limited by AlertManager)
+        if regime != self._last_regime:
+            mgr.enqueue(AlertTemplates.custom_alert(
+                event_type="regime_change",
+                title="Regime Change",
+                message=f"{self._last_regime} -> {regime}",
+                data={"old_regime": self._last_regime, "new_regime": regime, "vix": current_vix},
+            ))
+            self._last_regime = regime
+
+        # Alert when VIX crosses above 25 (only once per crossing)
+        if current_vix > 25 and not self._high_vix_alerted:
+            mgr.enqueue(AlertTemplates.high_vix_alert(
+                vix_level=current_vix,
+                max_vix=self.config.risk.max_vix_for_trading,
+            ))
+            self._high_vix_alerted = True
+        elif current_vix <= 25:
+            self._high_vix_alerted = False
 
     def get_regime_adjustments(self, regime: str) -> dict:
         """
@@ -162,11 +203,11 @@ class RegimeDetector:
             },
             "unknown": {
                 "favor_direction": "none",
-                "size_multiplier": 0.5,
+                "size_multiplier": 0.5,    # Reduced size: allow trades at half position when regime unclear
                 "use_trailing_stop": False,
                 "widen_targets": False,
                 "tighten_stops": True,
-                "description": "Unknown regime — reduced size, conservative approach",
+                "description": "Unknown regime — half size, conservative approach",
             },
         }
 

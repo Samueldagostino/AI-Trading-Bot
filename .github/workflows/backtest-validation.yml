@@ -52,6 +52,88 @@ jobs:
             --baseline nq_bot_vscode/config/backtest_baseline.json \
             --results /tmp/backtest_results.json
 
+      - name: Run post-fix baseline regression check
+        id: regression_check
+        run: |
+          python -c "
+          import json, sys
+
+          baseline_path = 'nq_bot_vscode/config/backtest_baseline.json'
+          results_path = '/tmp/backtest_results.json'
+
+          try:
+              with open(baseline_path) as f:
+                  baseline = json.load(f)
+              with open(results_path) as f:
+                  results = json.load(f)
+          except FileNotFoundError as e:
+              print(f'File not found: {e}')
+              sys.exit(0)
+
+          # Extract metrics
+          old_pf = baseline.get('profit_factor', 0)
+          new_pf = results.get('profit_factor', results.get('results', {}).get('profit_factor', 0))
+          old_dd = baseline.get('max_drawdown_pct', 0)
+          new_dd = results.get('max_drawdown_pct', results.get('results', {}).get('max_drawdown_pct', 0))
+
+          # Build comparison table
+          lines = []
+          lines.append('## Post-Fix Backtest Regression Check')
+          lines.append('')
+          lines.append('| Metric | Baseline | New | Delta | Status |')
+          lines.append('|--------|----------|-----|-------|--------|')
+
+          # Profit factor
+          pf_delta = new_pf - old_pf
+          pf_pct = ((new_pf - old_pf) / old_pf * 100) if old_pf > 0 else 0
+          pf_status = 'PASS' if pf_pct >= -10 else 'FAIL'
+          pf_icon = ':white_check_mark:' if pf_status == 'PASS' else ':x:'
+          lines.append(f'| Profit Factor | {old_pf:.2f} | {new_pf:.2f} | {pf_delta:+.2f} ({pf_pct:+.1f}%) | {pf_icon} {pf_status} |')
+
+          # Max drawdown
+          dd_delta = new_dd - old_dd
+          dd_pct = ((new_dd - old_dd) / old_dd * 100) if old_dd > 0 else 0
+          dd_status = 'PASS' if dd_pct <= 20 else 'FAIL'
+          dd_icon = ':white_check_mark:' if dd_status == 'PASS' else ':x:'
+          lines.append(f'| Max Drawdown | {old_dd:.1f}% | {new_dd:.1f}% | {dd_delta:+.1f}% ({dd_pct:+.1f}%) | {dd_icon} {dd_status} |')
+
+          # Other metrics
+          for key, label, hib in [
+              ('win_rate_pct', 'Win Rate', True),
+              ('total_pnl', 'Total PnL', True),
+              ('total_trades', 'Total Trades', True),
+              ('expectancy_per_trade', 'Expectancy', True),
+          ]:
+              old_v = baseline.get(key, 0)
+              new_v = results.get(key, results.get('results', {}).get(key, 0))
+              if key == 'win_rate_pct':
+                  new_v = results.get('win_rate', results.get('results', {}).get('win_rate', new_v))
+              delta_v = new_v - old_v
+              icon = ':white_check_mark:' if (delta_v >= 0) == hib else ':warning:'
+              lines.append(f'| {label} | {old_v} | {new_v} | {delta_v:+.2f} | {icon} |')
+
+          lines.append('')
+
+          overall = pf_status == 'PASS' and dd_status == 'PASS'
+          if overall:
+              lines.append('### :white_check_mark: Overall: PASS')
+          else:
+              lines.append('### :x: Overall: FAIL')
+              if pf_status == 'FAIL':
+                  lines.append(f'- Profit factor dropped {pf_pct:.1f}% (threshold: -10%)')
+              if dd_status == 'FAIL':
+                  lines.append(f'- Max drawdown increased {dd_pct:.1f}% (threshold: +20%)')
+
+          report = '\n'.join(lines)
+          with open('/tmp/regression_report.md', 'w') as f:
+              f.write(report)
+
+          print(report)
+
+          if not overall:
+              sys.exit(1)
+          "
+
       - name: Generate Backtest Report
         if: always()
         run: |
@@ -68,10 +150,16 @@ jobs:
             const fs = require('fs');
             let report = '';
 
+            // Include regression check results
+            if (fs.existsSync('/tmp/regression_report.md')) {
+              report += fs.readFileSync('/tmp/regression_report.md', 'utf8');
+              report += '\n\n---\n\n';
+            }
+
             if (fs.existsSync('/tmp/backtest_report.md')) {
-              report = fs.readFileSync('/tmp/backtest_report.md', 'utf8');
+              report += fs.readFileSync('/tmp/backtest_report.md', 'utf8');
             } else {
-              report = `## Backtest Validation\n\n`;
+              report += `## Backtest Validation\n\n`;
               report += `### Configuration\n`;
               report += `- Strategy: 2-Contract Scale-Out (HC Filtered)\n`;
               report += `- Account: $50,000\n`;
