@@ -362,7 +362,16 @@ class PaperTradingMonitor:
                 tmp.flush()
                 os.fsync(tmp.fileno())
                 tmp_path = tmp.name
-            os.replace(tmp_path, str(self._state_path))
+            # Windows PermissionError retry — another process may hold the file briefly
+            for attempt in range(3):
+                try:
+                    os.replace(tmp_path, str(self._state_path))
+                    break
+                except PermissionError:
+                    if attempt < 2:
+                        time.sleep(0.1)
+                    else:
+                        raise
         except OSError as e:
             logger.warning("Failed to write paper trading state: %s", e)
             if tmp_path and os.path.exists(tmp_path):

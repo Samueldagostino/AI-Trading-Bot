@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import sys
+import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -150,12 +151,21 @@ def _get_gamma_data() -> dict:
 
 
 def atomic_write_json(filepath: Path, data) -> None:
-    """Write JSON atomically: write to .tmp then rename."""
+    """Write JSON atomically: write to .tmp then rename (Windows retry)."""
     tmp_path = filepath.with_suffix(".json.tmp")
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, default=str)
-        os.replace(str(tmp_path), str(filepath))
+        # Windows PermissionError retry — another process may hold the file briefly
+        for attempt in range(3):
+            try:
+                os.replace(str(tmp_path), str(filepath))
+                return
+            except PermissionError:
+                if attempt < 2:
+                    time.sleep(0.1)
+                else:
+                    raise
     except OSError as e:
         logger.warning("Atomic write failed for %s: %s", filepath, e)
         try:

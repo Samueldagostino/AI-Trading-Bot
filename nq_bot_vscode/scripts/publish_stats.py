@@ -58,8 +58,19 @@ HEARTBEAT_FILE = LOGS_DIR / "heartbeat_state.json"
 # Account size for percentage calculation (not exposed)
 _ACCOUNT_SIZE = 50_000.0
 
-def atomic_json_write(filepath, data):
-    """Write JSON atomically — write to temp file, then rename."""
+
+def _safe_round(value, ndigits=2):
+    """None-safe round() — returns 0.0 if value is None."""
+    if value is None:
+        return 0.0
+    return round(value, ndigits)
+
+
+def atomic_json_write(filepath, data, retries=3, delay=0.1):
+    """Write JSON atomically — write to temp file, then rename.
+
+    Retries on Windows PermissionError when another process holds the file.
+    """
     dir_name = os.path.dirname(filepath)
     tmp_path = None
     try:
@@ -73,7 +84,6 @@ def atomic_json_write(filepath, data):
             tmp.flush()
             os.fsync(tmp.fileno())
             tmp_path = tmp.name
-        os.replace(tmp_path, str(filepath))
     except Exception:
         if tmp_path and os.path.exists(tmp_path):
             try:
@@ -81,6 +91,29 @@ def atomic_json_write(filepath, data):
             except OSError:
                 pass
         raise
+
+    for attempt in range(retries):
+        try:
+            os.replace(tmp_path, str(filepath))
+            return
+        except PermissionError:
+            if attempt < retries - 1:
+                time.sleep(delay * (attempt + 1))
+            else:
+                logger.warning("Atomic write failed for %s after %d retries (PermissionError)", filepath, retries)
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+        except OSError as e:
+            logger.warning("Atomic write failed for %s: %s", filepath, e)
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            return
 
 
 def repair_corrupted_jsonl(filepath: Path) -> int:
@@ -515,20 +548,20 @@ def build_sanitized_stats() -> dict:
 
     mod_values = {
         "overnight": {
-            "value": round(overnight_mod.get("value", 1.0), 2),
-            "display": f"{round(overnight_mod.get('value', 1.0), 2)}x ({overnight_mod.get('reason', 'neutral')})",
+            "value": _safe_round(overnight_mod.get("value", 1.0), 2),
+            "display": f"{_safe_round(overnight_mod.get('value', 1.0), 2)}x ({overnight_mod.get('reason', 'neutral')})",
         },
         "fomc": {
-            "value": round(fomc_mod.get("value", 1.0), 2),
-            "display": f"{round(fomc_mod.get('value', 1.0), 2)}x ({fomc_mod.get('reason', 'none')})",
+            "value": _safe_round(fomc_mod.get("value", 1.0), 2),
+            "display": f"{_safe_round(fomc_mod.get('value', 1.0), 2)}x ({fomc_mod.get('reason', 'none')})",
         },
         "gamma": {
-            "value": round(gamma_mod.get("value", 1.0), 2),
-            "display": f"{round(gamma_mod.get('value', 1.0), 2)}x ({gamma_mod.get('reason', 'unknown')})",
+            "value": _safe_round(gamma_mod.get("value", 1.0), 2),
+            "display": f"{_safe_round(gamma_mod.get('value', 1.0), 2)}x ({gamma_mod.get('reason', 'unknown')})",
         },
         "har_rv": {
-            "value": round(har_rv_mod.get("value", 1.0), 2),
-            "display": f"{round(har_rv_mod.get('value', 1.0), 2)}x ({har_rv_mod.get('reason', 'normal')})",
+            "value": _safe_round(har_rv_mod.get("value", 1.0), 2),
+            "display": f"{_safe_round(har_rv_mod.get('value', 1.0), 2)}x ({har_rv_mod.get('reason', 'normal')})",
         },
     }
 
@@ -597,15 +630,15 @@ def build_sanitized_stats() -> dict:
         "trading_mode": "PAPER",  # Change to "LIVE" only after Phase 4 validation gate
         "bars_processed": status.get("bars_processed", len(candles) if isinstance(candles, list) else 0),
         "trades_today": status.get("trade_count", 0),
-        "win_rate": round(status.get("win_rate", 0.0), 1),
-        "profit_factor": round(status.get("profit_factor", 0.0), 2),
+        "win_rate": _safe_round(status.get("win_rate", 0.0), 1),
+        "profit_factor": _safe_round(status.get("profit_factor", 0.0), 2),
         "session_pnl_pct": session_pnl_pct,
         "signals_rejected": rejected,
         "signals_approved": approved,
         "htf_bias": htf_bias,
         "safety_rails": safety_status,
         "modifiers": mod_values,
-        "last_price": round(last_price, 2),
+        "last_price": _safe_round(last_price, 2),
         "recent_decisions": recent_decisions,
         # Heartbeat & state
         "heartbeat": heartbeat,
@@ -659,10 +692,10 @@ def build_trade_viz_data() -> dict | None:
             continue
 
         direction = t.get("direction", "long")
-        entry_price = t.get("entry_price", 0)
-        total_pnl = t.get("total_pnl", 0)
-        c1_pnl = t.get("c1_pnl", 0)
-        c2_pnl = t.get("c2_pnl", 0)
+        entry_price = t.get("entry_price") or 0.0
+        total_pnl = t.get("total_pnl") or 0.0
+        c1_pnl = t.get("c1_pnl") or 0.0
+        c2_pnl = t.get("c2_pnl") or 0.0
         c1_reason = t.get("c1_reason", "stop")
         c2_reason = t.get("c2_reason", "stop")
 
@@ -695,21 +728,21 @@ def build_trade_viz_data() -> dict | None:
             "exitTime": t.get("timestamp", ""),  # Same for closed trades
             "side": direction,
             "qty": 2,
-            "entryPrice": round(entry_price, 2),
-            "exitPrice": round(exit_price, 2),
-            "stopPrice": round(entry_price - stop_dist if direction == "long" else entry_price + stop_dist, 2),
-            "tp1Price": round(entry_price + stop_dist * 1.5 if direction == "long" else entry_price - stop_dist * 1.5, 2),
-            "tp2Price": round(entry_price + stop_dist * 3.0 if direction == "long" else entry_price - stop_dist * 3.0, 2),
-            "stopDist": round(stop_dist, 1),
+            "entryPrice": _safe_round(entry_price, 2),
+            "exitPrice": _safe_round(exit_price, 2),
+            "stopPrice": _safe_round(entry_price - stop_dist if direction == "long" else entry_price + stop_dist, 2),
+            "tp1Price": _safe_round(entry_price + stop_dist * 1.5 if direction == "long" else entry_price - stop_dist * 1.5, 2),
+            "tp2Price": _safe_round(entry_price + stop_dist * 3.0 if direction == "long" else entry_price - stop_dist * 3.0, 2),
+            "stopDist": _safe_round(stop_dist, 1),
             "signalScore": t.get("signal_score", 0.85),
             "regime": t.get("regime", "unknown"),
             "htfBias": t.get("htf_bias", "neutral"),
             "exitType": exit_type,
-            "pnl": round(total_pnl, 2),
-            "c1Pnl": round(c1_pnl, 2),
-            "c2Pnl": round(c2_pnl, 2),
-            "slippage": round(t.get("total_slippage_pts", 1.5) * 2.0, 2),
-            "rMultiple": round(pts_pnl / stop_dist, 2) if stop_dist > 0 else 0,
+            "pnl": _safe_round(total_pnl, 2),
+            "c1Pnl": _safe_round(c1_pnl, 2),
+            "c2Pnl": _safe_round(c2_pnl, 2),
+            "slippage": _safe_round((t.get("total_slippage_pts") or 1.5) * 2.0, 2),
+            "rMultiple": _safe_round(pts_pnl / stop_dist, 2) if stop_dist > 0 else 0,
             "mfe": 0,
             "mae": 0,
             "holdBars": t.get("hold_bars", 5),
@@ -727,38 +760,48 @@ def build_trade_viz_data() -> dict | None:
     }
 
 
-def write_trade_viz(viz_data: dict) -> None:
-    """Write trade viz data atomically to docs/data/trade_viz_data.json."""
-    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_path = TRADE_VIZ_FILE.with_suffix(".json.tmp")
+def _atomic_write_with_retry(filepath: Path, data: dict) -> None:
+    """Atomic JSON write with Windows PermissionError retry."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = filepath.with_suffix(".json.tmp")
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(viz_data, f, indent=2, default=str)
-        os.replace(str(tmp_path), str(TRADE_VIZ_FILE))
-        logger.debug("Trade viz written to %s", TRADE_VIZ_FILE)
+            json.dump(data, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
     except OSError as e:
-        logger.warning("Failed to write trade viz: %s", e)
+        logger.warning("Atomic write tmp failed for %s: %s", filepath, e)
+        return
+    for attempt in range(3):
         try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+            os.replace(str(tmp_path), str(filepath))
+            return
+        except PermissionError:
+            if attempt < 2:
+                time.sleep(0.1 * (attempt + 1))
+            else:
+                logger.warning("Atomic write failed for %s after 3 retries", filepath)
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        except OSError as e:
+            logger.warning("Atomic write failed for %s: %s", filepath, e)
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return
+
+
+def write_trade_viz(viz_data: dict) -> None:
+    """Write trade viz data atomically to docs/data/trade_viz_data.json."""
+    _atomic_write_with_retry(TRADE_VIZ_FILE, viz_data)
 
 
 def write_stats(stats: dict) -> None:
     """Write stats atomically to docs/data/live_stats.json."""
-    DOCS_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_path = OUTPUT_FILE.with_suffix(".json.tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(stats, f, indent=2, default=str)
-        os.replace(str(tmp_path), str(OUTPUT_FILE))
-        logger.debug("Stats written to %s", OUTPUT_FILE)
-    except OSError as e:
-        logger.warning("Failed to write stats: %s", e)
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+    _atomic_write_with_retry(OUTPUT_FILE, stats)
 
 
 def _clean_git_locks() -> None:
@@ -959,7 +1002,8 @@ def run_loop(interval: int = 60, dry_run: bool = False) -> None:
             git_commit_and_push(dry_run=dry_run)
 
         except Exception as e:
-            logger.error("Publish error: %s", e)
+            import traceback
+            logger.error(f"Publish error: {e}\n{traceback.format_exc()}")
 
         time.sleep(interval)
 
