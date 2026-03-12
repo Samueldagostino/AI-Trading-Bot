@@ -57,6 +57,10 @@ HEARTBEAT_FILE = LOGS_DIR / "heartbeat_state.json"
 # Account size for percentage calculation (not exposed)
 _ACCOUNT_SIZE = 50_000.0
 
+# Max age (seconds) before data is considered stale and status goes OFFLINE.
+# If log files haven't been updated in this window, the bot isn't running.
+_STALE_DATA_THRESHOLD_SEC = 300  # 5 minutes
+
 # Track publisher uptime for heartbeat
 _PUBLISHER_START = datetime.now(timezone.utc)
 
@@ -126,17 +130,30 @@ def _build_heartbeat(status: dict, candles) -> dict:
         uptime_pct = round(hb_data.get("uptime_pct", 0.0), 1)
         quality = hb_data.get("connection_quality", "unknown")
     else:
-        # No health monitor -- derive from publisher activity
-        last_seen = now  # We're publishing right now, so we're alive
-        age_sec = 0.0
+        # No health monitor -- derive from log file freshness, NOT publisher time.
+        # Old bug: used `now` as last_seen, which always showed "just connected"
+        # even when the bot hadn't run in days.
+        state_file = LOGS_DIR / "paper_trading_state.json"
+        try:
+            if state_file.exists():
+                mtime = state_file.stat().st_mtime
+                last_seen = datetime.fromtimestamp(mtime, tz=timezone.utc)
+                age_sec = (now - last_seen).total_seconds()
+            else:
+                last_seen = _PUBLISHER_START
+                age_sec = (now - _PUBLISHER_START).total_seconds()
+        except OSError:
+            last_seen = _PUBLISHER_START
+            age_sec = (now - _PUBLISHER_START).total_seconds()
+
         uptime_start = _PUBLISHER_START
         uptime_total = (now - uptime_start).total_seconds()
         uptime_pct = 100.0 if uptime_total > 0 else 0.0
 
         # Derive connection quality from data freshness
-        if status and candles:
+        if age_sec < _STALE_DATA_THRESHOLD_SEC and status and candles:
             quality = "good"
-        elif status:
+        elif age_sec < _STALE_DATA_THRESHOLD_SEC * 2 and status:
             quality = "fair"
         else:
             quality = "poor"
@@ -203,8 +220,25 @@ def build_sanitized_stats() -> dict:
     safety = _read_json_safe(LOGS_DIR / "safety_state.json")
     modifiers = _read_json_safe(LOGS_DIR / "modifier_state.json")
 
-    # Determine system status
-    is_live = bool(status and status.get("trade_count", 0) >= 0 and candles)
+    # Determine system status — requires fresh data, not just file existence.
+    # Old bug: trade_count >= 0 is always True, so stale files showed "LIVE".
+    is_live = False
+    if status and candles:
+        # Check that the source log files were written recently
+        state_file = LOGS_DIR / "paper_trading_state.json"
+        candle_file = LOGS_DIR / "candle_buffer.json"
+        now_ts = time.time()
+        try:
+            state_age = now_ts - state_file.stat().st_mtime if state_file.exists() else float("inf")
+            candle_age = now_ts - candle_file.stat().st_mtime if candle_file.exists() else float("inf")
+            data_age = min(state_age, candle_age)
+            is_live = data_age < _STALE_DATA_THRESHOLD_SEC
+        except OSError:
+            is_live = False
+        if not is_live:
+            logger.info("Data stale (%.0fs old, threshold %ds) — reporting OFFLINE",
+                        data_age if data_age != float("inf") else -1,
+                        _STALE_DATA_THRESHOLD_SEC)
 
     # Count approved/rejected
     approved = sum(1 for d in decisions if d.get("decision") == "APPROVED")

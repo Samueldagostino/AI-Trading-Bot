@@ -1,0 +1,31 @@
+[Unit]
+Description=NQ Trading Bot — Paper Trading via IBKR TWS
+Documentation=https://github.com/samueldagostino/AI-Trading-Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/AI-Trading-Bot/nq_bot_vscode
+ExecStart=/usr/bin/python3 scripts/run_paper_live.py --log-level INFO
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/%i/AI-Trading-Bot/nq_bot_vscode/.env
+
+# Graceful shutdown (SIGINT → bot saves state)
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+# Logging to journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nq-trading-bot
+
+[Install]
+WantedBy=multi-user.target
