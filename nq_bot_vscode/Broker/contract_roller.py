@@ -1,6 +1,10 @@
 """
+MNQ Contract Rollover Manager
+Automatically switches from the expiring MNQ contract to the next front month
+before expiry. Rolls 5 trading days before expiration.
+
+MNQ expiry cycle: H (March), M (June), U (September), Z (December)
 CME Micro Futures Contract Rollover Manager
-=============================================
 Automatically switches from the expiring contract to the next front month
 before expiry. Rolls 5 trading days before expiration.
 
@@ -180,6 +184,8 @@ def third_friday(year: int, month: int) -> date:
 
 class ContractRoller:
     """
+    Manages automatic MNQ contract rollover.
+
     Manages automatic contract rollover for CME Micro futures.
 
     Supports MNQ, MES, MYM, M2K and any symbol using the HMUZ quarterly cycle.
@@ -187,6 +193,7 @@ class ContractRoller:
     Uses the H→M→U→Z quarterly cycle with year rollover on Z→H.
     """
 
+    def __init__(self):
     def __init__(self, instrument: str = "MNQ"):
         self._instrument = instrument.upper()
         self._current_symbol: Optional[str] = None

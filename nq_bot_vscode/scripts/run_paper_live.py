@@ -661,6 +661,8 @@ class PaperLiveRunner:
         try:
             ib = self._ibkr_client._ib  # Access underlying ib_insync.IB instance
             contract = self._ibkr_client._contract  # Use already-qualified contract (has conId + localSymbol)
+            contract = self._ibkr_client.contract  # Use already-qualified contract (has conId + localSymbol)
+            contract = self._ibkr_client._contract  # Use already-qualified contract (has conId + localSymbol)
 
             for tf_name, tf_cfg in HISTORICAL_TF_CONFIG.items():
                 try:
