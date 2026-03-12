@@ -1,12 +1,11 @@
 """
-IBKR Order Manager — 4-Contract Scale-Out Execution
+IBKR Order Manager — 2-Contract Scale-Out Execution
 ======================================================
-Manages the full order lifecycle for the MNQ 4-contract strategy via TWS API.
+Manages the full order lifecycle for the MNQ 2-contract strategy via TWS API.
 
 Architecture:
-  C1 (1): Canary — 5-bar time exit
-  C2 (1): Structural target + delayed breakeven
-  C3 (2): ATR trail runner (delayed entry)
+  C1: Fixed target exit (limit order at c1_target)
+  C2: Trailing stop runner (dynamically updated stop order)
 
 Order flow:
   1. Signal APPROVED -> submit_entry()
@@ -49,13 +48,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 # CONSTANTS — SAFETY LIMITS (NOT CONFIGURABLE)
 # ═══════════════════════════════════════════════════════════════
-MAX_CONTRACTS = 4                   # ABSOLUTE MAXIMUM — no exceptions (v3: 4-contract scale-out)
-MNQ_POINT_VALUE = 2.0               # $2.00 per point per contract
-MNQ_TICK_SIZE = 0.25                # Minimum price increment
-ENTRY_CHASE_TICKS = 2               # 2 ticks = 0.50 pts chase allowance
-ENTRY_TIMEOUT_SECONDS = 5.0         # Cancel entry if not filled
-ORDER_WATCHDOG_SECONDS = 30.0       # Cancel any order stuck > 30s
-DAILY_LOSS_LIMIT = 500.0            # Reject new entries if daily PnL <= -$500
+MAX_CONTRACTS = 2                   # ABSOLUTE MAXIMUM — no exceptions
 MNQ_POINT_VALUE = 2.0               # $2.00 per point per contract (default, overridden by instrument)
 MNQ_TICK_SIZE = 0.25                # Minimum price increment (default, overridden by instrument)
 ENTRY_CHASE_TICKS = 2               # 2 ticks chase allowance
@@ -94,16 +87,12 @@ class OrderManager:
     and enforces all safety rails before every order submission.
     """
 
-    def __init__(self, ib_client, config=None, log_dir: str = "logs"):
     def __init__(self, ib_client, config=None, log_dir: str = "logs", instrument: str = "MNQ"):
         """
         Args:
             ib_client: IBKRClient instance (from Broker.ibkr_client)
             config: Optional config dict with overrides
             log_dir: Directory for order/trade logs
-        """
-        self.ib = ib_client._ib             # ib_insync IB instance
-        self.contract = ib_client._contract  # Qualified MNQ contract
             instrument: Instrument symbol for point value / tick size lookup
         """
         self.ib = ib_client._ib             # ib_insync IB instance
@@ -143,17 +132,6 @@ class OrderManager:
 
         # Order-in-flight guard
         self._order_in_flight: bool = False
-
-        # Market halt detection
-        self._market_halt_suspected: bool = False
-        self._market_halt_resume_time: float = 0.0
-
-        # EOD state
-        self._eod_closed: bool = False
-
-        # Watchdog timers
-        self._watchdog_timers: Dict[int, threading.Timer] = {}
-
 
         # Market halt detection
         self._market_halt_suspected: bool = False
@@ -344,39 +322,6 @@ class OrderManager:
     # ENTRY
     # ══════════════════════════════════════════════════════════
 
-
-    # ══════════════════════════════════════════════════════════
-    # EOD FORCED CLOSE
-    # ══════════════════════════════════════════════════════════
-
-    async def check_eod(self) -> None:
-        """Check end-of-day times and force close if needed."""
-        et_now = datetime.now(ET_TZ)
-        h, m = et_now.hour, et_now.minute
-
-        warn_h, warn_m = map(int, EOD_WARNING_TIME.split(":"))
-        close_h, close_m = map(int, EOD_CLOSE_TIME.split(":"))
-
-        # Warning
-        if (h == warn_h and m == warn_m):
-            logger.warning("EOD_CLOSE_APPROACHING — positions must be flat by %s ET", EOD_CLOSE_TIME)
-            self._log_event("EOD_CLOSE_APPROACHING")
-
-        # Force close
-        if (h > close_h or (h == close_h and m >= close_m)):
-            if self._active_positions and not self._eod_closed:
-                logger.critical("EOD FORCED CLOSE at %02d:%02d ET", h, m)
-                await self.close_all_positions(reason="EOD_FORCED_CLOSE")
-                self._eod_closed = True
-
-    def reset_eod(self) -> None:
-        """Reset EOD state for new trading session."""
-        self._eod_closed = False
-
-    # ══════════════════════════════════════════════════════════
-    # ENTRY
-    # ══════════════════════════════════════════════════════════
-
     async def submit_entry(self, signal: dict) -> Optional[dict]:
         """
         Submit a new trade based on an approved signal.
@@ -434,7 +379,6 @@ class OrderManager:
         num_contracts = min(num_contracts, MAX_CONTRACTS)
 
         # Calculate limit price with chase
-        chase = ENTRY_CHASE_TICKS * MNQ_TICK_SIZE  # 0.50 pts
         chase = ENTRY_CHASE_TICKS * self._tick_size  # 0.50 pts
         if action == "BUY":
             limit_price = round(entry_price + chase, 2)
@@ -658,61 +602,6 @@ class OrderManager:
         """Place C1 take-profit limit order for 1 contract."""
         from ib_insync import LimitOrder
 
-
-            self._order_in_flight = False
-            return trade
-
-        except Exception as e:
-            self._order_in_flight = False
-            logger.error("Entry submission error: %s", e)
-            self._log_event("ORDER_ERROR", trade_id=trade_id,
-                            details=str(e))
-            return None
-
-    # ══════════════════════════════════════════════════════════
-    # STOP ORDER PLACEMENT
-    # ══════════════════════════════════════════════════════════
-
-    async def _place_stop_order(self, trade: dict, stop_price: float, quantity: int) -> bool:
-        """Place stop-loss order. Returns True on success."""
-        from ib_insync import StopOrder
-
-        reverse_action = trade["reverse_action"]
-        try:
-            stop_order = StopOrder(reverse_action, quantity, round(stop_price, 2))
-            stop_order.tif = "GTC"
-            stop_trade = self.ib.placeOrder(self.contract, stop_order)
-            trade["stop_order_id"] = stop_trade.order.orderId
-            trade["stop_status"] = "WORKING"
-            trade["stop_qty"] = quantity
-
-            self._log_event("STOP_PLACED", trade_id=trade["trade_id"],
-                            price=stop_price, quantity=quantity,
-                            order_id=stop_trade.order.orderId)
-            return True
-        except Exception as e:
-            logger.error("Stop order placement failed: %s", e)
-
-            # Retry with 2 points wider
-            try:
-                direction = trade["direction"]
-                wider_stop = stop_price - 2.0 if direction == "LONG" else stop_price + 2.0
-                stop_order = StopOrder(reverse_action, quantity, round(wider_stop, 2))
-                stop_order.tif = "GTC"
-                stop_trade = self.ib.placeOrder(self.contract, stop_order)
-                trade["stop_order_id"] = stop_trade.order.orderId
-                trade["stop_status"] = "WORKING"
-                trade["stop_qty"] = quantity
-                logger.info("Stop placed on retry with wider price: %.2f", wider_stop)
-                return True
-            except Exception as e2:
-                logger.critical("Stop retry also failed: %s — MUST FLATTEN", e2)
-                return False
-
-    async def _place_c1_target(self, trade: dict) -> bool:
-        """Place C1 take-profit limit order for 1 contract."""
-        from ib_insync import LimitOrder
-
         reverse_action = trade["reverse_action"]
         c1_target = trade["c1_target"]
 
@@ -773,9 +662,6 @@ class OrderManager:
 
         # Calculate C1 PnL
         if direction == "LONG":
-            c1_pnl = (fill_price - entry_price) * MNQ_POINT_VALUE
-        else:
-            c1_pnl = (entry_price - fill_price) * MNQ_POINT_VALUE
             c1_pnl = (fill_price - entry_price) * self._point_value
         else:
             c1_pnl = (entry_price - fill_price) * self._point_value
@@ -909,10 +795,6 @@ class OrderManager:
         stop_order_id = trade.get("stop_order_id")
         reverse_action = trade["reverse_action"]
 
-
-        stop_order_id = trade.get("stop_order_id")
-        reverse_action = trade["reverse_action"]
-
         if stop_order_id is None:
             return False
 
@@ -962,9 +844,6 @@ class OrderManager:
 
         # Calculate C2 PnL
         if direction == "LONG":
-            c2_pnl = (exit_price - entry_price) * MNQ_POINT_VALUE
-        else:
-            c2_pnl = (entry_price - exit_price) * MNQ_POINT_VALUE
             c2_pnl = (exit_price - entry_price) * self._point_value
         else:
             c2_pnl = (entry_price - exit_price) * self._point_value
@@ -1013,9 +892,6 @@ class OrderManager:
 
         # Calculate PnL for each unfilled leg
         if direction == "LONG":
-            pnl_per = (fill_price - entry_price) * MNQ_POINT_VALUE
-        else:
-            pnl_per = (entry_price - fill_price) * MNQ_POINT_VALUE
             pnl_per = (fill_price - entry_price) * self._point_value
         else:
             pnl_per = (entry_price - fill_price) * self._point_value
@@ -1107,10 +983,6 @@ class OrderManager:
         Emergency close all open positions.
         Cancels all pending orders, submits market orders to flatten.
         """
-        """
-        Emergency close all open positions.
-        Cancels all pending orders, submits market orders to flatten.
-        """
         from ib_insync import MarketOrder
 
         result = {"reason": reason, "trades_closed": 0, "orders_cancelled": 0}
@@ -1120,51 +992,6 @@ class OrderManager:
 
         # Cancel all pending orders
         for ib_trade in self.ib.openTrades():
-            try:
-                self.ib.cancelOrder(ib_trade.order)
-                result["orders_cancelled"] += 1
-            except Exception as e:
-                logger.error("Failed to cancel order %d: %s", ib_trade.order.orderId, e)
-
-        # Market close all positions
-        for trade_id, trade in list(self._active_positions.items()):
-            try:
-                reverse_action = trade["reverse_action"]
-                remaining = trade["contracts"]
-
-                # Determine remaining quantity
-                if trade["c1_status"] == "FILLED":
-                    remaining -= 1
-                if trade["c2_status"] == "FILLED":
-                    remaining -= 1
-
-                if remaining > 0:
-                    mkt_order = MarketOrder(reverse_action, remaining)
-                    self.ib.placeOrder(self.contract, mkt_order)
-                    result["trades_closed"] += 1
-
-                    # Get approximate current price for PnL
-                    ticker = self.ib.reqMktData(self.contract, '', False, False)
-                    self.ib.sleep(0.5)
-                    current_price = ticker.last if ticker.last and ticker.last > 0 else trade["entry_price"]
-                    try:
-                        self.ib.cancelMktData(self.contract)
-                    except Exception:
-                        pass
-
-                    # Close trade legs
-                    self._finalize_emergency_close(trade, current_price, reason)
-
-            except Exception as e:
-                logger.error("Failed to close trade %s: %s", trade_id, e)
-
-        self._order_in_flight = False
-        return result
-
-    async def _emergency_flatten_trade(self, trade: dict, reason: str) -> None:
-        """Emergency flatten a single trade."""
-        from ib_insync import MarketOrder
-
             try:
                 self.ib.cancelOrder(ib_trade.order)
                 result["orders_cancelled"] += 1
@@ -1229,24 +1056,6 @@ class OrderManager:
         entry_price = trade["entry_price"]
 
         if direction == "LONG":
-            pnl_per = (price - entry_price) * MNQ_POINT_VALUE
-        else:
-            pnl_per = (entry_price - price) * MNQ_POINT_VALUE
-
-
-            self._log_event(reason, trade_id=trade["trade_id"],
-                            direction=trade["direction"],
-                            quantity=remaining)
-
-        except Exception as e:
-            logger.critical("Emergency flatten failed for %s: %s", trade["trade_id"], e)
-
-    def _finalize_emergency_close(self, trade: dict, price: float, reason: str) -> None:
-        """Finalize trade on emergency close."""
-        direction = trade["direction"]
-        entry_price = trade["entry_price"]
-
-        if direction == "LONG":
             pnl_per = (price - entry_price) * self._point_value
         else:
             pnl_per = (entry_price - price) * self._point_value
@@ -1295,91 +1104,6 @@ class OrderManager:
                 hold_seconds = int((datetime.now(timezone.utc) - entry_time).total_seconds())
             except (ValueError, TypeError):
                 hold_seconds = 0
-
-            result.append({
-                "id": trade_id,
-                "direction": trade["direction"],
-                "contracts": trade["contracts"],
-                "entry_price": trade["entry_price"],
-                "entry_time": trade["entry_time"],
-                "current_price": self._last_bar_close,
-                "unrealized_pnl": self._calc_unrealized_pnl(trade),
-                "c1_status": trade["c1_status"],
-                "c1_target": trade["c1_target"],
-                "c2_trail_stop": trade.get("c2_trail_stop", 0),
-                "modifier_total": trade["modifier_total"],
-                "hold_duration_seconds": hold_seconds,
-            })
-        return result
-
-    def get_order_log(self) -> list:
-        """Return all order events."""
-        return list(self._order_log)
-
-    def get_trade_history(self) -> list:
-        """Return completed trade history."""
-        return list(self._trade_history)
-
-    def get_trade_metrics(self) -> dict:
-        """Return aggregate trade metrics for dashboard."""
-        wins = sum(1 for t in self._trade_history if t.get("total_pnl", 0) > 0)
-        losses = sum(1 for t in self._trade_history if t.get("total_pnl", 0) < 0)
-        total = len(self._trade_history)
-
-        return {
-            "total_trades": total,
-            "wins": wins,
-            "losses": losses,
-            "win_rate": (wins / total * 100) if total > 0 else 0.0,
-            "daily_pnl": round(self._daily_pnl, 2),
-            "total_pnl": round(sum(t.get("total_pnl", 0) for t in self._trade_history), 2),
-            "current_equity": round(self._current_equity, 2),
-            "peak_equity": round(self._peak_equity, 2),
-            "consecutive_losses": self._consecutive_losses,
-            "avg_slippage": round(self._slippage_total / max(1, self._slippage_count), 2),
-            "active_positions": len(self._active_positions),
-            "order_in_flight": self._order_in_flight,
-        }
-
-    # ══════════════════════════════════════════════════════════
-    # IBKR EVENT CALLBACKS
-    # ══════════════════════════════════════════════════════════
-
-    def _on_order_status(self, trade) -> None:
-        """Handle IBKR order status changes."""
-        status = trade.orderStatus.status
-        order_id = trade.order.orderId
-        filled = int(trade.orderStatus.filled)
-        avg_fill = trade.orderStatus.avgFillPrice
-
-        logger.debug("Order status: id=%d status=%s filled=%d avg=%.2f",
-                      order_id, status, filled, avg_fill)
-
-        if status == "Filled":
-            # Check if this is a stop fill for any active trade
-            for t_id, t in list(self._active_positions.items()):
-                if t.get("stop_order_id") == order_id:
-                    self._handle_stop_fill(t, avg_fill, filled)
-                    return
-                if t.get("c1_target_order_id") == order_id:
-                    self._handle_c1_fill(t, avg_fill)
-                    return
-
-    def _on_execution(self, trade, fill) -> None:
-        """Handle IBKR execution details — deduplicate by execId."""
-        exec_id = fill.execution.execId
-        if exec_id in self._processed_exec_ids:
-            logger.debug("Duplicate execution ignored: %s", exec_id)
-            return
-        self._processed_exec_ids.add(exec_id)
-
-        order_id = fill.execution.orderId
-        fill_price = fill.execution.price
-        filled_qty = int(fill.execution.shares)
-
-        logger.info("Execution: orderId=%d price=%.2f qty=%d execId=%s",
-                     order_id, fill_price, filled_qty, exec_id)
-
 
             result.append({
                 "id": trade_id,
@@ -1588,9 +1312,6 @@ class OrderManager:
             remaining += 1
 
         if direction == "LONG":
-            pnl = (current - entry_price) * MNQ_POINT_VALUE * remaining
-        else:
-            pnl = (entry_price - current) * MNQ_POINT_VALUE * remaining
             pnl = (current - entry_price) * self._point_value * remaining
         else:
             pnl = (entry_price - current) * self._point_value * remaining
@@ -1608,9 +1329,6 @@ class OrderManager:
             logger.error("PNL_SIGN_ERROR: direction=%s entry=%.2f exit=%.2f pnl=%.2f — recalculating",
                          direction, entry, exit, pnl)
             if direction == "LONG":
-                return round((exit - entry) * MNQ_POINT_VALUE, 2)
-            else:
-                return round((entry - exit) * MNQ_POINT_VALUE, 2)
                 return round((exit - entry) * self._point_value, 2)
             else:
                 return round((entry - exit) * self._point_value, 2)
@@ -1619,9 +1337,6 @@ class OrderManager:
             logger.error("PNL_SIGN_ERROR: direction=%s entry=%.2f exit=%.2f pnl=%.2f — recalculating",
                          direction, entry, exit, pnl)
             if direction == "LONG":
-                return round((exit - entry) * MNQ_POINT_VALUE, 2)
-            else:
-                return round((entry - exit) * MNQ_POINT_VALUE, 2)
                 return round((exit - entry) * self._point_value, 2)
             else:
                 return round((entry - exit) * self._point_value, 2)
