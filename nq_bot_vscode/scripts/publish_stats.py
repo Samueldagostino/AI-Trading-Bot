@@ -53,6 +53,8 @@ LOGS_DIR = PROJECT_DIR / "logs"
 DOCS_DATA_DIR = ROOT_DIR / "docs" / "data"
 OUTPUT_FILE = DOCS_DATA_DIR / "live_stats.json"
 HEARTBEAT_FILE = LOGS_DIR / "heartbeat_state.json"
+PAPER_TRADES_FILE = LOGS_DIR / "paper_trades.json"
+ACTIVE_TRADES_FILE = LOGS_DIR / "active_trades.json"
 
 # Account size for percentage calculation (not exposed)
 _ACCOUNT_SIZE = 50_000.0
@@ -191,72 +193,155 @@ def _build_bot_state(status: dict, decisions: list) -> dict:
     }
 
 
-def _build_trade_log() -> tuple[list, float]:
+def _build_session_summary(status: dict) -> dict:
     """
-    Build today's trade log from paper_trades.json.
-    Returns (trade_log_list, session_pnl_dollars).
-
-    Each trade entry contains:
-      - time: HH:MM:SS ET
-      - direction: LONG / SHORT
-      - entry_price: float
-      - c1_pnl: float (dollar PnL for C1 leg)
-      - c1_reason: str (exit reason for C1)
-      - c2_pnl: float (dollar PnL for C2 leg)
-      - c2_reason: str (exit reason for C2)
-      - total_pnl: float (total dollar PnL for the trade)
-      - signal_source: str (sweep / signal / confluence)
+    Build today's session summary from paper_trading_state.json.
+    Uses daily_pnls dict + aggregate stats.
+    Exposes PnL as PERCENTAGE only (never raw dollars).
     """
-    trades_file = LOGS_DIR / "paper_trades.json"
-    raw_trades = _read_json_safe(trades_file, default=[])
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    if not isinstance(raw_trades, list):
-        return [], 0.0
+    daily_pnls = status.get("daily_pnls", {}) if status else {}
+    today_pnl = daily_pnls.get(today_str, 0.0)
+    today_pnl_pct = round((today_pnl / _ACCOUNT_SIZE) * 100, 3) if _ACCOUNT_SIZE > 0 else 0.0
 
-    from zoneinfo import ZoneInfo
+    # Read today's trades from paper_trades.json to get session-specific counts
+    all_trades = _read_jsonl_safe(PAPER_TRADES_FILE, limit=500)
+    today_trades = [
+        t for t in all_trades
+        if t.get("timestamp", "").startswith(today_str)
+    ]
+    session_wins = sum(1 for t in today_trades if t.get("pnl", 0) > 0)
+    session_losses = sum(1 for t in today_trades if t.get("pnl", 0) <= 0)
+    session_count = len(today_trades)
+    session_wr = round((session_wins / session_count) * 100, 1) if session_count > 0 else 0.0
 
-    today_et = datetime.now(ZoneInfo("America/New_York")).date()
+    # Session profit factor
+    gross_profit = sum(t["pnl"] for t in today_trades if t.get("pnl", 0) > 0)
+    gross_loss = abs(sum(t["pnl"] for t in today_trades if t.get("pnl", 0) < 0))
+    session_pf = round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0.0
+
+    return {
+        "session_date": today_str,
+        "session_pnl_pct": today_pnl_pct,
+        "session_trades": session_count,
+        "session_wins": session_wins,
+        "session_losses": session_losses,
+        "session_win_rate": session_wr,
+        "session_pf": session_pf,
+    }
+
+
+def _build_trade_log() -> list:
+    """
+    Build sanitized trade log array from paper_trades.json.
+    Returns today's trades with per-leg PnL as POINTS (not dollars).
+    Entry/exit prices ARE exposed (market data is publicly available).
+    """
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    all_trades = _read_jsonl_safe(PAPER_TRADES_FILE, limit=500)
+    today_trades = [
+        t for t in all_trades
+        if t.get("timestamp", "").startswith(today_str)
+    ]
 
     trade_log = []
-    session_pnl = 0.0
+    for idx, t in enumerate(today_trades, start=1):
+        direction = (t.get("direction") or "unknown").upper()
+        entry = t.get("entry_price", 0.0)
+        pnl = t.get("pnl", 0.0)
+        contracts = t.get("contracts", 2)
+        # Point value for MNQ is $2/point
+        point_value = 2.0
+        total_points = round(pnl / (contracts * point_value), 2) if contracts > 0 and point_value > 0 else 0.0
 
-    for t in raw_trades:
-        # Filter to today's trades only
+        # Per-leg breakdown (C1 and C2 always present, C3/C4 may be absent)
+        c1_pnl = t.get("c1_pnl", 0.0)
+        c2_pnl = t.get("c2_pnl", 0.0)
+        c3_pnl = t.get("c3_pnl", 0.0)
+        c4_pnl = t.get("c4_pnl", 0.0)
+
+        def _leg(pnl_val, has_leg):
+            if not has_leg:
+                return None
+            pts = round(pnl_val / point_value, 2) if point_value > 0 else 0.0
+            return {
+                "points": pts,
+                "pnl_pct": round((pnl_val / _ACCOUNT_SIZE) * 100, 4) if _ACCOUNT_SIZE > 0 else 0.0,
+                "status": "closed",
+            }
+
+        legs = {
+            "C1": _leg(c1_pnl, True),
+            "C2": _leg(c2_pnl, True),
+        }
+        # Only include C3/C4 if they had activity
+        if c3_pnl != 0.0:
+            legs["C3"] = _leg(c3_pnl, True)
+        if c4_pnl != 0.0:
+            legs["C4"] = _leg(c4_pnl, True)
+
+        # Format time as ET
         ts_str = t.get("timestamp", "")
-        if not ts_str:
-            continue
-
-        try:
-            dt = datetime.fromisoformat(ts_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            et = dt.astimezone(ZoneInfo("America/New_York"))
-        except (ValueError, TypeError):
-            continue
-
-        if et.date() != today_et:
-            continue
-
-        total_pnl = t.get("total_pnl", 0.0)
-        session_pnl += total_pnl
-
-        direction = t.get("direction", "").upper()
-        if direction not in ("LONG", "SHORT"):
-            direction = direction or "UNKNOWN"
+        time_et = ""
+        if ts_str:
+            try:
+                from zoneinfo import ZoneInfo
+                dt = datetime.fromisoformat(ts_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                et = dt.astimezone(ZoneInfo("America/New_York"))
+                time_et = et.strftime("%H:%M:%S ET")
+            except (ValueError, TypeError):
+                time_et = ""
 
         trade_log.append({
-            "time": et.strftime("%H:%M:%S ET"),
+            "trade_id": idx,
+            "timestamp": time_et,
             "direction": direction,
-            "entry_price": round(t.get("entry_price", 0.0), 2),
-            "c1_pnl": round(t.get("c1_pnl", 0.0), 2),
-            "c1_reason": t.get("c1_reason", ""),
-            "c2_pnl": round(t.get("c2_pnl", 0.0), 2),
-            "c2_reason": t.get("c2_reason", ""),
-            "total_pnl": round(total_pnl, 2),
-            "signal_source": t.get("signal_source", "signal"),
+            "entry_price": round(entry, 2),
+            "legs": legs,
+            "total_points": total_points,
+            "total_pnl_pct": round((pnl / _ACCOUNT_SIZE) * 100, 4) if _ACCOUNT_SIZE > 0 else 0.0,
+            "result": "WIN" if pnl > 0 else "LOSS",
+            "regime": t.get("regime", ""),
         })
 
-    return trade_log, round(session_pnl, 2)
+    return trade_log
+
+
+def _build_open_position() -> dict | None:
+    """
+    Build open position info from active_trades.json.
+    Returns None if no position is open.
+    """
+    active = _read_json_safe(ACTIVE_TRADES_FILE, default=[])
+
+    # active_trades.json is an array; if empty, no position
+    if not active or (isinstance(active, list) and len(active) == 0):
+        # Also check active_trade.json (singular, used by run_tws.py)
+        active_single = _read_json_safe(LOGS_DIR / "active_trade.json")
+        if not active_single or not active_single.get("side"):
+            return None
+        # Convert single trade format
+        return {
+            "direction": active_single.get("side", "").upper(),
+            "entry_price": round(active_single.get("entry_price", 0.0), 2),
+            "legs_open": active_single.get("legs_open", 0),
+            "current_stop": round(active_single.get("stop_price", 0.0), 2),
+        }
+
+    # Array format from paper trading
+    if isinstance(active, list) and len(active) > 0:
+        pos = active[0]
+        return {
+            "direction": (pos.get("direction") or "").upper(),
+            "entry_price": round(pos.get("entry_price", 0.0), 2),
+            "legs_open": pos.get("legs_open", 0),
+            "current_stop": round(pos.get("stop_price", 0.0), 2),
+        }
+
+    return None
 
 
 def build_sanitized_stats() -> dict:
@@ -357,9 +442,6 @@ def build_sanitized_stats() -> dict:
         }
         recent_decisions.append(sanitized)
 
-    # Build trade log and session PnL
-    trade_log, session_pnl_dollars = _build_trade_log()
-
     # Build heartbeat and state (backward compatible -- new fields)
     heartbeat = _build_heartbeat(status, candles)
     bot_state = _build_bot_state(status, decisions)
@@ -403,9 +485,10 @@ def build_sanitized_stats() -> dict:
         # Trade chart data (publicly available market prices only)
         "active_trade": active_trade,
         "candle_buffer": chart_candles,
-        # Session PnL and trade log
-        "session_pnl_dollars": session_pnl_dollars,
-        "trade_log": trade_log,
+        # Session PnL, trade log, and open position (PROMPT 1 additions)
+        "session_summary": _build_session_summary(status),
+        "trade_log": _build_trade_log(),
+        "open_position": _build_open_position(),
     }
 
 
