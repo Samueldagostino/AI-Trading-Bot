@@ -84,8 +84,8 @@ ET = ZoneInfo("America/New_York")
 MIN_RR_RATIO = MIN_RR_OVERRIDE if MIN_RR_OVERRIDE is not None else 1.5
 
 # ── Slippage & Commission Model ─────────────────────────────────
-SLIPPAGE_RTH_PTS = 0.75   # Per fill, RTH (conservative — real avg ~0.50)
-SLIPPAGE_ETH_PTS = 1.25   # Per fill, ETH (conservative — real avg ~1.00)
+SLIPPAGE_RTH_PTS = 1.25   # Per fill, RTH (HARDENED — real avg ~0.50, we punish harder)
+SLIPPAGE_ETH_PTS = 2.00   # Per fill, ETH (HARDENED — real avg ~1.00, we punish harder)
 COMMISSION_PER_CONTRACT_PER_SIDE = 1.50  # $1.50 entry + $1.50 exit = $3.00/contract (conservative — real is $1.29)
 POINT_VALUE = 2.00         # MNQ $2/point
 

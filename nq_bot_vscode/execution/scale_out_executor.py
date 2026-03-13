@@ -446,17 +446,17 @@ class ScaleOutExecutor:
         from zoneinfo import ZoneInfo
         from datetime import time as dt_time
 
-        # Conservative slippage: 0.75pt RTH, 1.25pt ETH (real avg is ~0.96pt)
-        # We exaggerate to stress-test
+        # HARDENED slippage: 1.25pt RTH, 2.00pt ETH (real avg is ~0.96pt)
+        # Deliberately punishing to prove the system survives worst-case friction
         if timestamp:
             et = timestamp.astimezone(ZoneInfo("America/New_York"))
             is_rth = dt_time(9, 30) <= et.time() < dt_time(16, 0)
         else:
             is_rth = True
-        base_slip = 0.75 if is_rth else 1.25
-        # Add random component: base ± 0.25
-        slippage = base_slip + random.choice([-0.25, 0, 0.25, 0.50])
-        slippage = max(0.25, slippage)  # Minimum 1 tick slippage always
+        base_slip = 1.25 if is_rth else 2.00
+        # Add random component: base + [0, 0.25, 0.50, 0.75]
+        slippage = base_slip + random.choice([0, 0.25, 0.50, 0.75])
+        slippage = max(0.50, slippage)  # Minimum 2 ticks slippage always
 
         if trade.direction == "long":
             fill_price = price + slippage
@@ -780,9 +780,9 @@ class ScaleOutExecutor:
                     is_rth = dt_time(9, 30) <= et.time() < dt_time(16, 0)
                 else:
                     is_rth = True
-                base_slip = 0.75 if is_rth else 1.25
-                c3_slippage = base_slip + random.choice([-0.25, 0, 0.25, 0.50])
-                c3_slippage = max(0.25, c3_slippage)
+                base_slip = 1.25 if is_rth else 2.00
+                c3_slippage = base_slip + random.choice([0, 0.25, 0.50, 0.75])
+                c3_slippage = max(0.50, c3_slippage)
 
                 if direction == "long":
                     c3_fill_price = round(exit_price + c3_slippage, 2)
@@ -1004,9 +1004,9 @@ class ScaleOutExecutor:
             is_rth = dt_time(9, 30) <= et.time() < dt_time(16, 0)
         else:
             is_rth = True
-        exit_slip = 0.75 if is_rth else 1.25
-        exit_slip += random.choice([-0.25, 0, 0.25])
-        exit_slip = max(0.25, exit_slip)
+        exit_slip = 1.25 if is_rth else 2.00
+        exit_slip += random.choice([0, 0.25, 0.50, 0.75])
+        exit_slip = max(0.50, exit_slip)
 
         # Slippage is adverse: longs get worse exit, shorts get worse exit
         if direction == "long":

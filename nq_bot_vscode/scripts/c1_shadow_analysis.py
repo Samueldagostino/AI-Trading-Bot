@@ -28,16 +28,16 @@ COMMISSION_PER_CONTRACT_PER_SIDE = 1.50  # Conservative (real is $1.29)
 COMMISSION_RT = COMMISSION_PER_CONTRACT_PER_SIDE * 2  # $3.00 round-trip for 1 contract
 
 def get_slippage_pts(timestamp_str):
-    """Simplified slippage: 0.75 RTH, 1.25 ETH (conservative)."""
+    """Simplified slippage: 1.25 RTH, 2.00 ETH (HARDENED)."""
     # Parse hour from ISO timestamp
     try:
         hour = int(timestamp_str[11:13])
         # RTH roughly 9:30-16:00 ET => hours 9-15
         if 9 <= hour <= 15:
-            return 0.75
+            return 1.25
     except:
         pass
-    return 1.25
+    return 2.00
 
 
 def main():

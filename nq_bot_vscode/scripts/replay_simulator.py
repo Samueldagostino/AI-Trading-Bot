@@ -327,13 +327,13 @@ class DynamicSlippageEngine:
         tier = self._session_tier(et_time)
 
         if tier == "rth":
-            base = 0.75   # Conservative (real avg ~0.50)
-            vol_addon_range = (0.25, 0.50)
-            cap = 1.75
+            base = 1.25   # HARDENED (real avg ~0.50)
+            vol_addon_range = (0.25, 0.75)
+            cap = 2.50
         else:  # eth
-            base = 1.25   # Conservative (real avg ~1.00)
-            vol_addon_range = (0.50, 0.75)
-            cap = 2.75
+            base = 2.00   # HARDENED (real avg ~1.00)
+            vol_addon_range = (0.50, 1.00)
+            cap = 3.50
 
         # Volume spike addon (>2.0x 20-bar avg)
         vol_addon = 0.0
@@ -1525,8 +1525,8 @@ class ReplaySimulator:
     # Constants for shadow simulation
     _SHADOW_COMMISSION_PER_SIDE = 1.50  # $1.50/contract/side (conservative — real is $1.29)
     _SHADOW_POINT_VALUE = 2.00          # MNQ $2/point
-    _SHADOW_SLIPPAGE_RTH = 0.75         # pts per fill, RTH (conservative — real avg ~0.50)
-    _SHADOW_SLIPPAGE_ETH = 1.25         # pts per fill, ETH (conservative — real avg ~1.00)
+    _SHADOW_SLIPPAGE_RTH = 1.25         # pts per fill, RTH (HARDENED — real avg ~0.50)
+    _SHADOW_SLIPPAGE_ETH = 2.00         # pts per fill, ETH (HARDENED — real avg ~1.00)
     _SHADOW_OVERFLOW_THRESHOLD = 50_000
 
     def _record_shadow_signal(
