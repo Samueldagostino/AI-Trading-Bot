@@ -104,7 +104,9 @@ SWEEP_FVG_MIN_GAP_ATR = 0.3               # Minimum FVG size (gap_size >= 0.3 ×
 # C3 (3 runner contracts) only contributes when C1 exits profitably.
 # If C1 hits stop → C3's PnL is zeroed (simulates C3 never entered).
 # This prevents the #1 account killer: full 5-contract stop losses.
-C3_DELAYED_ENTRY = True                    # Master toggle for delayed C3
+# C3_DELAYED_ENTRY is now read from config: self.config.scale_out.c3_delayed_entry_enabled
+# Kept as module-level alias for backwards compatibility in standalone test scripts
+C3_DELAYED_ENTRY = True                    # Default — overridden by config in CausalReplayEngine.__init__
 
 # ── Session Constants ───────────────────────────────────────────
 SESSION_BOUNDARY_HOUR = 18  # 6 PM ET = new session start
@@ -826,6 +828,10 @@ class CausalReplayEngine:
 
     def __init__(self, config: BotConfig):
         self.config = config
+        # Read C3 delayed entry toggle from config (overrides module constant)
+        self._c3_delayed_entry = getattr(
+            config.scale_out, 'c3_delayed_entry_enabled', C3_DELAYED_ENTRY
+        )
 
         # ── Core pipeline components (REAL modules) ──
         self.feature_engine = NQFeatureEngine(config)
@@ -1080,7 +1086,7 @@ class CausalReplayEngine:
             # (happens on Phase 1 stops via _finalize_trade(c3_blocked=True))
             executor_already_adjusted = result.get("c3_blocked", False)
 
-            if C3_DELAYED_ENTRY:
+            if self._c3_delayed_entry:
                 self._c3_stats["trades_total"] += 1
                 if c1_pnl <= 0:
                     # C1 lost → C3 never entered → zero its contribution
@@ -1798,7 +1804,7 @@ class CausalReplayEngine:
                     c3_pnl_original = result.get("c3_pnl", 0)
                     c3_blocked = False
                     executor_already_adjusted_2 = result.get("c3_blocked", False)
-                    if C3_DELAYED_ENTRY:
+                    if self._c3_delayed_entry:
                         self._c3_stats["trades_total"] += 1
                         if c1_pnl <= 0:
                             c3_blocked = True

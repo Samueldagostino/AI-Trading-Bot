@@ -683,7 +683,7 @@ class ScaleOutExecutor:
         cfg = self.scale_config
         BE_BUFFER_PTS = cfg.c2_breakeven_buffer_points
         c1_was_profitable = trade.c1_exit_profit_pts > 0
-        be_variant = getattr(cfg, "c2_be_variant", "D")
+        be_variant = getattr(cfg, "c2_be_variant", "B")
 
         if c1_was_profitable and be_variant != "B":
             # Variant D / A / C: immediate breakeven (original behavior)
@@ -883,10 +883,10 @@ class ScaleOutExecutor:
                 # C3: Pure ATR trailing stop (runner)
                 # Uses C3's own wider ATR multiplier — runner needs more room
                 self._update_atr_trail(trade, leg, cfg, direction,
-                                       atr_mult_override=getattr(cfg, 'c3_trailing_atr_multiplier', cfg.c2_trailing_atr_multiplier))
+                                       atr_mult_override=getattr(cfg, 'c3_trailing_atr_multiplier', 3.0))
 
                 # C3: Max target safety valve (C3's own wider cap)
-                c3_max_target = getattr(cfg, 'c3_max_target_points', cfg.c2_max_target_points)
+                c3_max_target = getattr(cfg, 'c3_max_target_points', 300.0)
                 points_from_entry = abs(price - leg.entry_price)
                 if points_from_entry >= c3_max_target:
                     self._close_leg(leg, round(price, 2), time, "c3_max_target", direction)
@@ -894,7 +894,7 @@ class ScaleOutExecutor:
                     continue
 
                 # C3: Time stop (C3's own longer runway)
-                c3_time_stop = getattr(cfg, 'c3_time_stop_minutes', cfg.c2_time_stop_minutes)
+                c3_time_stop = getattr(cfg, 'c3_time_stop_minutes', 240)
                 if trade.entry_time:
                     elapsed_minutes = (time - trade.entry_time).total_seconds() / 60
                     if elapsed_minutes >= c3_time_stop:

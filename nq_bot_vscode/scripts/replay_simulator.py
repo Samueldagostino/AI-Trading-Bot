@@ -1308,13 +1308,13 @@ class ReplaySimulator:
 
             points_from_entry = abs(price - trade.entry_price)
             # Use C3's own wider caps (falls back to C2's if not set)
-            c3_max_target = getattr(cfg, 'c3_max_target_points', cfg.c2_max_target_points)
+            c3_max_target = getattr(cfg, 'c3_max_target_points', 300.0)
             if points_from_entry >= c3_max_target:
                 return await patched_close_c2(trade, price, time, "c3_max_target")
 
             if trade.entry_time:
                 elapsed_minutes = (time - trade.entry_time).total_seconds() / 60
-                c3_time_stop = getattr(cfg, 'c3_time_stop_minutes', cfg.c2_time_stop_minutes)
+                c3_time_stop = getattr(cfg, 'c3_time_stop_minutes', 240)
                 if elapsed_minutes >= c3_time_stop:
                     return await patched_close_c2(trade, price, time, "c3_time_stop")
 

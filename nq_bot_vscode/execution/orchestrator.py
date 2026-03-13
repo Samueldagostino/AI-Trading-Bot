@@ -595,7 +595,7 @@ class IBKRLivePipeline:
             limit_price=params.limit_price,
             stop_loss=params.stop_loss,
             c1_take_profit=params.c1_take_profit,
-            c3_contracts=3,
+            c3_contracts=getattr(self._scale_config, 'c3_contracts', 3),
         )
 
         c1_record = records["c1"]
@@ -755,7 +755,7 @@ class IBKRLivePipeline:
             "c3_fill_price": (
                 c3_record.fill_price if c3_record.accepted else None
             ),
-            "c3_contracts": 3 if c3_record.accepted else 0,
+            "c3_contracts": getattr(self._scale_config, 'c3_contracts', 3) if c3_record.accepted else 0,
             "stop_loss": params.stop_loss,
             "c1_take_profit": params.c1_take_profit,
             "signal_score": entry_score,
@@ -942,7 +942,7 @@ class IBKRLivePipeline:
         # Variant B (delayed): skip immediate BE -- _apply_delayed_be() handles it
         # during SCALING once MFE >= 1.5× stop_distance.
         BE_BUFFER_PTS = self._scale_config.c2_breakeven_buffer_points
-        be_variant = getattr(self._scale_config, "c2_be_variant", "D")
+        be_variant = getattr(self._scale_config, "c2_be_variant", "B")
         c3_blocked = False
 
         if c1_was_profitable and be_variant != "B":
@@ -1118,8 +1118,7 @@ class IBKRLivePipeline:
 
                 # C3: Max target safety valve (150pts)
                 points_from_entry = abs(price - self._entry_price)
-                max_target_pts = getattr(self._scale_config, 'c3_max_target_points',
-                                         self._scale_config.c2_max_target_points)
+                max_target_pts = getattr(self._scale_config, 'c3_max_target_points', 300.0)
                 if points_from_entry >= max_target_pts:
                     self._close_leg(pos_id, round(price, 2), current_time,
                                     "c3_max_target")
@@ -1131,8 +1130,7 @@ class IBKRLivePipeline:
                     elapsed_min = (
                         (current_time - self._entry_time).total_seconds() / 60
                     )
-                    if elapsed_min >= getattr(self._scale_config, 'c3_time_stop_minutes',
-                                              self._scale_config.c2_time_stop_minutes):
+                    if elapsed_min >= getattr(self._scale_config, 'c3_time_stop_minutes', 240):
                         self._close_leg(pos_id, round(price, 2), current_time,
                                         "time_stop")
                         closed_legs.append(pos_id.split("-")[-1])
@@ -1228,8 +1226,7 @@ class IBKRLivePipeline:
         Mirrors scale_out_executor._update_atr_trail() exactly.
         Only tightens (never widens the stop).
         """
-        multiplier = getattr(self._scale_config, 'c3_trailing_atr_multiplier',
-                             self._scale_config.c2_trailing_atr_multiplier)
+        multiplier = getattr(self._scale_config, 'c3_trailing_atr_multiplier', 3.0)
         distance = self._atr_at_entry * multiplier
 
         if direction == "long":

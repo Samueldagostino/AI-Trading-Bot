@@ -335,10 +335,67 @@ class TradingOrchestrator:
         # === 1. FEATURES (execution TF) ===
         features = self.feature_engine.update(bar)
 
-        # === 1b. INDICATOR SAFETY GATE (last line of defense) ===
-        # Even if warmup was bypassed, never trade with unprimed indicators
+        # === 1b. MANAGE ACTIVE POSITION (BEFORE safety gate) ===
+        # CRITICAL: Active positions MUST be managed every bar regardless of
+        # indicator state. If ATR drops to 0 mid-trade, we still need stops,
+        # trailing, and exits to fire. The safety gate only blocks NEW entries.
+        if self.executor.has_active_trade:
+            try:
+                result = await self.executor.update(
+                    bar.close, bar.timestamp,
+                    bar_high=bar.high, bar_low=bar.low,
+                )
+                self._executor_fail_count = 0  # Reset on success
+            except Exception as e:
+                self._executor_fail_count += 1
+                logger.error(
+                    "executor.update() raised (%d/%d): %s",
+                    self._executor_fail_count, self._EXECUTOR_FAIL_LIMIT,
+                    e, exc_info=True,
+                )
+                if self._executor_fail_count >= self._EXECUTOR_FAIL_LIMIT:
+                    logger.critical(
+                        "executor.update() failed %d times -- emergency flatten",
+                        self._executor_fail_count,
+                    )
+                    last_price = self._get_last_price()
+                    await self.executor.emergency_flatten(last_price)
+                    self._executor_fail_count = 0
+                return action_result
+            if result:
+                if result.get("action") == "trade_closed":
+                    result["close_timestamp"] = bar.timestamp.isoformat()
+                    total_pnl = result["total_pnl"]
+                    # NaN guard -- prevent corrupted PnL from poisoning risk engine
+                    if not math.isfinite(total_pnl):
+                        logger.critical(
+                            "NaN/Inf total_pnl from trade close -- blocking risk update"
+                        )
+                        total_pnl = 0.0
+                        result["total_pnl"] = 0.0
+                        result["pnl_nan_guarded"] = True
+                    self.risk_engine.record_trade_result(total_pnl, result["direction"])
+                    self.monitoring.record_trade({
+                        "action": "exit",
+                        "pnl": total_pnl,
+                        "direction": result["direction"],
+                    })
+                    # Log exit to decision logger
+                    self.decision_logger.log_exit(
+                        direction=result.get("direction", "UNKNOWN"),
+                        entry_price=result.get("entry_price", 0.0),
+                        exit_price=result.get("exit_price", bar.close),
+                        total_pnl=total_pnl,
+                        exit_reason=result.get("exit_type", "trade_closed"),
+                    )
+
+                action_result = result
+
+        # === 1c. INDICATOR SAFETY GATE (blocks NEW entries only) ===
+        # Even if warmup was bypassed, never open a trade with unprimed indicators.
+        # Active positions are already managed above — this only gates new signals.
         if features.atr_14 <= 0:
-            return None  # ATR not ready — skip silently
+            return action_result  # ATR not ready — return any position management result
 
         # === 2. HTF BIAS (already computed via process_htf_bar) ===
         htf_bias = self._htf_bias  # May be None if no HTF data yet
@@ -384,59 +441,10 @@ class TradingOrchestrator:
                 trend_direction=features.trend_direction,
             )
 
-        # === 4. MANAGE ACTIVE POSITION ===
+        # === 4. ACTIVE POSITION GUARD ===
+        # Position management already ran in step 1b (before safety gate).
+        # If we still have an active trade after management, block new entries.
         if self.executor.has_active_trade:
-            try:
-                result = await self.executor.update(bar.close, bar.timestamp)
-                self._executor_fail_count = 0  # Reset on success
-            except Exception as e:
-                self._executor_fail_count += 1
-                logger.error(
-                    "executor.update() raised (%d/%d): %s",
-                    self._executor_fail_count, self._EXECUTOR_FAIL_LIMIT,
-                    e, exc_info=True,
-                )
-                if self._executor_fail_count >= self._EXECUTOR_FAIL_LIMIT:
-                    logger.critical(
-                        "executor.update() failed %d times -- emergency flatten",
-                        self._executor_fail_count,
-                    )
-                    last_price = self._get_last_price()
-                    await self.executor.emergency_flatten(last_price)
-                    self._executor_fail_count = 0
-                return action_result
-            if result:
-                if result.get("action") == "trade_closed":
-                    result["close_timestamp"] = bar.timestamp.isoformat()
-                    total_pnl = result["total_pnl"]
-                    # NaN guard -- prevent corrupted PnL from poisoning risk engine
-                    if not math.isfinite(total_pnl):
-                        logger.critical(
-                            "NaN/Inf total_pnl from trade close -- blocking risk update"
-                        )
-                        total_pnl = 0.0
-                        result["total_pnl"] = 0.0
-                        result["pnl_nan_guarded"] = True
-                    self.risk_engine.record_trade_result(total_pnl, result["direction"])
-                    self.monitoring.record_trade({
-                        "action": "exit",
-                        "pnl": total_pnl,
-                        "direction": result["direction"],
-                    })
-                    # Log exit to decision logger
-                    self.decision_logger.log_exit(
-                        direction=result.get("direction", "UNKNOWN"),
-                        entry_price=result.get("entry_price", 0.0),
-                        exit_price=result.get("exit_price", bar.close),
-                        total_pnl=total_pnl,
-                        exit_reason=result.get("exit_type", "trade_closed"),
-                    )
-
-                    action_result = result
-
-                elif result.get("action") == "c1_time_exit":
-                    action_result = result
-
             return action_result
 
         # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
