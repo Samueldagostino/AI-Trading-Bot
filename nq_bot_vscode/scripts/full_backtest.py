@@ -902,7 +902,7 @@ class CausalReplayEngine:
         3. Charge round-trip commission ($1.29 × 2 sides per contract)
         """
         engine_ref = self
-        commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2  # $2.58 round-trip per contract
+        commission_per_contract_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2  # $2.58 round-trip per contract
 
         async def patched_paper_enter(trade, price, **kwargs):
             fill_price = round(price, 2)
@@ -916,7 +916,7 @@ class CausalReplayEngine:
                     leg.is_filled = True
                     leg.is_open = True
                     leg.best_price = fill_price
-                    leg.commission = commission_rt  # Round-trip: $2.58 per contract
+                    leg.commission = commission_per_contract_rt * leg.contracts  # Per-CONTRACT, not per-leg
 
             trade.entry_price = fill_price
             trade.entry_time = sim_time

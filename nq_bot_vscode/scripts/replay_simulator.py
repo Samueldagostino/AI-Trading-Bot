@@ -958,12 +958,14 @@ class ReplaySimulator:
             fill_price = round(adjusted_price, 2)
             now = bar_time
 
-            for leg in [trade.c1, trade.c2]:
-                leg.entry_price = fill_price
-                leg.entry_time = now
-                leg.is_filled = True
-                leg.is_open = True
-                leg.commission = executor.risk_config.commission_per_contract
+            for leg in trade.all_legs:
+                if leg.contracts > 0:
+                    leg.entry_price = fill_price
+                    leg.entry_time = now
+                    leg.is_filled = True
+                    leg.is_open = True
+                    # Round-trip commission: both sides × number of contracts
+                    leg.commission = executor.risk_config.commission_per_contract * 2 * leg.contracts
 
             trade.entry_price = fill_price
             trade.entry_time = now

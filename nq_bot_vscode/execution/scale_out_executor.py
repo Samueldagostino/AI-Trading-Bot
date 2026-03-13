@@ -453,7 +453,8 @@ class ScaleOutExecutor:
                 leg.is_filled = True
                 leg.is_open = True
                 leg.best_price = fill_price
-                leg.commission = self.risk_config.get_commission(self._instrument)
+                # Round-trip commission: both sides × number of contracts
+                leg.commission = self.risk_config.get_commission(self._instrument) * 2 * leg.contracts
             else:
                 leg.is_filled = False
                 leg.is_open = False
