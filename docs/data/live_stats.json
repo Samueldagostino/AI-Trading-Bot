@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-13T03:51:27.615231+00:00",
+  "updated": "2026-03-13T03:52:29.481456+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 200,
@@ -29,50 +29,8 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.84)"
     }
   },
-  "last_price": 24619.75,
+  "last_price": 24620.25,
   "recent_decisions": [
-    {
-      "time": "23:50:30 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:50:41 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:50:45 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:50:50 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:50:55 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:51:01 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:51:05 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
     {
       "time": "23:51:10 ET",
       "direction": "SHORT",
@@ -90,11 +48,53 @@
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:51:31 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:51:35 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:51:41 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:51:46 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:51:51 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:51:56 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:52:00 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
     }
   ],
   "heartbeat": {
     "last_seen": "2026-03-11T17:37:35.115789+00:00",
-    "seconds_since_last": 123232.5,
+    "seconds_since_last": 123294.4,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
@@ -105,102 +105,6 @@
   },
   "active_trade": null,
   "candle_buffer": [
-    {
-      "t": "",
-      "o": 24602.75,
-      "h": 24603.25,
-      "l": 24600.75,
-      "c": 24602.0,
-      "v": 72
-    },
-    {
-      "t": "",
-      "o": 24601.75,
-      "h": 24601.75,
-      "l": 24601.0,
-      "c": 24601.75,
-      "v": 23
-    },
-    {
-      "t": "",
-      "o": 24602.0,
-      "h": 24602.75,
-      "l": 24601.0,
-      "c": 24602.25,
-      "v": 29
-    },
-    {
-      "t": "",
-      "o": 24603.0,
-      "h": 24604.0,
-      "l": 24601.75,
-      "c": 24602.0,
-      "v": 41
-    },
-    {
-      "t": "",
-      "o": 24602.0,
-      "h": 24603.25,
-      "l": 24601.0,
-      "c": 24602.5,
-      "v": 22
-    },
-    {
-      "t": "",
-      "o": 24603.0,
-      "h": 24605.0,
-      "l": 24602.5,
-      "c": 24604.5,
-      "v": 37
-    },
-    {
-      "t": "",
-      "o": 24603.5,
-      "h": 24604.0,
-      "l": 24602.75,
-      "c": 24603.5,
-      "v": 31
-    },
-    {
-      "t": "",
-      "o": 24603.0,
-      "h": 24603.0,
-      "l": 24601.5,
-      "c": 24602.25,
-      "v": 14
-    },
-    {
-      "t": "",
-      "o": 24601.75,
-      "h": 24602.5,
-      "l": 24600.25,
-      "c": 24600.25,
-      "v": 14
-    },
-    {
-      "t": "",
-      "o": 24601.25,
-      "h": 24601.75,
-      "l": 24599.0,
-      "c": 24599.5,
-      "v": 43
-    },
-    {
-      "t": "",
-      "o": 24599.75,
-      "h": 24600.5,
-      "l": 24599.75,
-      "c": 24600.5,
-      "v": 22
-    },
-    {
-      "t": "",
-      "o": 24600.0,
-      "h": 24600.25,
-      "l": 24599.25,
-      "c": 24600.25,
-      "v": 12
-    },
     {
       "t": "",
       "o": 24600.25,
@@ -1704,6 +1608,102 @@
       "l": 24619.5,
       "c": 24619.75,
       "v": 14
+    },
+    {
+      "t": "",
+      "o": 24619.5,
+      "h": 24620.25,
+      "l": 24619.5,
+      "c": 24619.75,
+      "v": 19
+    },
+    {
+      "t": "",
+      "o": 24620.0,
+      "h": 24620.25,
+      "l": 24619.5,
+      "c": 24619.5,
+      "v": 7
+    },
+    {
+      "t": "",
+      "o": 24619.25,
+      "h": 24619.75,
+      "l": 24617.5,
+      "c": 24619.75,
+      "v": 47
+    },
+    {
+      "t": "",
+      "o": 24619.25,
+      "h": 24619.75,
+      "l": 24619.25,
+      "c": 24619.75,
+      "v": 9
+    },
+    {
+      "t": "",
+      "o": 24619.75,
+      "h": 24619.75,
+      "l": 24619.75,
+      "c": 24619.75,
+      "v": 0
+    },
+    {
+      "t": "",
+      "o": 24619.0,
+      "h": 24619.75,
+      "l": 24619.0,
+      "c": 24619.5,
+      "v": 7
+    },
+    {
+      "t": "",
+      "o": 24619.5,
+      "h": 24620.25,
+      "l": 24619.5,
+      "c": 24619.75,
+      "v": 6
+    },
+    {
+      "t": "",
+      "o": 24619.75,
+      "h": 24622.0,
+      "l": 24619.75,
+      "c": 24621.75,
+      "v": 53
+    },
+    {
+      "t": "",
+      "o": 24621.25,
+      "h": 24622.0,
+      "l": 24621.25,
+      "c": 24621.75,
+      "v": 21
+    },
+    {
+      "t": "",
+      "o": 24621.5,
+      "h": 24622.5,
+      "l": 24621.5,
+      "c": 24621.5,
+      "v": 40
+    },
+    {
+      "t": "",
+      "o": 24621.75,
+      "h": 24622.75,
+      "l": 24621.75,
+      "c": 24622.0,
+      "v": 19
+    },
+    {
+      "t": "",
+      "o": 24620.75,
+      "h": 24621.5,
+      "l": 24620.25,
+      "c": 24620.25,
+      "v": 7
     }
   ],
   "session_pnl_dollars": 0.0,
