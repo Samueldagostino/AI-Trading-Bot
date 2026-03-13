@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════
 RECONCILIATION_INTERVAL_SECONDS = 30
-COMMISSION_PER_CONTRACT = 1.50   # Conservative (real Tradovate is $1.29)
+COMMISSION_PER_CONTRACT = 1.29   # Actual Tradovate rate
 
 
 # ═══════════════════════════════════════════════════════════════

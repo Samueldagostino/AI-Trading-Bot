@@ -264,10 +264,10 @@ class DynamicSlippageEngine:
     - Volume spikes (>2.0x of 20-bar average)
     - News windows (FOMC, CPI, NFP)
 
-    Slippage tiers (per fill, always adverse, conservative):
-      RTH (9:30-16:00 ET):  0.75pt base, +0.50 vol spike, cap 1.75pt
-      ETH (18:01-9:29 ET):  1.25pt base, +0.75 vol spike, cap 2.75pt
-      News window:          +1.00pt addon, cap 3.25pt
+    Slippage tiers (per fill, always adverse, realistic):
+      RTH (9:30-16:00 ET):  0.50pt base, +0.25 vol spike, cap 0.75pt
+      ETH (18:01-9:29 ET):  1.00pt base, +0.50 vol spike, cap 1.50pt
+      News window:          +0.50pt addon, cap 2.00pt
     """
 
     def __init__(self, seed: int = 42):
@@ -327,13 +327,13 @@ class DynamicSlippageEngine:
         tier = self._session_tier(et_time)
 
         if tier == "rth":
-            base = 1.25   # HARDENED (real avg ~0.50)
-            vol_addon_range = (0.25, 0.75)
-            cap = 2.50
+            base = 0.50   # Realistic (sourced from real MNQ fill data)
+            vol_addon_range = (0.0, 0.25)
+            cap = 0.75
         else:  # eth
-            base = 2.00   # HARDENED (real avg ~1.00)
-            vol_addon_range = (0.50, 1.00)
-            cap = 3.50
+            base = 1.00   # Realistic (sourced from real MNQ fill data)
+            vol_addon_range = (0.0, 0.50)
+            cap = 1.50
 
         # Volume spike addon (>2.0x 20-bar avg)
         vol_addon = 0.0
@@ -345,8 +345,8 @@ class DynamicSlippageEngine:
         news_addon = 0.0
         is_news = self._is_news_window(bar_time)
         if is_news:
-            news_addon = 1.00
-            cap = 3.00  # raise cap during news
+            news_addon = 0.50
+            cap = 2.00  # raise cap during news
             self.news_fills += 1
 
         total = base + vol_addon + news_addon
@@ -962,9 +962,9 @@ class ReplaySimulator:
                 leg.entry_time = now
                 leg.is_filled = True
                 leg.is_open = True
-                # Commission: $1.50/contract/side (conservative — real is $1.29)
-                # Charged as round-trip upfront: $1.50 * 2 sides * contracts
-                leg.commission = 1.50 * 2 * leg.contracts
+                # Commission: $1.29/contract/side (actual Tradovate rate)
+                # Charged as round-trip upfront: $1.29 * 2 sides * contracts
+                leg.commission = 1.29 * 2 * leg.contracts
 
             trade.entry_price = fill_price
             trade.entry_time = now
@@ -1523,10 +1523,10 @@ class ReplaySimulator:
     # ================================================================
 
     # Constants for shadow simulation
-    _SHADOW_COMMISSION_PER_SIDE = 1.50  # $1.50/contract/side (conservative — real is $1.29)
+    _SHADOW_COMMISSION_PER_SIDE = 1.29  # $1.29/contract/side (actual Tradovate rate)
     _SHADOW_POINT_VALUE = 2.00          # MNQ $2/point
-    _SHADOW_SLIPPAGE_RTH = 1.25         # pts per fill, RTH (HARDENED — real avg ~0.50)
-    _SHADOW_SLIPPAGE_ETH = 2.00         # pts per fill, ETH (HARDENED — real avg ~1.00)
+    _SHADOW_SLIPPAGE_RTH = 0.50         # pts per fill, RTH (realistic — real avg ~0.50)
+    _SHADOW_SLIPPAGE_ETH = 1.00         # pts per fill, ETH (realistic — real avg ~1.00)
     _SHADOW_OVERFLOW_THRESHOLD = 50_000
 
     def _record_shadow_signal(

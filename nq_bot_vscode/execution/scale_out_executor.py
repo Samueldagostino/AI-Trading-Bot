@@ -446,17 +446,17 @@ class ScaleOutExecutor:
         from zoneinfo import ZoneInfo
         from datetime import time as dt_time
 
-        # HARDENED slippage: 1.25pt RTH, 2.00pt ETH (real avg is ~0.96pt)
-        # Deliberately punishing to prove the system survives worst-case friction
+        # Realistic slippage: 0.50pt RTH, 1.00pt ETH (sourced from real MNQ fill data)
+        # Fair but honest — no negative slippage, no punishing inflation
         if timestamp:
             et = timestamp.astimezone(ZoneInfo("America/New_York"))
             is_rth = dt_time(9, 30) <= et.time() < dt_time(16, 0)
         else:
             is_rth = True
-        base_slip = 1.25 if is_rth else 2.00
-        # Add random component: base + [0, 0.25, 0.50, 0.75]
-        slippage = base_slip + random.choice([0, 0.25, 0.50, 0.75])
-        slippage = max(0.50, slippage)  # Minimum 2 ticks slippage always
+        base_slip = 0.50 if is_rth else 1.00
+        # Add random component: small variance around realistic average
+        slippage = base_slip + random.choice([0, 0.25]) if is_rth else base_slip + random.choice([0, 0.25, 0.50])
+        slippage = max(0.25, slippage)  # Minimum 1 tick slippage always
 
         if trade.direction == "long":
             fill_price = price + slippage
@@ -486,9 +486,9 @@ class ScaleOutExecutor:
                 leg.is_filled = True
                 leg.is_open = True
                 leg.best_price = fill_price
-                # Commission: $1.50/contract/side (conservative — real is $1.29)
-                # Charged as round-trip upfront: $1.50 * 2 sides * contracts
-                leg.commission = 1.50 * 2 * leg.contracts
+                # Commission: $1.29/contract/side (actual Tradovate rate)
+                # Charged as round-trip upfront: $1.29 * 2 sides * contracts
+                leg.commission = 1.29 * 2 * leg.contracts
             else:
                 leg.is_filled = False
                 leg.is_open = False
@@ -780,9 +780,9 @@ class ScaleOutExecutor:
                     is_rth = dt_time(9, 30) <= et.time() < dt_time(16, 0)
                 else:
                     is_rth = True
-                base_slip = 1.25 if is_rth else 2.00
-                c3_slippage = base_slip + random.choice([0, 0.25, 0.50, 0.75])
-                c3_slippage = max(0.50, c3_slippage)
+                base_slip = 0.50 if is_rth else 1.00
+                c3_slippage = base_slip + random.choice([0, 0.25]) if is_rth else base_slip + random.choice([0, 0.25, 0.50])
+                c3_slippage = max(0.25, c3_slippage)
 
                 if direction == "long":
                     c3_fill_price = round(exit_price + c3_slippage, 2)
@@ -794,7 +794,7 @@ class ScaleOutExecutor:
                 trade.c3.is_filled = True
                 trade.c3.is_open = True
                 trade.c3.best_price = c3_fill_price
-                trade.c3.commission = 1.50 * 2 * trade.c3.contracts
+                trade.c3.commission = 1.29 * 2 * trade.c3.contracts
                 trade.c3_pending = False
 
                 # Set C3's stop: use BE from its own entry if immediate BE variant

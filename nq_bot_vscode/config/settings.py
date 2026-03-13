@@ -224,7 +224,7 @@ class RiskConfig:
     nq_point_value_micro: float = 2.0
     
     max_slippage_ticks: int = 4
-    commission_per_contract: float = 1.50    # Conservative (real Tradovate is $1.29)
+    commission_per_contract: float = 1.29    # Actual Tradovate rate
     
     atr_period: int = 14
     atr_multiplier_stop: float = 2.0

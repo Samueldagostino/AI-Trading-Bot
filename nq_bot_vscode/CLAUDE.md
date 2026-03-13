@@ -767,3 +767,133 @@ python scripts/replay_simulator.py --validate --no-sweep
 # View HTML report
 open docs/validation_report.html
 ```
+
+---
+
+## Backtesting Integrity Rules (MANDATORY — Non-Negotiable)
+
+These rules define what a **fair, honest backtest** looks like. They exist because prior backtests cheated in subtle ways that inflated results. Every agent working on backtesting code MUST enforce these rules and verify they are respected in the output.
+
+**Philosophy**: The backtest must simulate what an institutional trader would experience in live trading. No impossible fills, no future information, no retroactive accounting. If something can't happen on a live exchange, it can't happen in the backtest.
+
+### Rule 1: Entry Execution — Next-Bar Open + Slippage
+
+- Signal generated at bar N close → entry executes at bar **N+1 open** + slippage
+- **NEVER** enter at the signal bar's close, high, low, or any other price on bar N
+- Entry price = `bar[N+1].open + slippage` (longs) or `bar[N+1].open - slippage` (shorts)
+- This is how real orders work: you see the signal, you submit the order, you get filled on the next bar's open
+
+### Rule 2: Stop Loss — Intra-Bar Execution on Touch
+
+- If a bar's **low** touches or breaches the stop level (for longs), the stop is triggered — **period**
+- If a bar's **high** touches or breaches the stop level (for shorts), the stop is triggered — **period**
+- Fill price = the stop price (not the close, not the open of next bar)
+- It does NOT matter if the bar closes above/below the stop — once price hit it, you were out
+- An institutional trader's stop order sits on the exchange. When price touches it, it executes. The close is irrelevant.
+- **Check bar_low (longs) and bar_high (shorts), not just close price**
+
+### Rule 3: Target/TP — Intra-Bar Execution on Touch
+
+- Same logic as stops: if bar's **high** reaches a long target, the target is hit
+- If bar's **low** reaches a short target, the target is hit
+- Fill price = the target price
+- Do NOT wait for close to confirm target hits
+
+### Rule 4: Realistic Slippage — Fair, Not Punishing
+
+Slippage must reflect what MNQ traders actually experience, not a torture test:
+
+| Session | Base Slippage | Random Component | Minimum | Maximum |
+|---------|--------------|------------------|---------|---------|
+| **RTH** (9:30-16:00 ET) | 0.50 pts | + random [0, 0.25] | 0.25 pts (1 tick) | 0.75 pts |
+| **ETH** (16:00-9:30 ET) | 1.00 pts | + random [0, 0.25, 0.50] | 0.50 pts (2 ticks) | 1.50 pts |
+
+- Applied on **BOTH** entry and exit fills (always adverse direction)
+- For longs: entry slippage adds to price, exit slippage subtracts from price
+- For shorts: entry slippage subtracts from price, exit slippage adds to price
+- **No negative slippage** — you never get a better fill than expected in a backtest
+- These numbers are sourced from real MNQ fill data (~0.50pt RTH avg, ~1.00pt ETH avg)
+
+### Rule 5: Realistic Commission
+
+- **$1.29 per contract per side** (Tradovate actual rate)
+- Round-trip = $1.29 × 2 = $2.58 per contract
+- 5-contract trade: $2.58 × 5 = $12.90 total commission
+- Do NOT inflate commission for "stress testing" — use real broker rates
+
+### Rule 6: C3 Delayed Entry — No Retroactive Fills
+
+- C3 (3 runner contracts) is **NOT filled** at trade entry
+- C3 remains PENDING until C1 exits
+- If C1 exits profitably → C3 fills at the **current market price at that moment** + entry slippage
+- If C1 exits at a loss → C3 was **never in the trade** — zero PnL, zero commission, zero everything
+- **IMPOSSIBLE**: Filling C3 at the original entry price retroactively after seeing C1 win. This is time travel.
+- **IMPOSSIBLE**: Unfilling C3 retroactively after seeing C1 lose. Orders that filled can't be un-filled.
+
+### Rule 7: No Look-Ahead Bias (Causality)
+
+- At bar N, the system only knows bars [0..N] and completed HTF bars
+- HTF bars are "complete" only after their period ends (e.g., 5m bar at 9:35 is complete at 9:40)
+- Daily bars complete at 6 PM ET session boundary
+- **Timestamp monotonicity**: bars MUST be processed in chronological order
+- Any out-of-order bar processing = CausalityViolationError (immediate halt)
+- HTF future-leak detection: verify no HTF bar is consumed before its period ends
+
+### Rule 8: Bar-by-Bar Drawdown Tracking
+
+- Equity curve tracks unrealized PnL on **every bar** during open positions
+- Max drawdown includes intra-trade adverse excursion, not just closed-trade snapshots
+- If a trade is -$200 unrealized mid-trade but closes at +$50, the -$200 still counts toward max DD
+- This is how real portfolio risk works — your broker sees the unrealized loss
+
+### Rule 9: Session Boundaries and Warmup
+
+- New session starts at 6 PM ET (futures roll convention)
+- First 30 bars of each session = warmup only, NO trades
+- DST-aware: use `ZoneInfo("America/New_York")`, never hardcode UTC offsets
+- Session PDH/PDL/VWAP reset at session boundary
+
+### Rule 10: No Cherry-Picking Time Windows
+
+- Backtests must run on the **full available data range** — do not restrict to "prime hours only" or hand-picked good periods
+- If time-of-day filters exist, they must be validated on the full dataset first, then applied consistently
+- A filter that blocks 95% of signals is suspicious and should be investigated before deployment
+
+### Rule 11: Commission on ALL Filled Legs
+
+- Every leg that is filled (is_filled=True) pays commission — no exceptions
+- C3 only pays commission when it actually fills (after C1 profits)
+- Unfilled/blocked legs pay zero commission
+
+### Rule 12: Verification Checklist (Every Backtest Run)
+
+Every backtest output MUST include a verification section confirming:
+
+```
+[PASS/FAIL] causality:      Signal at bar N -> entry at bar N+1 (no look-ahead)
+[PASS/FAIL] stop_execution:  Stops trigger on bar_low (long) / bar_high (short)
+[PASS/FAIL] slippage:        Entry + exit slippage applied (adverse direction, realistic levels)
+[PASS/FAIL] commission:      $1.29/contract/side charged on all filled legs
+[PASS/FAIL] c3_delayed:      C3 fills at market price when C1 profits, not retroactively
+[PASS/FAIL] warmup:          First 30 bars of each session skipped
+[PASS/FAIL] drawdown:        Bar-by-bar equity tracking (not just trade-close snapshots)
+[PASS/FAIL] timestamp_order: All bars processed in chronological order
+```
+
+If ANY check fails, the backtest results are INVALID. Fix the issue and re-run.
+
+### Anti-Patterns to Watch For (How Backtests Cheat)
+
+| Cheat | What It Looks Like | Why It's Wrong |
+|-------|-------------------|----------------|
+| **Close-only stops** | Stop checked against `bar.close` only | Real stops execute on touch, not close |
+| **Same-bar entry** | Enter at signal bar's price | You can't see the signal and fill simultaneously |
+| **Retroactive C3** | C3 gets entry price from trade open | C3 didn't enter at open — it entered later |
+| **Zero exit slippage** | Slippage only on entry, not exit | Every fill has slippage |
+| **Negative slippage** | Random slippage can go negative (price improvement) | Backtests should be conservative |
+| **Inflated friction** | 2-3x real slippage for "stress testing" | Makes the system look dead when it's not |
+| **Prime hours gate** | Only test 9-11 AM, skip rest | Cherry-picking the best window |
+| **Trade-close DD** | Only update equity at trade close | Hides intra-trade pain |
+| **Future HTF data** | Feed 5m bar before its period ends | Using information from the future |
+
+---

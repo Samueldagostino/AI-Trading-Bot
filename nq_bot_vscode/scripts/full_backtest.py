@@ -12,7 +12,7 @@ EXECUTION RULES:
   - 1m bars aggregated to 2m execution bars (~700K bars)
   - Signal at bar N close -> entry at bar N+1 open + slippage
   - Slippage: RTH 0.75 pts/fill, ETH 1.25 pts/fill (both sides, conservative)
-  - Commission: $1.50 per contract per side (round-trip charged, conservative)
+  - Commission: $1.29 per contract per side (round-trip charged, actual Tradovate rate)
   - Point value: $2.00/pt (MNQ)
   - 2-contract scale-out: C1 trail-from-profit, C2 ATR trail
   - HC filter >= 0.75, HTF gate >= 0.3, max stop 30pts, min R:R 1.5
@@ -85,9 +85,9 @@ ET = ZoneInfo("America/New_York")
 MIN_RR_RATIO = MIN_RR_OVERRIDE if MIN_RR_OVERRIDE is not None else 1.5
 
 # ── Slippage & Commission Model ─────────────────────────────────
-SLIPPAGE_RTH_PTS = 1.25   # Per fill, RTH (HARDENED — real avg ~0.50, we punish harder)
-SLIPPAGE_ETH_PTS = 2.00   # Per fill, ETH (HARDENED — real avg ~1.00, we punish harder)
-COMMISSION_PER_CONTRACT_PER_SIDE = 1.50  # $1.50 entry + $1.50 exit = $3.00/contract (conservative — real is $1.29)
+SLIPPAGE_RTH_PTS = 0.50   # Per fill, RTH (realistic — sourced from real MNQ fill data)
+SLIPPAGE_ETH_PTS = 1.00   # Per fill, ETH (realistic — sourced from real MNQ fill data)
+COMMISSION_PER_CONTRACT_PER_SIDE = 1.29  # $1.29 entry + $1.29 exit = $2.58/contract (actual Tradovate rate)
 POINT_VALUE = 2.00         # MNQ $2/point
 
 # ── Phase 3 Additive: Post-Sweep FVG Tracking (data collection) ──
@@ -906,7 +906,7 @@ class CausalReplayEngine:
         """Override _paper_enter to fix three issues:
         1. No additional random slippage (engine applies it deterministically)
         2. Use simulated bar time instead of datetime.now(timezone.utc)
-        3. Charge round-trip commission ($1.50 × 2 sides × contracts, conservative)
+        3. Charge round-trip commission ($1.29 × 2 sides × contracts, actual Tradovate rate)
         """
         engine_ref = self
 
@@ -927,9 +927,9 @@ class CausalReplayEngine:
                     leg.is_filled = True
                     leg.is_open = True
                     leg.best_price = fill_price
-                    # Commission: $1.50/contract/side (conservative — real is $1.29)
-                    # Charged as round-trip upfront: $1.50 * 2 sides * contracts
-                    leg.commission = 1.50 * 2 * leg.contracts
+                    # Commission: $1.29/contract/side (actual Tradovate rate)
+                    # Charged as round-trip upfront: $1.29 * 2 sides * contracts
+                    leg.commission = 1.29 * 2 * leg.contracts
 
             # Mark C3 as pending when delayed entry is enabled
             trade.c3_pending = C3_DELAYED_ENTRY and trade.c3.contracts > 0
@@ -2369,8 +2369,8 @@ def run_verification_checks(
     }
 
     # 3. Commission audit
-    # Expected: $1.50/contract/side × 2 sides × N contracts per leg
-    # Per-leg commission = $1.50 * 2 * leg.contracts
+    # Expected: $1.29/contract/side × 2 sides × N contracts per leg
+    # Per-leg commission = $1.29 * 2 * leg.contracts
     # Total varies by trade (C3 may be blocked)
     total_commission = 0.0
     commission_errors = 0

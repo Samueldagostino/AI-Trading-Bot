@@ -61,7 +61,7 @@ V3_BASELINE = {
     # Engine
     "execution_tf":       "2m",
     "point_value":        2.0,
-    "commission":         1.50,
+    "commission":         1.29,
 }
 
 # Parameters that MUST match -- mismatch = refuse to trade

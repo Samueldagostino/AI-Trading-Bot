@@ -40,7 +40,7 @@ def _make_config(**risk_overrides) -> BotConfig:
         "use_micro": True,
         "nq_point_value_micro": 2.0,
         "max_contracts_micro": 2,
-        "commission_per_contract": 1.50,
+        "commission_per_contract": 1.29,
         "max_slippage_ticks": 4,
     }
     risk_kw.update(risk_overrides)

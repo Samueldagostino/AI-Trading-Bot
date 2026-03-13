@@ -36,7 +36,7 @@ class InstrumentSpec:
     session_close: str            # RTH close time ET (e.g., "16:00")
     expiry_cycle: str             # "HMUZ" for quarterly futures
     contract_months: Dict[str, str] = field(default_factory=dict)
-    commission_per_contract: float = 1.50  # Conservative (real Tradovate is $1.29)
+    commission_per_contract: float = 1.29  # Actual Tradovate rate
     validated: bool = False       # True only after 200+ trade backtest validation
 
     @property
@@ -116,7 +116,7 @@ INSTRUMENT_SPECS: Dict[str, InstrumentSpec] = {
         session_close="16:00",
         expiry_cycle="HMUZ",
         contract_months=_QUARTERLY_MONTHS,
-        commission_per_contract=1.50,
+        commission_per_contract=1.29,
         validated=True,            # 14,848 trades, 4.5 years, PF 1.53
     ),
     "MES": InstrumentSpec(
@@ -133,7 +133,7 @@ INSTRUMENT_SPECS: Dict[str, InstrumentSpec] = {
         session_close="16:00",
         expiry_cycle="HMUZ",
         contract_months=_QUARTERLY_MONTHS,
-        commission_per_contract=1.50,
+        commission_per_contract=1.29,
     ),
     "MYM": InstrumentSpec(
         symbol="MYM",
@@ -149,7 +149,7 @@ INSTRUMENT_SPECS: Dict[str, InstrumentSpec] = {
         session_close="16:00",
         expiry_cycle="HMUZ",
         contract_months=_QUARTERLY_MONTHS,
-        commission_per_contract=1.50,
+        commission_per_contract=1.29,
     ),
     "M2K": InstrumentSpec(
         symbol="M2K",
@@ -165,7 +165,7 @@ INSTRUMENT_SPECS: Dict[str, InstrumentSpec] = {
         session_close="16:00",
         expiry_cycle="HMUZ",
         contract_months=_QUARTERLY_MONTHS,
-        commission_per_contract=1.50,
+        commission_per_contract=1.29,
     ),
 }
 
