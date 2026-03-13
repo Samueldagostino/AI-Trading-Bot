@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-13T01:19:05.601413+00:00",
+  "updated": "2026-03-13T01:20:07.489219+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 200,
@@ -7,8 +7,8 @@
   "win_rate": 41.2,
   "profit_factor": 1.35,
   "session_pnl_pct": 0.273,
-  "signals_rejected": 48,
-  "signals_approved": 1,
+  "signals_rejected": 50,
+  "signals_approved": 0,
   "htf_bias": "NEUTRAL",
   "safety_rails": "OK",
   "modifiers": {
@@ -29,64 +29,64 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.84)"
     }
   },
-  "last_price": 24650.0,
+  "last_price": 24651.75,
   "recent_decisions": [
     {
-      "time": "21:15:45 ET",
+      "time": "21:19:15 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:15:56 ET",
+      "time": "21:19:20 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:16:00 ET",
+      "time": "21:19:25 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:16:50 ET",
+      "time": "21:19:30 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:16:55 ET",
+      "time": "21:19:35 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:18:30 ET",
+      "time": "21:19:40 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:18:40 ET",
+      "time": "21:19:45 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:18:45 ET",
+      "time": "21:19:50 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:18:50 ET",
+      "time": "21:19:55 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
     },
     {
-      "time": "21:18:55 ET",
+      "time": "21:20:06 ET",
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
@@ -94,113 +94,17 @@
   ],
   "heartbeat": {
     "last_seen": "2026-03-11T17:37:35.115789+00:00",
-    "seconds_since_last": 114090.5,
+    "seconds_since_last": 114152.4,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
   "state": {
     "mode": "TRADING",
-    "last_trade_time": "21:08:35 ET",
+    "last_trade_time": "",
     "active_positions": 0
   },
   "active_trade": null,
   "candle_buffer": [
-    {
-      "t": "",
-      "o": 24640.0,
-      "h": 24640.25,
-      "l": 24637.25,
-      "c": 24637.25,
-      "v": 80
-    },
-    {
-      "t": "",
-      "o": 24637.75,
-      "h": 24638.5,
-      "l": 24636.25,
-      "c": 24637.0,
-      "v": 53
-    },
-    {
-      "t": "",
-      "o": 24637.25,
-      "h": 24638.25,
-      "l": 24635.25,
-      "c": 24635.5,
-      "v": 108
-    },
-    {
-      "t": "",
-      "o": 24636.0,
-      "h": 24637.0,
-      "l": 24634.25,
-      "c": 24635.25,
-      "v": 91
-    },
-    {
-      "t": "",
-      "o": 24636.0,
-      "h": 24636.75,
-      "l": 24634.25,
-      "c": 24634.75,
-      "v": 60
-    },
-    {
-      "t": "",
-      "o": 24635.75,
-      "h": 24636.75,
-      "l": 24635.0,
-      "c": 24636.25,
-      "v": 63
-    },
-    {
-      "t": "",
-      "o": 24636.5,
-      "h": 24636.5,
-      "l": 24633.0,
-      "c": 24635.0,
-      "v": 78
-    },
-    {
-      "t": "",
-      "o": 24634.25,
-      "h": 24635.75,
-      "l": 24633.75,
-      "c": 24634.5,
-      "v": 124
-    },
-    {
-      "t": "",
-      "o": 24634.25,
-      "h": 24635.5,
-      "l": 24633.5,
-      "c": 24633.5,
-      "v": 40
-    },
-    {
-      "t": "",
-      "o": 24634.25,
-      "h": 24634.25,
-      "l": 24630.75,
-      "c": 24632.25,
-      "v": 96
-    },
-    {
-      "t": "",
-      "o": 24632.25,
-      "h": 24633.5,
-      "l": 24630.0,
-      "c": 24630.5,
-      "v": 51
-    },
-    {
-      "t": "",
-      "o": 24631.0,
-      "h": 24632.0,
-      "l": 24629.5,
-      "c": 24631.0,
-      "v": 80
-    },
     {
       "t": "",
       "o": 24630.5,
@@ -1704,31 +1608,105 @@
       "l": 24649.5,
       "c": 24650.0,
       "v": 111
+    },
+    {
+      "t": "",
+      "o": 24650.25,
+      "h": 24650.25,
+      "l": 24646.0,
+      "c": 24647.0,
+      "v": 46
+    },
+    {
+      "t": "",
+      "o": 24646.25,
+      "h": 24648.0,
+      "l": 24646.0,
+      "c": 24647.0,
+      "v": 34
+    },
+    {
+      "t": "",
+      "o": 24647.5,
+      "h": 24648.75,
+      "l": 24646.75,
+      "c": 24648.75,
+      "v": 36
+    },
+    {
+      "t": "",
+      "o": 24647.75,
+      "h": 24649.5,
+      "l": 24647.75,
+      "c": 24649.0,
+      "v": 13
+    },
+    {
+      "t": "",
+      "o": 24648.25,
+      "h": 24648.75,
+      "l": 24648.25,
+      "c": 24648.75,
+      "v": 7
+    },
+    {
+      "t": "",
+      "o": 24648.0,
+      "h": 24648.25,
+      "l": 24647.75,
+      "c": 24648.25,
+      "v": 17
+    },
+    {
+      "t": "",
+      "o": 24649.0,
+      "h": 24649.5,
+      "l": 24646.25,
+      "c": 24646.5,
+      "v": 27
+    },
+    {
+      "t": "",
+      "o": 24646.25,
+      "h": 24646.75,
+      "l": 24645.75,
+      "c": 24646.0,
+      "v": 23
+    },
+    {
+      "t": "",
+      "o": 24645.75,
+      "h": 24647.25,
+      "l": 24645.75,
+      "c": 24646.75,
+      "v": 21
+    },
+    {
+      "t": "",
+      "o": 24647.5,
+      "h": 24647.5,
+      "l": 24645.75,
+      "c": 24646.25,
+      "v": 17
+    },
+    {
+      "t": "",
+      "o": 24647.75,
+      "h": 24650.5,
+      "l": 24647.75,
+      "c": 24649.5,
+      "v": 34
+    },
+    {
+      "t": "",
+      "o": 24649.75,
+      "h": 24651.75,
+      "l": 24649.5,
+      "c": 24651.75,
+      "v": 31
     }
   ],
   "session_pnl_dollars": 0.0,
   "trade_log": [],
-  "trade_events": [
-    {
-      "type": "ENTRY",
-      "time": "2026-03-13T01:08:35.457575+00:00",
-      "time_et": "21:08:35 ET",
-      "direction": "LONG",
-      "price": 24655.0,
-      "score": 0.75,
-      "stop_width": 14.25,
-      "c1_target": 24658.0,
-      "c2_trail_start": 24657.82
-    },
-    {
-      "type": "EXIT",
-      "time": "2026-03-13T01:11:16.026846+00:00",
-      "time_et": "21:11:16 ET",
-      "direction": "LONG",
-      "price": 24654.75,
-      "entry_price": 24655.0,
-      "pnl": -0.93,
-      "reason": "trade_closed"
-    }
-  ]
+  "trade_events": []
 }
