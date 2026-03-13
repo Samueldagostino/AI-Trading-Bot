@@ -1258,6 +1258,15 @@ class ScaleOutExecutor:
             return None
 
         trade = self._active_trade
+
+        # v1.3.3: If C3 is still pending, resolve it (never entered)
+        c3_blocked = False
+        if self._c3_delayed_entry and trade.c3_pending and trade.c3.contracts > 0:
+            trade.c3_pending = False
+            c3_blocked = True
+            self._c3_stats["trades_total"] += 1
+            self._c3_stats["c3_blocked"] += 1
+
         open_legs = trade.open_legs
         n_contracts = sum(leg.contracts for leg in open_legs)
 
@@ -1273,7 +1282,7 @@ class ScaleOutExecutor:
         if not self.config.execution.paper_trading and self.broker:
             await self.broker.flatten_position()
 
-        return self._finalize_trade(trade, current_time)
+        return self._finalize_trade(trade, current_time, c3_blocked=c3_blocked)
 
     # ================================================================
     # EMERGENCY
@@ -1286,13 +1295,21 @@ class ScaleOutExecutor:
         trade = self._active_trade
         now = datetime.now(timezone.utc)
 
+        # v1.3.3: If C3 is still pending, resolve it (never entered)
+        c3_blocked = False
+        if self._c3_delayed_entry and trade.c3_pending and trade.c3.contracts > 0:
+            trade.c3_pending = False
+            c3_blocked = True
+            self._c3_stats["trades_total"] += 1
+            self._c3_stats["c3_blocked"] += 1
+
         for leg in trade.open_legs:
             self._close_leg(leg, price, now, "emergency", trade.direction)
 
         if not self.config.execution.paper_trading and self.broker:
             await self.broker.flatten_position()
 
-        return self._finalize_trade(trade, now)
+        return self._finalize_trade(trade, now, c3_blocked=c3_blocked)
 
     # ================================================================
     # HELPERS
