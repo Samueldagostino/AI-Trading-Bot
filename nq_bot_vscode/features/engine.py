@@ -288,6 +288,35 @@ class NQFeatureEngine:
 
         return snapshot
 
+    def is_ready(self) -> dict:
+        """Validate that all indicators have enough data to produce real values.
+
+        Returns dict with 'ready' bool and 'details' showing each check.
+        This is the REAL warmup gate — not a bar counter.
+        """
+        atr_period = self.risk_config.atr_period  # type: ignore
+        checks = {
+            "bars_minimum": len(self._bars) >= 20,
+            "bars_for_atr": len(self._bars) >= atr_period + 1,
+            "bars_for_ema": len(self._bars) >= 21,  # 20-bar EMA needs 21 bars
+            "vwap_active": self._session_volume_sum > 0,
+        }
+        # Check the last snapshot has non-zero ATR (the critical indicator)
+        if len(self._bars) >= atr_period + 1:
+            snapshot = FeatureSnapshot(timestamp=self._bars[-1].timestamp)
+            self._compute_atr(snapshot)
+            checks["atr_nonzero"] = snapshot.atr_14 > 0
+        else:
+            checks["atr_nonzero"] = False
+
+        all_ready = all(checks.values())
+        return {"ready": all_ready, "details": checks, "bars_loaded": len(self._bars)}
+
+    @property
+    def bars_loaded(self) -> int:
+        """Number of bars currently in the rolling window."""
+        return len(self._bars)
+
     def reset_session(self) -> None:
         """Reset session-based calculations (call at session open)."""
         self._session_volume_price_sum = 0.0

@@ -335,6 +335,11 @@ class TradingOrchestrator:
         # === 1. FEATURES (execution TF) ===
         features = self.feature_engine.update(bar)
 
+        # === 1b. INDICATOR SAFETY GATE (last line of defense) ===
+        # Even if warmup was bypassed, never trade with unprimed indicators
+        if features.atr_14 <= 0:
+            return None  # ATR not ready — skip silently
+
         # === 2. HTF BIAS (already computed via process_htf_bar) ===
         htf_bias = self._htf_bias  # May be None if no HTF data yet
 

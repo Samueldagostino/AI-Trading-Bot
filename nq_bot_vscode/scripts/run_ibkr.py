@@ -377,26 +377,33 @@ class IBKRLiveRunner:
 
         # Warmup phase -- feed bars to feature engine only, do NOT trade
         if not self._warmup_complete:
-            if self._warmup_bar_count < self.WARMUP_BARS:
-                # Feed to feature engine only -- do NOT call original_on_bar
-                # or process_bar, which would allow trades during warmup
-                self._pipeline._feature_engine.update(bar)
+            # Feed to feature engine only -- do NOT call original_on_bar
+            # or process_bar, which would allow trades during warmup
+            self._pipeline._feature_engine.update(bar)
+
+            if self._warmup_bar_count % 10 == 0:
+                logger.info(
+                    "WARMUP: %d bars fed so far",
+                    self._warmup_bar_count,
+                )
+
+            # Check REAL indicator readiness (not just bar count)
+            readiness = self._pipeline._feature_engine.is_ready()
+            if not readiness["ready"]:
                 if self._warmup_bar_count % 10 == 0:
-                    logger.info(
-                        "WARMUP: %d/%d bars",
-                        self._warmup_bar_count,
-                        self.WARMUP_BARS,
-                    )
+                    logger.info("  Indicators not ready: %s", readiness["details"])
                 return
 
-            # Warmup complete
+            # All indicators validated — warmup complete
             self._warmup_complete = True
             logger.info("=" * 60)
             logger.info("  WARMUP COMPLETE -- TRADING ACTIVE")
-            logger.info("  Indicators primed with %d bars", self.WARMUP_BARS)
+            logger.info("  Indicators validated after %d bars", self._warmup_bar_count)
+            logger.info("  Readiness: %s", readiness["details"])
             logger.info("=" * 60)
             self._log_decision("warmup_complete", {
-                "bars_used": self.WARMUP_BARS,
+                "bars_used": self._warmup_bar_count,
+                "readiness": readiness["details"],
             })
 
         # Dry run -- log the bar but don't execute

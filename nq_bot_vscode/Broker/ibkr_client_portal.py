@@ -587,7 +587,7 @@ class IBKRWebSocket:
 # ================================================================
 
 # Historical backfill: 2 hours of 2-minute bars = 60 bars.
-BACKFILL_PERIOD = "2h"
+BACKFILL_PERIOD = "4h"     # Pull 4 hours (120 bars of 2m) — guarantees ATR, EMA, VWAP all primed
 BACKFILL_BAR_SIZE = "2min"
 
 

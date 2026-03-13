@@ -627,13 +627,24 @@ class TWSLiveRunner:
                 self._last_price = self._candle_buffer[-1]["c"]
             self._bars_processed = bars_fed
 
-            # Mark warmup as complete since we've primed everything
-            self._warmup_complete = True
-            self._warmup_count = bars_fed
+            # Validate indicators are actually ready (not just bar count)
+            readiness = self._pipeline._feature_engine.is_ready()
+            if readiness["ready"]:
+                self._warmup_complete = True
+                self._warmup_count = bars_fed
+                logger.info(
+                    "Backfill complete: %d bars fed — indicators VALIDATED", bars_fed
+                )
+                logger.info("  Readiness: %s", readiness["details"])
+            else:
+                logger.warning(
+                    "Backfill fed %d bars but indicators NOT ready: %s",
+                    bars_fed, readiness["details"]
+                )
+                logger.warning(
+                    "  Falling back to live warmup — will validate on each bar"
+                )
 
-            logger.info(
-                "Backfill complete: %d bars fed through pipeline", bars_fed
-            )
             logger.info(
                 "  Feature engine: %d bars in rolling window",
                 len(self._pipeline._feature_engine._bars),
@@ -713,20 +724,28 @@ class TWSLiveRunner:
 
     def _on_2min_candle(self, candle: Bar) -> None:
         """Process a completed 2-minute candle."""
-        # Warmup phase -- prime indicators only
+        # Warmup phase -- prime indicators only, validate before trading
         if not self._warmup_complete:
             self._warmup_count += 1
             self._pipeline._feature_engine.update(candle)
 
             if self._warmup_count % 5 == 0:
-                logger.info("WARMUP: %d/%d candles", self._warmup_count, self.WARMUP_BARS)
+                logger.info("WARMUP: %d bars fed so far", self._warmup_count)
 
-            if self._warmup_count >= self.WARMUP_BARS:
-                self._warmup_complete = True
-                logger.info("=" * 60)
-                logger.info("  WARMUP COMPLETE -- TRADING ACTIVE")
-                logger.info("  Indicators primed with %d candles", self.WARMUP_BARS)
-                logger.info("=" * 60)
+            # Check REAL indicator readiness (not just bar count)
+            readiness = self._pipeline._feature_engine.is_ready()
+            if not readiness["ready"]:
+                if self._warmup_count % 5 == 0:
+                    logger.info("  Indicators not ready: %s", readiness["details"])
+                return
+
+            # All indicators validated
+            self._warmup_complete = True
+            logger.info("=" * 60)
+            logger.info("  WARMUP COMPLETE -- TRADING ACTIVE")
+            logger.info("  Indicators validated after %d bars", self._warmup_count)
+            logger.info("  Readiness: %s", readiness["details"])
+            logger.info("=" * 60)
             return
 
         # Dry run -- log only
