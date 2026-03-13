@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-13T03:56:36.649876+00:00",
+  "updated": "2026-03-13T03:57:38.376416+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 200,
@@ -29,56 +29,8 @@
       "display": "1.1x (RV 50th percentile (below avg vol), log_rv=-10.84)"
     }
   },
-  "last_price": 24624.5,
+  "last_price": 24625.25,
   "recent_decisions": [
-    {
-      "time": "23:55:15 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:55:25 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:55:45 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:55:50 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:55:55 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:56:00 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:56:06 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
-    {
-      "time": "23:56:21 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HTF_GATE"
-    },
     {
       "time": "23:56:25 ET",
       "direction": "SHORT",
@@ -90,11 +42,59 @@
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:56:40 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:56:46 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:56:51 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:57:11 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:57:15 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:57:20 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:57:25 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
+    },
+    {
+      "time": "23:57:31 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HTF_GATE"
     }
   ],
   "heartbeat": {
     "last_seen": "2026-03-11T17:37:35.115789+00:00",
-    "seconds_since_last": 123541.5,
+    "seconds_since_last": 123603.3,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
@@ -105,102 +105,6 @@
   },
   "active_trade": null,
   "candle_buffer": [
-    {
-      "t": "",
-      "o": 24595.75,
-      "h": 24595.75,
-      "l": 24595.25,
-      "c": 24595.75,
-      "v": 9
-    },
-    {
-      "t": "",
-      "o": 24596.0,
-      "h": 24597.25,
-      "l": 24596.0,
-      "c": 24596.5,
-      "v": 11
-    },
-    {
-      "t": "",
-      "o": 24597.25,
-      "h": 24597.25,
-      "l": 24595.5,
-      "c": 24596.0,
-      "v": 12
-    },
-    {
-      "t": "",
-      "o": 24594.75,
-      "h": 24595.5,
-      "l": 24593.5,
-      "c": 24593.5,
-      "v": 44
-    },
-    {
-      "t": "",
-      "o": 24594.0,
-      "h": 24594.25,
-      "l": 24591.75,
-      "c": 24594.0,
-      "v": 40
-    },
-    {
-      "t": "",
-      "o": 24594.25,
-      "h": 24595.5,
-      "l": 24593.75,
-      "c": 24594.75,
-      "v": 12
-    },
-    {
-      "t": "",
-      "o": 24595.0,
-      "h": 24595.0,
-      "l": 24594.25,
-      "c": 24594.25,
-      "v": 10
-    },
-    {
-      "t": "",
-      "o": 24594.25,
-      "h": 24596.25,
-      "l": 24594.25,
-      "c": 24595.0,
-      "v": 10
-    },
-    {
-      "t": "",
-      "o": 24594.25,
-      "h": 24594.5,
-      "l": 24594.25,
-      "c": 24594.5,
-      "v": 3
-    },
-    {
-      "t": "",
-      "o": 24594.75,
-      "h": 24594.75,
-      "l": 24593.0,
-      "c": 24593.5,
-      "v": 13
-    },
-    {
-      "t": "",
-      "o": 24595.0,
-      "h": 24598.25,
-      "l": 24595.0,
-      "c": 24598.25,
-      "v": 41
-    },
-    {
-      "t": "",
-      "o": 24597.25,
-      "h": 24598.25,
-      "l": 24597.25,
-      "c": 24598.0,
-      "v": 30
-    },
     {
       "t": "",
       "o": 24597.5,
@@ -1704,6 +1608,102 @@
       "l": 24624.5,
       "c": 24624.5,
       "v": 9
+    },
+    {
+      "t": "",
+      "o": 24624.25,
+      "h": 24624.5,
+      "l": 24623.5,
+      "c": 24623.5,
+      "v": 7
+    },
+    {
+      "t": "",
+      "o": 24623.5,
+      "h": 24624.5,
+      "l": 24623.5,
+      "c": 24624.5,
+      "v": 15
+    },
+    {
+      "t": "",
+      "o": 24624.25,
+      "h": 24626.0,
+      "l": 24624.25,
+      "c": 24626.0,
+      "v": 8
+    },
+    {
+      "t": "",
+      "o": 24626.0,
+      "h": 24626.5,
+      "l": 24625.5,
+      "c": 24625.5,
+      "v": 10
+    },
+    {
+      "t": "",
+      "o": 24625.5,
+      "h": 24625.5,
+      "l": 24624.75,
+      "c": 24625.0,
+      "v": 19
+    },
+    {
+      "t": "",
+      "o": 24625.0,
+      "h": 24626.0,
+      "l": 24624.75,
+      "c": 24625.0,
+      "v": 12
+    },
+    {
+      "t": "",
+      "o": 24624.75,
+      "h": 24625.0,
+      "l": 24624.25,
+      "c": 24624.25,
+      "v": 7
+    },
+    {
+      "t": "",
+      "o": 24624.0,
+      "h": 24625.25,
+      "l": 24623.75,
+      "c": 24624.25,
+      "v": 15
+    },
+    {
+      "t": "",
+      "o": 24624.25,
+      "h": 24624.5,
+      "l": 24623.5,
+      "c": 24624.25,
+      "v": 20
+    },
+    {
+      "t": "",
+      "o": 24624.25,
+      "h": 24624.75,
+      "l": 24624.25,
+      "c": 24624.25,
+      "v": 18
+    },
+    {
+      "t": "",
+      "o": 24623.75,
+      "h": 24626.5,
+      "l": 24623.75,
+      "c": 24626.5,
+      "v": 39
+    },
+    {
+      "t": "",
+      "o": 24624.5,
+      "h": 24625.5,
+      "l": 24623.75,
+      "c": 24625.25,
+      "v": 38
     }
   ],
   "session_pnl_dollars": 0.0,
