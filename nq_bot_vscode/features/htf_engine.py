@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-from config.constants import HTF_STRENGTH_GATE, HTF_STALENESS_LIMITS
+from config.constants import (
+    HTF_STRENGTH_GATE,
+    HTF_STALENESS_LIMITS,
+    HTF_HYSTERESIS_MARGIN,
+    HTF_HYSTERESIS_CONFIRM_BARS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +58,16 @@ class HTFBiasEngine:
     STRENGTH_GATE = HTF_STRENGTH_GATE  # Imported from config/constants.py -- single source of truth
     _STALENESS_LIMITS = HTF_STALENESS_LIMITS  # Imported from config/constants.py
 
+    # ── Hysteresis: prevent flip-flopping on choppy days ──
+    # Two-stage protection:
+    #   Stage 1 (margin): opposing direction must exceed HYSTERESIS_MARGIN
+    #           strength to even START the confirmation counter.
+    #   Stage 2 (hold):   opposing direction must HOLD for CONFIRM_BARS
+    #           consecutive get_bias() calls before the lock actually flips.
+    # A single fakeout candle won't override a persistent trend.
+    HYSTERESIS_MARGIN = HTF_HYSTERESIS_MARGIN
+    CONFIRM_BARS = HTF_HYSTERESIS_CONFIRM_BARS
+
     def __init__(self, config=None, timeframes: List[str] = None):
         self.config = config
         self.timeframes = timeframes or ["5m", "15m", "30m", "1H", "4H", "1D"]
@@ -62,6 +77,10 @@ class HTFBiasEngine:
         self._total_updates = 0
         self._last_update_time: Dict[str, datetime] = {}
         self._stale_warned: set = set()
+        self._locked_direction: str = "neutral"  # Sticky directional lock
+        self._lock_strength: float = 0.0         # Strength when lock was set
+        self._flip_candidate: str = "neutral"    # Direction trying to flip TO
+        self._flip_confirm_count: int = 0        # Consecutive bars candidate held
 
     def update_bar(self, timeframe: str, bar: HTFBar) -> None:
         """Ingest a new HTF bar and recompute bias for that TF."""
@@ -124,11 +143,18 @@ class HTFBiasEngine:
 
         strength = max(bullish, bearish) / total
         if bullish > bearish:
-            direction = "bullish"
+            raw_direction = "bullish"
         elif bearish > bullish:
-            direction = "bearish"
+            raw_direction = "bearish"
         else:
-            direction = "neutral"
+            raw_direction = "neutral"
+
+        # ── Hysteresis: two-stage anti-flip-flop ──────────────────────
+        # Stage 1 — margin check: does the raw signal OPPOSE the current
+        #   lock strongly enough to even start the confirmation timer?
+        # Stage 2 — hold check: has the opposing signal persisted for
+        #   CONFIRM_BARS consecutive calls?  If not, lock stays put.
+        direction = self._apply_hysteresis(raw_direction, strength)
 
         result = HTFBiasResult(
             consensus_direction=direction,
@@ -140,6 +166,86 @@ class HTFBiasEngine:
         )
         self._last_result = result
         return result
+
+    def _apply_hysteresis(self, raw_direction: str, strength: float) -> str:
+        """Apply two-stage hysteresis to prevent bias flip-flopping.
+
+        Stage 1 (margin):  The opposing direction must exceed
+                           HYSTERESIS_MARGIN strength to start the timer.
+        Stage 2 (hold):    The opposing direction must persist for
+                           CONFIRM_BARS consecutive get_bias() calls
+                           before the lock flips.
+
+        Returns the effective (possibly locked) direction.
+        """
+        locked = self._locked_direction
+
+        # ── First bias ever: just lock it immediately ──
+        if locked == "neutral":
+            if raw_direction != "neutral":
+                self._locked_direction = raw_direction
+                self._lock_strength = strength
+                self._flip_candidate = "neutral"
+                self._flip_confirm_count = 0
+                logger.info(
+                    "HTF bias lock INITIAL: %s (strength=%.2f)",
+                    raw_direction, strength,
+                )
+            return raw_direction
+
+        # ── Same direction as lock: reinforce it ──
+        if raw_direction == locked:
+            self._lock_strength = strength
+            self._flip_candidate = "neutral"
+            self._flip_confirm_count = 0
+            return locked
+
+        # ── Neutral raw: not strong enough to flip, keep the lock ──
+        # Neutral doesn't start a flip timer — it's indecision, not opposition.
+        if raw_direction == "neutral":
+            self._flip_candidate = "neutral"
+            self._flip_confirm_count = 0
+            return locked
+
+        # ── Opposing direction detected ──
+        # Stage 1: Is the opposing signal strong enough to even consider?
+        if strength < self.HYSTERESIS_MARGIN:
+            # Too weak — reset any in-progress flip attempt
+            self._flip_candidate = "neutral"
+            self._flip_confirm_count = 0
+            return locked
+
+        # Stage 2: Opposing signal is strong enough — run confirmation timer
+        if raw_direction == self._flip_candidate:
+            # Same flip candidate as last call — increment counter
+            self._flip_confirm_count += 1
+        else:
+            # New flip candidate — restart the timer
+            self._flip_candidate = raw_direction
+            self._flip_confirm_count = 1
+
+        if self._flip_confirm_count >= self.CONFIRM_BARS:
+            # Confirmed flip: opposing direction held for enough bars
+            old_lock = self._locked_direction
+            self._locked_direction = raw_direction
+            self._lock_strength = strength
+            self._flip_candidate = "neutral"
+            self._flip_confirm_count = 0
+            logger.info(
+                "HTF bias lock FLIPPED: %s → %s after %d confirming bars "
+                "(strength=%.2f)",
+                old_lock, raw_direction, self.CONFIRM_BARS, strength,
+            )
+            return raw_direction
+
+        # Not yet confirmed — keep the existing lock
+        logger.debug(
+            "HTF hysteresis: %s attempting flip to %s (%d/%d confirms, "
+            "strength=%.2f) — lock stays %s",
+            locked, raw_direction, self._flip_confirm_count,
+            self.CONFIRM_BARS, strength, locked,
+        )
+        return locked
 
     def _check_staleness(self, now: datetime) -> set:
         """Return set of timeframe labels whose last bar is stale."""
@@ -211,5 +317,8 @@ class HTFBiasEngine:
             r = self._last_result
             lines.append(f"  Consensus: {r.consensus_direction} ({r.consensus_strength:.2f})")
             lines.append(f"  Allows long={r.htf_allows_long}  short={r.htf_allows_short}")
+        lines.append(f"  Hysteresis lock: {self._locked_direction} "
+                     f"(flip candidate={self._flip_candidate}, "
+                     f"confirms={self._flip_confirm_count}/{self.CONFIRM_BARS})")
         lines.append("=" * 40)
         return "\n".join(lines)

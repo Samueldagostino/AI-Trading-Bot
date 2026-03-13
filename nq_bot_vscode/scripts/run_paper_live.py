@@ -477,19 +477,27 @@ class PaperLiveRunner:
                     regime=result.get("regime", ""),
                     htf_bias=result.get("htf_bias", ""),
                     c1_pnl=result.get("c1_pnl", 0),
+                    c1_reason=result.get("c1_exit_reason", ""),
                     c2_pnl=result.get("c2_pnl", 0),
-                    contracts=result.get("contracts", 2),
+                    c2_reason=result.get("c2_exit_reason", ""),
+                    c3_pnl=result.get("c3_pnl", 0),
+                    c3_reason=result.get("c3_exit_reason", ""),
+                    c4_pnl=result.get("c4_pnl", 0),
+                    c4_reason=result.get("c4_exit_reason", ""),
+                    contracts=result.get("contracts", 4),
                     metadata={
                         "inst_position_mult": result.get("inst_position_mult"),
                         "inst_stop_mult": result.get("inst_stop_mult"),
+                        "c3_blocked": result.get("c3_blocked", False),
                     },
                 )
 
                 logger.info(
-                    "TRADE CLOSED: PnL $%.2f | C1: $%.2f | C2: $%.2f | Daily: $%.2f",
+                    "TRADE CLOSED: PnL $%.2f | C1: $%.2f (%s) | C2: $%.2f (%s) | C3: $%.2f (%s) | Daily: $%.2f",
                     pnl,
-                    result.get("c1_pnl", 0),
-                    result.get("c2_pnl", 0),
+                    result.get("c1_pnl", 0), result.get("c1_exit_reason", "?"),
+                    result.get("c2_pnl", 0), result.get("c2_exit_reason", "?"),
+                    result.get("c3_pnl", 0), result.get("c3_exit_reason", "?"),
                     self._safety_rails.daily_loss.daily_pnl,
                 )
 

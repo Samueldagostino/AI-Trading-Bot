@@ -59,8 +59,14 @@ class PaperTradeRecord:
     regime: str = ""
     htf_bias: str = ""
     c1_pnl: float = 0.0
+    c1_reason: str = ""
     c2_pnl: float = 0.0
-    contracts: int = 2
+    c2_reason: str = ""
+    c3_pnl: float = 0.0
+    c3_reason: str = ""
+    c4_pnl: float = 0.0
+    c4_reason: str = ""
+    contracts: int = 4
     metadata: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
@@ -76,7 +82,13 @@ class PaperTradeRecord:
             "regime": self.regime,
             "htf_bias": self.htf_bias,
             "c1_pnl": round(self.c1_pnl, 2),
+            "c1_reason": self.c1_reason,
             "c2_pnl": round(self.c2_pnl, 2),
+            "c2_reason": self.c2_reason,
+            "c3_pnl": round(self.c3_pnl, 2),
+            "c3_reason": self.c3_reason,
+            "c4_pnl": round(self.c4_pnl, 2),
+            "c4_reason": self.c4_reason,
             "contracts": self.contracts,
             "metadata": self.metadata,
         }
@@ -146,8 +158,14 @@ class PaperTradingMonitor:
         regime: str = "",
         htf_bias: str = "",
         c1_pnl: float = 0.0,
+        c1_reason: str = "",
         c2_pnl: float = 0.0,
-        contracts: int = 2,
+        c2_reason: str = "",
+        c3_pnl: float = 0.0,
+        c3_reason: str = "",
+        c4_pnl: float = 0.0,
+        c4_reason: str = "",
+        contracts: int = 4,
         metadata: Optional[Dict] = None,
     ) -> None:
         """Record a completed paper trade."""
@@ -164,7 +182,13 @@ class PaperTradingMonitor:
             regime=regime,
             htf_bias=htf_bias,
             c1_pnl=c1_pnl,
+            c1_reason=c1_reason,
             c2_pnl=c2_pnl,
+            c2_reason=c2_reason,
+            c3_pnl=c3_pnl,
+            c3_reason=c3_reason,
+            c4_pnl=c4_pnl,
+            c4_reason=c4_reason,
             contracts=contracts,
             metadata=metadata or {},
         )

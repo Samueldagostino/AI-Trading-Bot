@@ -256,15 +256,14 @@ function App() {
   }
 
   const isLive = data.status === 'LIVE';
-  const ss = data.session_summary || {};
   const trades = data.trade_log || [];
-  const op = data.open_position || null;
+  const op = data.active_trade || null;
   const decs = data.recent_decisions || [];
 
   return (
     <>
       <StatusBar data={data} isLive={isLive} />
-      <PnlHero ss={ss} />
+      <PnlHero data={data} trades={trades} />
       {op && <OpenPosition pos={op} />}
       <TradeLog trades={trades} expanded={expanded} setExpanded={setExpanded} />
       <SessionFooter trades={trades} />
@@ -302,36 +301,41 @@ function StatusBar({ data, isLive }) {
 }
 
 /* ── SECTION B: PNL HERO ── */
-function PnlHero({ ss }) {
-  const pnl = ss.session_pnl_pct || 0;
+function PnlHero({ data, trades }) {
+  const pnl = data.session_pnl_pct || 0;
   const cls = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'flat';
   const sign = pnl > 0 ? '+' : '';
+
+  // Compute wins/losses from trade log
+  const wins = trades.filter(t => t.total_pnl > 0).length;
+  const losses = trades.filter(t => t.total_pnl <= 0).length;
+  const totalTrades = data.trades_today || trades.length;
 
   return (
     <div className="pnl-hero">
       <div className={'pnl-number ' + cls}>
         {sign}{pnl.toFixed(3)}%
       </div>
-      <div className="pnl-sub">Session PnL — {ss.session_date || 'Today'}</div>
+      <div className="pnl-sub">Session PnL — Today</div>
       <div className="kpi-row">
         <div className="kpi-item">
-          <div className="kpi-val">{ss.session_trades || 0}</div>
+          <div className="kpi-val">{totalTrades}</div>
           <div className="kpi-lbl">Trades</div>
         </div>
         <div className="kpi-item">
-          <div className="kpi-val green">{ss.session_wins || 0}</div>
+          <div className="kpi-val green">{wins}</div>
           <div className="kpi-lbl">Wins</div>
         </div>
         <div className="kpi-item">
-          <div className="kpi-val red">{ss.session_losses || 0}</div>
+          <div className="kpi-val red">{losses}</div>
           <div className="kpi-lbl">Losses</div>
         </div>
         <div className="kpi-item">
-          <div className="kpi-val">{(ss.session_win_rate || 0).toFixed(1)}%</div>
+          <div className="kpi-val">{(data.win_rate || 0).toFixed(1)}%</div>
           <div className="kpi-lbl">Win Rate</div>
         </div>
         <div className="kpi-item">
-          <div className="kpi-val">{(ss.session_pf || 0).toFixed(2)}</div>
+          <div className="kpi-val">{(data.profit_factor || 0).toFixed(2)}</div>
           <div className="kpi-lbl">Profit Factor</div>
         </div>
       </div>
@@ -341,15 +345,17 @@ function PnlHero({ ss }) {
 
 /* ── SECTION C: OPEN POSITION ── */
 function OpenPosition({ pos }) {
-  const isLong = pos.direction === 'LONG';
+  const dir = (pos.side || pos.direction || '').toUpperCase();
+  const isLong = dir === 'LONG' || dir === 'BUY';
   const dc = isLong ? 'long' : 'short';
-  const legs = pos.legs_open || 0;
+  const dirLabel = isLong ? 'LONG' : 'SHORT';
+  const legsOpen = pos.legs_open || pos.active_legs || 0;
   const names = ['C1','C2','C3','C4'];
 
   return (
     <div className="open-pos show">
       <div className="op-row">
-        <span className={'dir-pill ' + dc}>{pos.direction}</span>
+        <span className={'dir-pill ' + dc}>{dirLabel}</span>
         <span className="op-tag">Open Position</span>
       </div>
       <div className="op-details">
@@ -359,16 +365,16 @@ function OpenPosition({ pos }) {
         </div>
         <div className="op-item">
           <span className="ol">Stop</span>
-          <span className="ov" style={{color:'var(--red)'}}>{fmt(pos.current_stop)}</span>
+          <span className="ov" style={{color:'var(--red)'}}>{fmt(pos.current_stop || pos.stop_price)}</span>
         </div>
         <div className="op-item">
           <span className="ol">Legs Open</span>
-          <span className="ov">{legs}</span>
+          <span className="ov">{legsOpen}</span>
         </div>
       </div>
       <div className="legs-row">
         {names.map((n, i) => (
-          <span key={n} className={'leg-pill ' + (i < legs ? 'on' : 'off')}>{n}</span>
+          <span key={n} className={'leg-pill ' + (i < legsOpen ? 'on' : 'off')}>{n}</span>
         ))}
       </div>
     </div>
@@ -378,7 +384,7 @@ function OpenPosition({ pos }) {
 /* ── SECTION D: TRADE LOG ── */
 function TradeLog({ trades, expanded, setExpanded }) {
   const rev = [...trades].reverse();
-  const toggle = (id) => setExpanded(expanded === id ? null : id);
+  const toggle = (idx) => setExpanded(expanded === idx ? null : idx);
 
   return (
     <div>
@@ -393,9 +399,9 @@ function TradeLog({ trades, expanded, setExpanded }) {
         </div>
       ) : (
         <div className="trade-cards">
-          {rev.map(t => (
-            <TradeCard key={t.trade_id} t={t} open={expanded === t.trade_id}
-              onClick={() => toggle(t.trade_id)} />
+          {rev.map((t, i) => (
+            <TradeCard key={i} idx={i} t={t} open={expanded === i}
+              onClick={() => toggle(i)} />
           ))}
         </div>
       )}
@@ -403,65 +409,73 @@ function TradeLog({ trades, expanded, setExpanded }) {
   );
 }
 
-function TradeCard({ t, open, onClick }) {
-  const w = t.result === 'WIN';
-  const lo = t.direction === 'LONG';
+function TradeCard({ t, idx, open, onClick }) {
+  const pnl = t.total_pnl || 0;
+  const w = pnl > 0;
+  const lo = (t.direction || '').toUpperCase() === 'LONG';
   const arrow = lo ? '\u2191' : '\u2193';
-  const sP = t.total_pnl_pct > 0 ? '+' : '';
-  const sPt = t.total_points > 0 ? '+' : '';
-  const legs = t.legs || {};
-  const names = ['C1','C2','C3','C4'];
+  const sP = pnl > 0 ? '+' : '';
+
+  // Build leg data from flat fields
+  const legData = [
+    { name: 'C1', pnl: t.c1_pnl || 0, reason: t.c1_reason || '', contracts: 1 },
+    { name: 'C2', pnl: t.c2_pnl || 0, reason: t.c2_reason || '', contracts: 1 },
+    { name: 'C3', pnl: t.c3_pnl || 0, reason: t.c3_reason || '', contracts: 2 },
+    { name: 'C4', pnl: t.c4_pnl || 0, reason: t.c4_reason || '', contracts: 0 },
+  ];
 
   return (
     <div className={'tc ' + (w ? 'win' : 'loss') + ' tc-enter'} onClick={onClick}>
-      <span className="tc-time">{t.timestamp}</span>
+      <span className="tc-time">{t.time}</span>
       <div className="tc-head">
         <div className={'tc-icon ' + (lo ? 'long' : 'short')}>{arrow}</div>
         <div className="tc-mid">
-          <div className={'tc-dir ' + (lo ? 'long' : 'short')}>{t.direction} #{t.trade_id}</div>
-          <div className="tc-price">Entry: {fmt(t.entry_price)}</div>
+          <div className={'tc-dir ' + (lo ? 'long' : 'short')}>{(t.direction || '').toUpperCase()}</div>
+          <div className="tc-price">
+            Entry: {fmt(t.entry_price)}
+            {t.signal_source ? <span style={{marginLeft:'8px',opacity:0.6}}>{t.signal_source}</span> : null}
+          </div>
         </div>
         <div className="tc-right">
-          <div className={'tc-pnl ' + (w ? 'pos' : 'neg')}>{sP}{t.total_pnl_pct?.toFixed(3)}%</div>
-          <div className="tc-pts">{sPt}{t.total_points?.toFixed(1)} pts</div>
+          <div className={'tc-pnl ' + (w ? 'pos' : 'neg')}>{sP}${Math.abs(pnl).toFixed(2)}</div>
+          <div className="tc-pts">{t.contracts || 4} contracts</div>
         </div>
       </div>
       <div className="tc-chips">
-        {names.map(n => {
-          const leg = legs[n];
-          if (!leg) return <span key={n} className="chip na">{n}: —</span>;
-          const s = leg.points > 0 ? '+' : '';
-          return <span key={n} className={'chip ' + (leg.points > 0 ? 'win' : 'lose')}>
-            {n}: {s}{leg.points.toFixed(1)}pts
+        {legData.map(leg => {
+          if (leg.contracts === 0 && leg.pnl === 0) return <span key={leg.name} className="chip na">{leg.name}: —</span>;
+          const s = leg.pnl > 0 ? '+' : '';
+          return <span key={leg.name} className={'chip ' + (leg.pnl > 0 ? 'win' : leg.pnl < 0 ? 'lose' : 'na')}>
+            {leg.name}: {s}${leg.pnl.toFixed(2)}
           </span>;
         })}
       </div>
       <div className={'tc-exp ' + (open ? 'open' : '')}>
         <div className="tc-exp-grid">
           <div className="tc-exp-item">
+            <div className="el">Signal</div>
+            <div className="ev">{t.signal_source || '—'}</div>
+          </div>
+          <div className="tc-exp-item">
+            <div className="el">Score</div>
+            <div className="ev">{t.signal_score ? t.signal_score.toFixed(3) : '—'}</div>
+          </div>
+          <div className="tc-exp-item">
+            <div className="el">HTF Bias</div>
+            <div className="ev">{t.htf_bias || '—'}</div>
+          </div>
+          <div className="tc-exp-item">
             <div className="el">Regime</div>
             <div className="ev">{t.regime || '—'}</div>
           </div>
-          <div className="tc-exp-item">
-            <div className="el">Result</div>
-            <div className="ev" style={{color: w ? 'var(--green)' : 'var(--red)'}}>{t.result}</div>
-          </div>
-          <div className="tc-exp-item">
-            <div className="el">Total Points</div>
-            <div className="ev">{sPt}{t.total_points?.toFixed(2)}</div>
-          </div>
-          {names.map(n => {
-            const leg = legs[n];
-            if (!leg) return null;
-            return (
-              <div key={n} className="tc-exp-item">
-                <div className="el">{n} PnL%</div>
-                <div className="ev" style={{color: leg.pnl_pct > 0 ? 'var(--green)' : 'var(--red)'}}>
-                  {leg.pnl_pct > 0 ? '+' : ''}{(leg.pnl_pct * 100).toFixed(2)}%
-                </div>
+          {legData.filter(l => l.contracts > 0).map(leg => (
+            <div key={leg.name} className="tc-exp-item">
+              <div className="el">{leg.name} Exit</div>
+              <div className="ev" style={{color: leg.pnl > 0 ? 'var(--green)' : leg.pnl < 0 ? 'var(--red)' : 'inherit'}}>
+                {leg.reason || '—'}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -474,15 +488,21 @@ function SessionFooter({ trades }) {
 
   const totals = { C1: 0, C2: 0, C3: 0, C4: 0 };
   trades.forEach(t => {
-    const legs = t.legs || {};
-    ['C1','C2','C3','C4'].forEach(n => { if (legs[n]) totals[n] += legs[n].points; });
+    totals.C1 += (t.c1_pnl || 0);
+    totals.C2 += (t.c2_pnl || 0);
+    totals.C3 += (t.c3_pnl || 0);
+    totals.C4 += (t.c4_pnl || 0);
   });
 
   let best = trades[0], worst = trades[0];
   trades.forEach(t => {
-    if (t.total_points > best.total_points) best = t;
-    if (t.total_points < worst.total_points) worst = t;
+    const p = t.total_pnl || 0;
+    if (p > (best.total_pnl || 0)) best = t;
+    if (p < (worst.total_pnl || 0)) worst = t;
   });
+
+  const bestPnl = best.total_pnl || 0;
+  const worstPnl = worst.total_pnl || 0;
 
   return (
     <div>
@@ -495,17 +515,17 @@ function SessionFooter({ trades }) {
             <div key={n} className="sf-cell">
               <div className="sfl">{n} Total</div>
               <div className={'sfv ' + (totals[n] > 0 ? 'pos' : totals[n] < 0 ? 'neg' : '')}>
-                {totals[n] > 0 ? '+' : ''}{totals[n].toFixed(1)} pts
+                {totals[n] > 0 ? '+' : ''}${totals[n].toFixed(2)}
               </div>
             </div>
           ))}
           <div className="sf-cell">
             <div className="sfl">Best Trade</div>
-            <div className="sfv pos">+{best.total_points.toFixed(1)} pts</div>
+            <div className="sfv pos">+${bestPnl.toFixed(2)}</div>
           </div>
           <div className="sf-cell">
             <div className="sfl">Worst Trade</div>
-            <div className="sfv neg">{worst.total_points.toFixed(1)} pts</div>
+            <div className={'sfv ' + (worstPnl < 0 ? 'neg' : '')}>${worstPnl.toFixed(2)}</div>
           </div>
         </div>
       </div>

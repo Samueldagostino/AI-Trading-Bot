@@ -141,6 +141,8 @@ class ScaleOutTrade:
 
     # Context
     signal_score: float = 0.0
+    signal_source: str = ""          # "sweep", "aggregator", etc.
+    htf_bias: str = ""               # "bullish", "bearish", "neutral"
     market_regime: str = "unknown"
     atr_at_entry: float = 0.0
 
@@ -317,6 +319,8 @@ class ScaleOutExecutor:
         regime_multiplier: float = 1.0,
         structural_target: float = 0.0,
         timestamp: Optional[datetime] = None,
+        signal_source: str = "",
+        htf_bias: str = "",
     ) -> Optional[ScaleOutTrade]:
         """
         Enter a 5-contract trade: C1 (1) + C2 (1) + C3 (3).
@@ -364,6 +368,8 @@ class ScaleOutExecutor:
             initial_stop=round(stop_price, 2),
             stop_distance=stop_distance,
             signal_score=signal_score,
+            signal_source=signal_source,
+            htf_bias=htf_bias,
             market_regime=regime,
             atr_at_entry=atr,
         )
@@ -1084,6 +1090,10 @@ class ScaleOutExecutor:
             "trade_id": trade.trade_id,
             "direction": trade.direction,
             "entry_price": trade.entry_price,
+            "signal_score": trade.signal_score,
+            "signal_source": trade.signal_source,
+            "htf_bias": trade.htf_bias,
+            "contracts": sum(l.contracts for l in trade.active_legs),
             "c1_exit_price": trade.c1.exit_price,
             "c1_exit_reason": trade.c1.exit_reason,
             "c1_pnl": trade.c1.net_pnl,

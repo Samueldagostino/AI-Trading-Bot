@@ -67,6 +67,23 @@ SWEEP_CONFLUENCE_BONUS: float = 0.05
 #   without full backtest validation across 6-month OOS window.
 HTF_STRENGTH_GATE: float = 0.3
 
+# ── HTF HYSTERESIS (anti-flip-flop) ─────────────────────────────
+#   With only 2 TFs (5m + 15m), a single 5m blip can flip the consensus
+#   from bearish→neutral→allows longs.  Hysteresis prevents this:
+#
+#   1) MARGIN: opposing direction must exceed this strength ratio to even
+#      START the confirmation timer.  0.3 = 30% stronger than neutral.
+#   2) CONFIRM BARS: opposing direction must hold for N consecutive
+#      get_bias() calls before the lock actually flips.  Prevents fakeouts
+#      where one candle spikes against the trend then reverses.
+#
+#   Example on a bearish day:
+#     - 15m bearish, 5m flips bullish → tie → neutral, but lock stays bearish
+#     - 5m stays bullish for 3 consecutive calls → NOW lock flips to neutral/bullish
+#     - Single 5m bull candle then reversal → timer resets, lock stays bearish
+HTF_HYSTERESIS_MARGIN: float = 0.3
+HTF_HYSTERESIS_CONFIRM_BARS: int = 3   # consecutive bars opposing must hold
+
 # ── HTF STALENESS LIMITS ──────────────────────────────────────────
 #   Maximum age (minutes) before a TF's bars are considered stale.
 #   If no bar arrives within this window, that TF's bias is downgraded

@@ -200,28 +200,45 @@ def _build_trade_log() -> tuple[list, float]:
       - time: HH:MM:SS ET
       - direction: LONG / SHORT
       - entry_price: float
-      - c1_pnl: float (dollar PnL for C1 leg)
-      - c1_reason: str (exit reason for C1)
-      - c2_pnl: float (dollar PnL for C2 leg)
-      - c2_reason: str (exit reason for C2)
+      - signal_score: float (0.0-1.0 conviction score)
+      - signal_source: str (sweep / aggregator)
+      - htf_bias: str (bullish / bearish / neutral)
+      - contracts: int (total contracts, typically 4)
+      - c1_pnl/c1_reason: C1 scalp (1 contract, 5-bar time exit)
+      - c2_pnl/c2_reason: C2 structural (1 contract, swing target)
+      - c3_pnl/c3_reason: C3 runner (2 contracts, ATR trail)
+      - c4_pnl/c4_reason: C4 unused (0 contracts)
       - total_pnl: float (total dollar PnL for the trade)
-      - signal_source: str (sweep / signal / confluence)
     """
     trades_file = LOGS_DIR / "paper_trades.json"
-    raw_trades = _read_json_safe(trades_file, default=[])
+    raw_trades = _read_jsonl_safe(trades_file, limit=500)
 
-    if not isinstance(raw_trades, list):
+    if not raw_trades:
         return [], 0.0
 
     from zoneinfo import ZoneInfo
 
-    today_et = datetime.now(ZoneInfo("America/New_York")).date()
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    today_et = now_et.date()
+
+    # Futures session spans midnight ET: starts 6 PM ET prior day.
+    # If it's before 6 PM ET, include trades from 6 PM yesterday onward.
+    # If it's after 6 PM ET, include trades from 6 PM today onward.
+    if now_et.hour < 18:
+        from datetime import timedelta
+        session_start_date = today_et - timedelta(days=1)
+    else:
+        session_start_date = today_et
+    session_start = datetime(
+        session_start_date.year, session_start_date.month, session_start_date.day,
+        18, 0, 0, tzinfo=ZoneInfo("America/New_York"),
+    )
 
     trade_log = []
     session_pnl = 0.0
 
     for t in raw_trades:
-        # Filter to today's trades only
+        # Filter to current futures session (6 PM ET prior day → now)
         ts_str = t.get("timestamp", "")
         if not ts_str:
             continue
@@ -234,26 +251,41 @@ def _build_trade_log() -> tuple[list, float]:
         except (ValueError, TypeError):
             continue
 
-        if et.date() != today_et:
+        if et < session_start:
             continue
 
-        total_pnl = t.get("total_pnl", 0.0)
+        total_pnl = t.get("pnl", t.get("total_pnl", 0.0))
         session_pnl += total_pnl
 
         direction = t.get("direction", "").upper()
         if direction not in ("LONG", "SHORT"):
             direction = direction or "UNKNOWN"
 
+        c1_pnl = round(t.get("c1_pnl", 0.0), 2)
+        c2_pnl = round(t.get("c2_pnl", 0.0), 2)
+        c3_pnl = round(t.get("c3_pnl", 0.0), 2)
+        # If c3_pnl not recorded (older trades), derive from total
+        if c3_pnl == 0.0 and abs(total_pnl - c1_pnl - c2_pnl) > 0.5:
+            c3_pnl = round(total_pnl - c1_pnl - c2_pnl, 2)
+
         trade_log.append({
             "time": et.strftime("%H:%M:%S ET"),
             "direction": direction,
             "entry_price": round(t.get("entry_price", 0.0), 2),
-            "c1_pnl": round(t.get("c1_pnl", 0.0), 2),
+            "signal_score": round(t.get("signal_score", 0.0), 3),
+            "signal_source": t.get("signal_source", "") or "signal",
+            "htf_bias": t.get("htf_bias", ""),
+            "regime": t.get("regime", ""),
+            "contracts": t.get("contracts", 4),
+            "c1_pnl": c1_pnl,
             "c1_reason": t.get("c1_reason", ""),
-            "c2_pnl": round(t.get("c2_pnl", 0.0), 2),
+            "c2_pnl": c2_pnl,
             "c2_reason": t.get("c2_reason", ""),
+            "c3_pnl": c3_pnl,
+            "c3_reason": t.get("c3_reason", ""),
+            "c4_pnl": round(t.get("c4_pnl", 0.0), 2),
+            "c4_reason": t.get("c4_reason", ""),
             "total_pnl": round(total_pnl, 2),
-            "signal_source": t.get("signal_source", "signal"),
         })
 
     return trade_log, round(session_pnl, 2)
@@ -266,7 +298,20 @@ def _build_trade_events(decisions: list) -> list:
     price, score, stop, target, pnl, reason.
     """
     from zoneinfo import ZoneInfo
-    today_et = datetime.now(ZoneInfo("America/New_York")).date()
+
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    today_et = now_et.date()
+    # Futures session: 6 PM ET prior day → now
+    if now_et.hour < 18:
+        from datetime import timedelta
+        session_start_date = today_et - timedelta(days=1)
+    else:
+        session_start_date = today_et
+    session_start = datetime(
+        session_start_date.year, session_start_date.month, session_start_date.day,
+        18, 0, 0, tzinfo=ZoneInfo("America/New_York"),
+    )
+
     events = []
 
     for d in decisions:
@@ -282,7 +327,7 @@ def _build_trade_events(decisions: list) -> list:
         except (ValueError, TypeError):
             continue
 
-        if et.date() != today_et:
+        if et < session_start:
             continue
 
         decision = d.get("decision", "")

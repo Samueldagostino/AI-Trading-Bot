@@ -881,6 +881,8 @@ class TradingOrchestrator:
                 signal_score=entry_score,
                 regime=self._current_regime,
                 timestamp=bar.timestamp,
+                signal_source=entry_source,
+                htf_bias=htf_bias.consensus_direction if htf_bias else "",
             )
 
             if trade:
