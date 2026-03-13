@@ -53,9 +53,9 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ──
 POINT_VALUE = 2.0       # MNQ $2/point
-SLIPPAGE_RTH = 0.50     # pts per fill
-SLIPPAGE_ETH = 1.00     # pts per fill
-COMMISSION_RT = 2.58    # round-trip per contract
+SLIPPAGE_RTH = 0.75     # pts per fill (conservative — real avg ~0.50)
+SLIPPAGE_ETH = 1.25     # pts per fill (conservative — real avg ~1.00)
+COMMISSION_RT = 3.00    # round-trip per contract (conservative — real is $2.58)
 C1_EXIT_BARS = 5        # 5-bar time exit
 STOP_BUFFER = 3.0
 ET = ZoneInfo("America/New_York")

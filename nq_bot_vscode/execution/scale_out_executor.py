@@ -57,6 +57,17 @@ from monitoring.alert_templates import AlertTemplates
 logger = logging.getLogger(__name__)
 
 
+# ================================================================
+# ANTI-CHEAT: Causality Enforcement
+# ================================================================
+class CausalityViolationError(Exception):
+    """Raised when the system detects potential look-ahead bias."""
+    pass
+
+_LAST_BAR_TIMESTAMP = None
+_CAUSALITY_VIOLATIONS = 0
+
+
 class ScaleOutPhase(Enum):
     """Current phase of the scale-out trade."""
     PENDING = "pending"          # Signal received, not yet entered
@@ -163,6 +174,9 @@ class ScaleOutTrade:
     c1_exit_bars: int = 0
     c1_price_velocity: float = 0.0
 
+    # C3 delayed entry: C3 starts as pending, only fills when C1 exits profitably
+    c3_pending: bool = True
+
     # Aggregate PnL
     total_gross_pnl: float = 0.0
     total_commission: float = 0.0
@@ -258,9 +272,9 @@ class ScaleOutExecutor:
     @staticmethod
     def score_based_contracts(signal_score: float, regime_multiplier: float = 1.0) -> dict:
         """
-        4 contracts: C1 (1) + C2 (1) + C3 (2).
+        5 contracts: C1 (1) + C2 (1) + C3 (3).
 
-        C3 (runner) gets 2× allocation -- delayed entry + ATR trail captures
+        C3 (runner) gets 3× allocation -- delayed entry + ATR trail captures
         fat tails while C1 canary validates direction first.
 
         C4 is unused (kept for backward compat).
@@ -268,8 +282,8 @@ class ScaleOutExecutor:
         Partial fill handling: if fewer contracts fill, priority order is
         C3 first (moneymaker), then C1 (quick feedback), then C2 (structural).
         """
-        alloc = {"c1": 1, "c2": 1, "c3": 2, "c4": 0}
-        alloc["total"] = 4
+        alloc = {"c1": 1, "c2": 1, "c3": 3, "c4": 0}
+        alloc["total"] = 5
         return alloc
 
     @staticmethod
@@ -286,8 +300,8 @@ class ScaleOutExecutor:
         adjusted = {"c1": 0, "c2": 0, "c3": 0, "c4": 0}
         remaining = filled_contracts
 
-        # C3 gets up to 2 contracts
-        adjusted["c3"] = min(2, remaining)
+        # C3 gets up to 3 contracts
+        adjusted["c3"] = min(3, remaining)
         remaining -= adjusted["c3"]
 
         # C1 gets 1 if available
@@ -454,6 +468,19 @@ class ScaleOutExecutor:
 
         for leg in trade.all_legs:
             if leg.contracts > 0:
+                # v1.3.3: C3 delayed entry -- C3 is NOT filled at trade open.
+                # It remains pending until C1 exits profitably, then fills at
+                # the market price at that time. This prevents the impossible
+                # scenario of C3 getting the best entry on winners and no
+                # exposure on losers.
+                if leg.leg_label == "C3" and self._c3_delayed_entry:
+                    leg.is_filled = False
+                    leg.is_open = False
+                    leg.commission = 0.0
+                    # Store the stop price for later use when C3 fills
+                    # (entry_price will be set when C3 actually fills)
+                    continue
+
                 leg.entry_price = fill_price
                 leg.entry_time = now
                 leg.is_filled = True
@@ -466,6 +493,9 @@ class ScaleOutExecutor:
                 leg.is_filled = False
                 leg.is_open = False
                 leg.commission = 0.0
+
+        # Mark C3 as pending when delayed entry is enabled
+        trade.c3_pending = self._c3_delayed_entry and trade.c3.contracts > 0
 
         trade.entry_price = fill_price
         trade.entry_time = now
@@ -522,6 +552,18 @@ class ScaleOutExecutor:
         If a bar's low dips below a long stop, the stop is triggered even if
         the bar closes above it. Same logic for shorts with bar_high.
         """
+        global _LAST_BAR_TIMESTAMP, _CAUSALITY_VIOLATIONS
+
+        # ANTI-CHEAT: Verify bar timestamps are monotonically increasing
+        if _LAST_BAR_TIMESTAMP is not None and current_time < _LAST_BAR_TIMESTAMP:
+            _CAUSALITY_VIOLATIONS += 1
+            msg = (f"CAUSALITY VIOLATION #{_CAUSALITY_VIOLATIONS}: "
+                   f"Bar timestamp {current_time} < previous {_LAST_BAR_TIMESTAMP}. "
+                   f"THE BOT IS CHEATING — processing bars out of order!")
+            logger.critical(msg)
+            raise CausalityViolationError(msg)
+        _LAST_BAR_TIMESTAMP = current_time
+
         trade = self._active_trade
         if not trade or trade.phase in (ScaleOutPhase.DONE, ScaleOutPhase.ERROR, ScaleOutPhase.PENDING):
             return None
@@ -590,24 +632,27 @@ class ScaleOutExecutor:
             for leg in trade.open_legs:
                 leg.mfe = max(leg.mfe, unrealized)
 
-        # --- Update best prices ---
+        # --- Update best prices (use intra-bar extremes for accurate MFE) ---
+        best_high = check_high  # bar_high or price
+        best_low = check_low    # bar_low or price
         if direction == "long":
-            trade.c1_best_price = max(trade.c1_best_price, price)
-            trade.c2_best_price = max(trade.c2_best_price, price)
+            trade.c1_best_price = max(trade.c1_best_price, best_high)
+            trade.c2_best_price = max(trade.c2_best_price, best_high)
             for leg in trade.open_legs:
-                leg.best_price = max(leg.best_price, price)
+                leg.best_price = max(leg.best_price, best_high)
         else:
-            trade.c1_best_price = min(trade.c1_best_price, price)
-            trade.c2_best_price = min(trade.c2_best_price, price)
+            trade.c1_best_price = min(trade.c1_best_price, best_low)
+            trade.c2_best_price = min(trade.c2_best_price, best_low)
             for leg in trade.open_legs:
-                leg.best_price = min(leg.best_price, price)
+                leg.best_price = min(leg.best_price, best_low)
 
         # --- C2 structural target check during Phase 1 (in case of fast move) ---
+        # Use intra-bar extremes: for longs, bar_high may have reached target
         if trade.c2.is_open and trade.c2.target_price > 0:
             target_hit = False
-            if direction == "long" and price >= trade.c2.target_price:
+            if direction == "long" and check_high >= trade.c2.target_price:
                 target_hit = True
-            elif direction == "short" and price <= trade.c2.target_price:
+            elif direction == "short" and check_low <= trade.c2.target_price:
                 target_hit = True
             if target_hit:
                 self._close_leg(trade.c2, trade.c2.target_price, time, "structural_target", direction)
@@ -719,24 +764,71 @@ class ScaleOutExecutor:
                 pnl=trade.c1.net_pnl,
             ))
 
-        # ── v1.3.1: C3 delayed entry check at C1 exit ──────────────────
-        # Backtest rule: C3 only stays open when C1 exits profitably (net PnL > 0).
-        # This covers the rare case (3/120 in backtest) where C1 exits via
-        # 12-bar fallback with positive unrealized pts but negative net PnL
-        # after commission/slippage.
+        # ── v1.3.3: C3 delayed entry -- fill C3 NOW if C1 was profitable ──
+        # C3 was never filled at trade open (pending). If C1 exits profitably,
+        # C3 enters at the CURRENT market price (exit_price). If C1 loses,
+        # C3 stays unfilled -- zero PnL, zero commission, zero everything.
         c3_blocked_at_transition = False
-        if (
-            self._c3_delayed_entry
-            and trade.c1.net_pnl <= 0
-            and trade.c3.is_open
-            and trade.c3.contracts > 0
-        ):
-            c3_blocked_at_transition = True
-            self._close_leg(trade.c3, exit_price, time, "c3_delayed_blocked", direction)
-            logger.info(
-                f"  C3 DELAYED BLOCKED at C1 exit: C1 net PnL ${trade.c1.net_pnl:.2f} <= 0 | "
-                f"C3 closed at market"
-            )
+        if self._c3_delayed_entry and trade.c3_pending and trade.c3.contracts > 0:
+            if trade.c1.net_pnl > 0:
+                # C1 profitable → FILL C3 at current market price with entry slippage
+                import random
+                from zoneinfo import ZoneInfo
+                from datetime import time as dt_time
+                if time:
+                    et = time.astimezone(ZoneInfo("America/New_York"))
+                    is_rth = dt_time(9, 30) <= et.time() < dt_time(16, 0)
+                else:
+                    is_rth = True
+                base_slip = 0.75 if is_rth else 1.25
+                c3_slippage = base_slip + random.choice([-0.25, 0, 0.25, 0.50])
+                c3_slippage = max(0.25, c3_slippage)
+
+                if direction == "long":
+                    c3_fill_price = round(exit_price + c3_slippage, 2)
+                else:
+                    c3_fill_price = round(exit_price - c3_slippage, 2)
+
+                trade.c3.entry_price = c3_fill_price
+                trade.c3.entry_time = time
+                trade.c3.is_filled = True
+                trade.c3.is_open = True
+                trade.c3.best_price = c3_fill_price
+                trade.c3.commission = 1.50 * 2 * trade.c3.contracts
+                trade.c3_pending = False
+
+                # Set C3's stop: use BE from its own entry if immediate BE variant
+                if c1_was_profitable and be_variant != "B":
+                    if direction == "long":
+                        c3_be_stop = round(c3_fill_price + BE_BUFFER_PTS, 2)
+                    else:
+                        c3_be_stop = round(c3_fill_price - BE_BUFFER_PTS, 2)
+                    trade.c3.stop_price = c3_be_stop
+                    trade.c3.be_triggered = True
+                else:
+                    # Use initial stop for C3
+                    trade.c3.stop_price = trade.initial_stop
+
+                logger.info(
+                    f"  C3 DELAYED FILL: C1 net PnL ${trade.c1.net_pnl:.2f} > 0 | "
+                    f"C3 filled {trade.c3.contracts}x @ {c3_fill_price:.2f} (slip {c3_slippage:.2f}) | "
+                    f"Stop: {trade.c3.stop_price:.2f}"
+                )
+
+                self._c3_stats["trades_total"] += 1
+                self._c3_stats["c3_entered"] += 1
+            else:
+                # C1 lost → C3 never enters. Zero everything.
+                c3_blocked_at_transition = True
+                trade.c3_pending = False
+                # C3 stays unfilled: is_filled=False, is_open=False, no PnL, no commission
+                logger.info(
+                    f"  C3 DELAYED BLOCKED: C1 net PnL ${trade.c1.net_pnl:.2f} <= 0 | "
+                    f"C3 never entered (no cost, no PnL)"
+                )
+
+                self._c3_stats["trades_total"] += 1
+                self._c3_stats["c3_blocked"] += 1
 
         # If no remaining legs, trade is done
         if not trade.open_legs:
@@ -755,7 +847,8 @@ class ScaleOutExecutor:
     # ================================================================
     # SCALING: Independent management of C2, C3, C4
     # ================================================================
-    async def _manage_scaling(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
+    async def _manage_scaling(self, trade: ScaleOutTrade, price: float, time: datetime,
+                              bar_high: float = None, bar_low: float = None) -> Optional[dict]:
         """
         Manage remaining legs independently after C1 exits.
 
@@ -767,15 +860,20 @@ class ScaleOutExecutor:
         cfg = self.scale_config
         closed_legs = []
 
+        # Intra-bar extremes for realistic stop/target checks
+        check_low = bar_low if bar_low is not None else price
+        check_high = bar_high if bar_high is not None else price
+
         for leg in trade.open_legs:
             # Update per-leg tracking
             leg.bars_since_active += 1
 
+            # Use intra-bar extremes for best_price tracking (more accurate MFE)
             if direction == "long":
-                leg.best_price = max(leg.best_price, price)
+                leg.best_price = max(leg.best_price, check_high)
                 unrealized = price - leg.entry_price
             else:
-                leg.best_price = min(leg.best_price, price)
+                leg.best_price = min(leg.best_price, check_low)
                 unrealized = leg.entry_price - price
 
             if unrealized > 0:
@@ -785,11 +883,13 @@ class ScaleOutExecutor:
                     trade.c2_mfe = max(trade.c2_mfe, unrealized)
 
             # ------ INITIAL STOP CHECK (all legs) ------
+            # Use intra-bar extremes: for longs, bar_low may have hit stop;
+            # for shorts, bar_high may have hit stop
             stop_hit = False
             stop_to_check = leg.stop_price
-            if direction == "long" and price <= stop_to_check:
+            if direction == "long" and check_low <= stop_to_check:
                 stop_hit = True
-            elif direction == "short" and price >= stop_to_check:
+            elif direction == "short" and check_high >= stop_to_check:
                 stop_hit = True
 
             if stop_hit:
@@ -802,10 +902,11 @@ class ScaleOutExecutor:
 
             if leg.exit_strategy == "structural_target":
                 # C2: Exit at structural target (swing point)
+                # Use intra-bar extremes for target checks
                 target_hit = False
-                if direction == "long" and price >= leg.target_price:
+                if direction == "long" and check_high >= leg.target_price:
                     target_hit = True
-                elif direction == "short" and price <= leg.target_price:
+                elif direction == "short" and check_low <= leg.target_price:
                     target_hit = True
 
                 if target_hit:
@@ -836,11 +937,11 @@ class ScaleOutExecutor:
                 self._apply_delayed_be(trade, leg, cfg, direction)
 
             elif leg.exit_strategy == "target_3r":
-                # Legacy C3: Check profit target
+                # Legacy C3: Check profit target using intra-bar extremes
                 target_hit = False
-                if direction == "long" and price >= leg.target_price:
+                if direction == "long" and check_high >= leg.target_price:
                     target_hit = True
-                elif direction == "short" and price <= leg.target_price:
+                elif direction == "short" and check_low <= leg.target_price:
                     target_hit = True
 
                 if target_hit:
@@ -855,8 +956,11 @@ class ScaleOutExecutor:
                 # C3: Pure ATR trailing stop (runner)
                 self._update_atr_trail(trade, leg, cfg, direction)
 
-                # C3: Max target safety valve
-                points_from_entry = abs(price - leg.entry_price)
+                # C3: Max target safety valve (use intra-bar extremes)
+                if direction == "long":
+                    points_from_entry = check_high - leg.entry_price
+                else:
+                    points_from_entry = leg.entry_price - check_low
                 if points_from_entry >= cfg.c2_max_target_points:
                     self._close_leg(leg, round(price, 2), time, "max_target", direction)
                     closed_legs.append(leg.leg_label)
@@ -1005,75 +1109,55 @@ class ScaleOutExecutor:
     async def _close_all(self, trade: ScaleOutTrade, price: float, time: datetime, reason: str) -> dict:
         """Close all open contracts (initial stop hit).
 
-        v1.3.1: When called during Phase 1 (all legs still open) and C3 delayed
-        entry is enabled, C3 is marked as blocked. The PnL adjustment happens
-        in _finalize_trade to mirror exact backtest behavior.
+        v1.3.3: When C3 delayed entry is enabled and C3 is still pending
+        (never filled), we simply skip it -- no PnL, no commission, no close.
+        Only close legs that are actually open (C1, C2 during Phase 1).
         """
         direction = trade.direction
 
-        # v1.3.1: Determine if C3 should be blocked
-        # C3 is blocked when the initial stop is hit during Phase 1
-        # (C1 never got a chance to prove direction)
-        c3_should_block = (
+        # v1.3.3: If C3 is pending (never filled), mark it as blocked and
+        # resolve its pending state. It was never in the trade.
+        c3_was_pending = (
             self._c3_delayed_entry
-            and trade.phase == ScaleOutPhase.PHASE_1
-            and reason == "stop"
-            and trade.c3.is_open
+            and trade.c3_pending
             and trade.c3.contracts > 0
         )
 
+        if c3_was_pending:
+            trade.c3_pending = False
+            self._c3_stats["trades_total"] += 1
+            self._c3_stats["c3_blocked"] += 1
+            logger.info(
+                f"  C3 PENDING SKIPPED: initial stop hit during Phase 1, "
+                f"C3 was never filled (no cost)"
+            )
+
+        # Close only legs that are actually open (C3 won't be here if pending)
         for leg in trade.open_legs:
-            if c3_should_block and leg.leg_label == "C3":
-                self._close_leg(leg, price, time, "c3_delayed_blocked", direction)
-            else:
-                self._close_leg(leg, price, time, reason, direction)
+            self._close_leg(leg, price, time, reason, direction)
 
         trade.c1_exit_bars = trade.c1_bars_elapsed
-        return self._finalize_trade(trade, time, c3_blocked=c3_should_block)
+        return self._finalize_trade(trade, time, c3_blocked=c3_was_pending)
 
     def _finalize_trade(self, trade: ScaleOutTrade, time: datetime, c3_blocked: bool = False) -> dict:
         """Compute final PnL and archive trade.
 
-        v1.3.1: When c3_blocked=True, C3's PnL contribution is zeroed out
-        to mirror the delayed C3 runner architecture validated in backtest.
-        C3 was never really "in" the trade -- we reverse its market exposure.
+        v1.3.3: Only sum PnL from legs that were actually filled (is_filled=True).
+        When C3 is blocked (never entered), it contributes zero to all totals --
+        no retroactive adjustment needed since C3 was never in the trade.
         """
-        trade.total_gross_pnl = sum(l.gross_pnl for l in trade.active_legs)
-        trade.total_commission = sum(l.commission for l in trade.active_legs)
+        # Only sum PnL from legs that were actually filled
+        filled_legs = [l for l in trade.active_legs if l.is_filled]
+        trade.total_gross_pnl = sum(l.gross_pnl for l in filled_legs)
+        trade.total_commission = sum(l.commission for l in filled_legs)
         trade.total_net_pnl = trade.total_gross_pnl - trade.total_commission
 
-        # v1.3.1: C3 delayed entry PnL adjustment
-        # When C3 is blocked, remove its PnL contribution and add back its
-        # slippage/commission costs (since it was never really entered).
-        # This mirrors the backtest logic exactly.
         if c3_blocked and trade.c3.contracts > 0:
-            c3_pnl_original = trade.c3.net_pnl
-            c3_gross = trade.c3.gross_pnl
-            c3_commission = trade.c3.commission
-
-            # Remove C3's market PnL but keep slippage cost as "blocked" cost
-            # In the backtest: adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_slip_cost + c3_commission
-            # Effectively: total_net_pnl -= c3_pnl_original (remove the C3 loss)
-            # then add back the slippage cost that wouldn't have occurred
-            trade.total_net_pnl -= c3_gross  # Remove C3 gross PnL (the market loss)
-            trade.total_commission -= c3_commission  # Remove C3 commission (never entered)
-            trade.total_gross_pnl -= c3_gross  # Adjust gross too
-
-            # Update C3 stats
-            self._c3_stats["trades_total"] += 1
-            self._c3_stats["c3_blocked"] += 1
-            self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
-
             logger.info(
-                f"  C3 DELAYED BLOCKED: removed C3 PnL ${c3_pnl_original:.2f} | "
-                f"Adjusted total: ${trade.total_net_pnl:.2f} | "
-                f"C3 stats: {self._c3_stats['c3_blocked']}/{self._c3_stats['trades_total']} blocked, "
-                f"${self._c3_stats['c3_pnl_saved']:.2f} saved"
+                f"  C3 NEVER ENTERED: C3 was pending, zero PnL | "
+                f"Total from filled legs: ${trade.total_net_pnl:.2f} | "
+                f"C3 stats: {self._c3_stats['c3_blocked']}/{self._c3_stats['trades_total']} blocked"
             )
-        elif trade.c3.contracts > 0:
-            # C3 entered (not blocked) -- track stats
-            self._c3_stats["trades_total"] += 1
-            self._c3_stats["c3_entered"] += 1
 
         trade.closed_at = time
         trade._set_phase(ScaleOutPhase.DONE)
@@ -1098,13 +1182,16 @@ class ScaleOutExecutor:
         self._trade_history.append(trade)
         self._active_trade = None
 
-        # Log summary
+        # Log summary (only include filled legs; unfilled C3 shows as "never_entered")
         leg_summaries = []
         for leg in trade.active_legs:
-            pts = abs(leg.exit_price - leg.entry_price) if leg.exit_price else 0
-            leg_summaries.append(
-                f"{leg.leg_label}: {leg.exit_reason} ({pts:.1f}pts ${leg.net_pnl:.2f})"
-            )
+            if leg.is_filled:
+                pts = abs(leg.exit_price - leg.entry_price) if leg.exit_price else 0
+                leg_summaries.append(
+                    f"{leg.leg_label}: {leg.exit_reason} ({pts:.1f}pts ${leg.net_pnl:.2f})"
+                )
+            else:
+                leg_summaries.append(f"{leg.leg_label}: never_entered")
 
         logger.info(
             f"TRADE CLOSED: {trade.direction.upper()} | "

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 MNQ_TICK_SIZE = 0.25
 MNQ_POINT_VALUE = 2.0
-MNQ_COMMISSION_PER_CONTRACT = 1.29
+MNQ_COMMISSION_PER_CONTRACT = 1.50  # Conservative (real Tradovate is $1.29)
 
 
 @dataclass

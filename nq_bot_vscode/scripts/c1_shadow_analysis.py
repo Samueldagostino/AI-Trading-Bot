@@ -24,20 +24,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Constants matching the real backtest
 POINT_VALUE = 2.0  # MNQ
-COMMISSION_PER_CONTRACT_PER_SIDE = 1.29
-COMMISSION_RT = COMMISSION_PER_CONTRACT_PER_SIDE * 2  # $2.58 round-trip for 1 contract
+COMMISSION_PER_CONTRACT_PER_SIDE = 1.50  # Conservative (real is $1.29)
+COMMISSION_RT = COMMISSION_PER_CONTRACT_PER_SIDE * 2  # $3.00 round-trip for 1 contract
 
 def get_slippage_pts(timestamp_str):
-    """Simplified slippage: 0.50 RTH, 1.00 ETH."""
+    """Simplified slippage: 0.75 RTH, 1.25 ETH (conservative)."""
     # Parse hour from ISO timestamp
     try:
         hour = int(timestamp_str[11:13])
         # RTH roughly 9:30-16:00 ET => hours 9-15
         if 9 <= hour <= 15:
-            return 0.50
+            return 0.75
     except:
         pass
-    return 1.00
+    return 1.25
 
 
 def main():

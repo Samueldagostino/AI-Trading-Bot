@@ -11,8 +11,8 @@ Zero look-ahead bias guaranteed.
 EXECUTION RULES:
   - 1m bars aggregated to 2m execution bars (~700K bars)
   - Signal at bar N close -> entry at bar N+1 open + slippage
-  - Slippage: RTH 0.50 pts/fill, ETH 1.00 pts/fill (both sides)
-  - Commission: $1.29 per contract per side (round-trip charged)
+  - Slippage: RTH 0.75 pts/fill, ETH 1.25 pts/fill (both sides, conservative)
+  - Commission: $1.50 per contract per side (round-trip charged, conservative)
   - Point value: $2.00/pt (MNQ)
   - 2-contract scale-out: C1 trail-from-profit, C2 ATR trail
   - HC filter >= 0.75, HTF gate >= 0.3, max stop 30pts, min R:R 1.5
@@ -84,9 +84,9 @@ ET = ZoneInfo("America/New_York")
 MIN_RR_RATIO = MIN_RR_OVERRIDE if MIN_RR_OVERRIDE is not None else 1.5
 
 # ── Slippage & Commission Model ─────────────────────────────────
-SLIPPAGE_RTH_PTS = 0.50   # Per fill, RTH
-SLIPPAGE_ETH_PTS = 1.00   # Per fill, ETH
-COMMISSION_PER_CONTRACT_PER_SIDE = 1.29  # $1.29 entry + $1.29 exit = $2.58/contract
+SLIPPAGE_RTH_PTS = 0.75   # Per fill, RTH (conservative — real avg ~0.50)
+SLIPPAGE_ETH_PTS = 1.25   # Per fill, ETH (conservative — real avg ~1.00)
+COMMISSION_PER_CONTRACT_PER_SIDE = 1.50  # $1.50 entry + $1.50 exit = $3.00/contract (conservative — real is $1.29)
 POINT_VALUE = 2.00         # MNQ $2/point
 
 # ── Phase 3 Additive: Post-Sweep FVG Tracking (data collection) ──
@@ -887,6 +887,14 @@ class CausalReplayEngine:
         # ── Maintenance window entry cutoff ──
         self._maintenance_entry_blocked: bool = False
 
+        # ── Bar-by-bar equity tracking for accurate drawdown ──
+        self._starting_equity: float = 50_000.0
+        self._equity_series: List[float] = [self._starting_equity]
+
+        # ── ANTI-CHEAT: Causality violation tracking ──
+        self._causality_violations: int = 0
+        self._prev_bar_ts: Optional[datetime] = None
+
         # ── Patch executor for backtest mode ──
         self._patch_executor()
 
@@ -897,10 +905,9 @@ class CausalReplayEngine:
         """Override _paper_enter to fix three issues:
         1. No additional random slippage (engine applies it deterministically)
         2. Use simulated bar time instead of datetime.now(timezone.utc)
-        3. Charge round-trip commission ($1.29 × 2 sides per contract)
+        3. Charge round-trip commission ($1.50 × 2 sides × contracts, conservative)
         """
         engine_ref = self
-        commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2  # $2.58 round-trip per contract
 
         async def patched_paper_enter(trade, price):
             fill_price = round(price, 2)
@@ -913,7 +920,9 @@ class CausalReplayEngine:
                     leg.is_filled = True
                     leg.is_open = True
                     leg.best_price = fill_price
-                    leg.commission = commission_rt  # Round-trip: $2.58 per contract
+                    # Commission: $1.50/contract/side (conservative — real is $1.29)
+                    # Charged as round-trip upfront: $1.50 * 2 sides * contracts
+                    leg.commission = 1.50 * 2 * leg.contracts
 
             trade.entry_price = fill_price
             trade.entry_time = sim_time
@@ -1049,50 +1058,39 @@ class CausalReplayEngine:
         if not self.executor.has_active_trade:
             return None
 
-        result = await self.executor.update(bar["close"], bar["timestamp"])
+        result = await self.executor.update(bar["close"], bar["timestamp"], bar_high=bar["high"], bar_low=bar["low"])
 
         if result and result.get("action") == "trade_closed":
             # Get completed trade from executor for accurate per-leg exit times
             closed_trade = self.executor._trade_history[-1]
 
             # Per-leg exit slippage based on each leg's exit timestamp
+            # v1.3.3: Only compute slippage for legs that were actually filled
             total_exit_slippage = 0.0
             leg_slippages = {}
             for leg in closed_trade.active_legs:
-                slip = (get_slippage(leg.exit_time) if leg.exit_time else SLIPPAGE_RTH_PTS)
-                leg_slippages[leg.leg_label] = slip
-                total_exit_slippage += slip * leg.contracts
+                if leg.is_filled:
+                    slip = (get_slippage(leg.exit_time) if leg.exit_time else SLIPPAGE_RTH_PTS)
+                    leg_slippages[leg.leg_label] = slip
+                    total_exit_slippage += slip * leg.contracts
             exit_slippage_cost = total_exit_slippage * POINT_VALUE
 
             raw_pnl = result.get("total_pnl", 0.0)
             adjusted_pnl = raw_pnl - exit_slippage_cost
 
-            # ── Delayed C3: Zero out C3 PnL if C1 was not profitable ──
+            # v1.3.3: C3 delayed entry is now handled correctly by the executor.
+            # C3 is only filled when C1 exits profitably (enters at market price
+            # at that time). When C1 loses, C3 was never filled -- zero PnL,
+            # zero commission. No retroactive adjustment needed.
             c1_pnl = result.get("c1_pnl", 0)
-            c3_pnl_original = result.get("c3_pnl", 0)
-            c3_pnl_final = c3_pnl_original
-            c3_blocked = False
+            c3_blocked = result.get("c3_blocked", False)
+            c3_pnl_final = result.get("c3_pnl", 0)
 
             if C3_DELAYED_ENTRY:
                 self._c3_stats["trades_total"] += 1
-                if c1_pnl <= 0:
-                    # C1 lost → C3 never entered → zero its contribution
-                    c3_blocked = True
-                    c3_pnl_final = 0.0
-                    # Also remove C3's exit slippage cost
-                    c3_slip = leg_slippages.get("C3", SLIPPAGE_RTH_PTS)
-                    c3_contracts = closed_trade.c3.contracts
-                    c3_slip_cost = c3_slip * c3_contracts * POINT_VALUE
-                    # Also remove C3's commission (already in raw_pnl from executor)
-                    c3_commission = closed_trade.c3.commission
-
-                    # Adjust PnL: remove C3 loss + its slippage + add back its commission
-                    # (commission was already subtracted in executor's raw_pnl)
-                    adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_slip_cost + c3_commission
+                if c3_blocked:
                     self._c3_stats["c3_blocked"] += 1
-                    self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
                 else:
-                    # C1 profitable → C3 enters (keep full PnL)
                     self._c3_stats["c3_entered"] += 1
 
             # NaN guard on PnL
@@ -1113,7 +1111,7 @@ class CausalReplayEngine:
                 "entry_price": result.get("entry_price", 0),
                 "c1_exit_price": result.get("c1_exit_price", 0),
                 "c2_exit_price": result.get("c2_exit_price", 0),
-                "c3_exit_price": result.get("c3_exit_price", 0) if not c3_blocked else 0,
+                "c3_exit_price": result.get("c3_exit_price", 0),
                 "c4_exit_price": result.get("c4_exit_price", 0),
                 "raw_pnl": raw_pnl,
                 "exit_slippage_cost": exit_slippage_cost,
@@ -1127,7 +1125,7 @@ class CausalReplayEngine:
                 "c4_pnl": result.get("c4_pnl", 0),
                 "c1_exit_reason": result.get("c1_exit_reason", ""),
                 "c2_exit_reason": result.get("c2_exit_reason", ""),
-                "c3_exit_reason": result.get("c3_exit_reason", "n/a") if not c3_blocked else "delayed_c3_blocked",
+                "c3_exit_reason": result.get("c3_exit_reason", "n/a"),
                 "c4_exit_reason": result.get("c4_exit_reason", "n/a"),
                 "commission_total": closed_trade.total_commission,
             }
@@ -1554,7 +1552,7 @@ class CausalReplayEngine:
 
         total_bars = len(bars_2m)
         num_contracts = 1  # C1-only
-        commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * num_contracts  # $2.58
+        commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * num_contracts  # $3.00 (conservative)
         time_exit_bars = 5  # C1 5-bar time exit
 
         shadow_results = []
@@ -1673,7 +1671,7 @@ class CausalReplayEngine:
             g["shadow_total_pnl"] += r["shadow_pnl"]
 
             # For profit factor: track gross wins/losses (before commission)
-            # C1-only: 1 contract, so commission is $2.58
+            # C1-only: 1 contract, so commission is $3.00 (conservative)
             commission_rt_1c = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 1
             gross = r["shadow_pnl"] + commission_rt_1c
 
@@ -1747,6 +1745,17 @@ class CausalReplayEngine:
         self._bars_processed += 1
         ts = bar["timestamp"]
 
+        # ── ANTI-CHEAT: Verify strictly increasing timestamps ──
+        if hasattr(self, '_prev_bar_ts') and self._prev_bar_ts is not None:
+            if bar["timestamp"] <= self._prev_bar_ts:
+                self._causality_violations += 1
+                logger.critical(
+                    f"ANTI-CHEAT ALERT #{self._causality_violations}: "
+                    f"Bar timestamp {bar['timestamp']} <= previous {self._prev_bar_ts}. "
+                    f"LOOK-AHEAD DETECTED — system is cheating!"
+                )
+        self._prev_bar_ts = bar["timestamp"]
+
         # ── MAINTENANCE WINDOW CHECKS (must be FIRST -- before any signal processing) ──
         current_et = ts.astimezone(ET)
         current_time_et = current_et.time()
@@ -1761,29 +1770,23 @@ class CausalReplayEngine:
                 if result:
                     # Process exit PnL through same path as normal exits
                     closed_trade = self.executor._trade_history[-1]
+                    # v1.3.3: Only compute slippage for filled legs
                     total_exit_slippage = 0.0
                     for leg in closed_trade.active_legs:
-                        slip = (get_slippage(leg.exit_time) if leg.exit_time else SLIPPAGE_RTH_PTS)
-                        total_exit_slippage += slip * leg.contracts
+                        if leg.is_filled:
+                            slip = (get_slippage(leg.exit_time) if leg.exit_time else SLIPPAGE_RTH_PTS)
+                            total_exit_slippage += slip * leg.contracts
                     exit_slippage_cost = total_exit_slippage * POINT_VALUE
                     raw_pnl = result.get("total_pnl", 0.0)
                     adjusted_pnl = raw_pnl - exit_slippage_cost
 
-                    # C3 delayed entry logic
+                    # v1.3.3: C3 handled by executor -- no retroactive adjustment needed
                     c1_pnl = result.get("c1_pnl", 0)
-                    c3_pnl_original = result.get("c3_pnl", 0)
-                    c3_blocked = False
+                    c3_blocked = result.get("c3_blocked", False)
                     if C3_DELAYED_ENTRY:
                         self._c3_stats["trades_total"] += 1
-                        if c1_pnl <= 0:
-                            c3_blocked = True
-                            c3_slip = SLIPPAGE_RTH_PTS
-                            c3_contracts = closed_trade.c3.contracts
-                            c3_slip_cost = c3_slip * c3_contracts * POINT_VALUE
-                            c3_commission = closed_trade.c3.commission
-                            adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_slip_cost + c3_commission
+                        if c3_blocked:
                             self._c3_stats["c3_blocked"] += 1
-                            self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
                         else:
                             self._c3_stats["c3_entered"] += 1
 
@@ -1803,7 +1806,7 @@ class CausalReplayEngine:
                         "entry_price": result.get("entry_price", 0),
                         "c1_exit_price": result.get("c1_exit_price", 0),
                         "c2_exit_price": result.get("c2_exit_price", 0),
-                        "c3_exit_price": result.get("c3_exit_price", 0) if not c3_blocked else 0,
+                        "c3_exit_price": result.get("c3_exit_price", 0),
                         "c4_exit_price": result.get("c4_exit_price", 0),
                         "raw_pnl": raw_pnl,
                         "exit_slippage_cost": exit_slippage_cost,
@@ -1812,12 +1815,12 @@ class CausalReplayEngine:
                         "cumulative_pnl": self._cumulative_pnl,
                         "c1_pnl": c1_pnl,
                         "c2_pnl": result.get("c2_pnl", 0),
-                        "c3_pnl": 0.0 if c3_blocked else c3_pnl_original,
+                        "c3_pnl": result.get("c3_pnl", 0),
                         "c3_blocked": c3_blocked,
                         "c4_pnl": result.get("c4_pnl", 0),
                         "c1_exit_reason": result.get("c1_exit_reason", "EXIT_MAINTENANCE_FLATTEN"),
                         "c2_exit_reason": result.get("c2_exit_reason", "EXIT_MAINTENANCE_FLATTEN"),
-                        "c3_exit_reason": "delayed_c3_blocked" if c3_blocked else "EXIT_MAINTENANCE_FLATTEN",
+                        "c3_exit_reason": result.get("c3_exit_reason", "n/a"),
                         "c4_exit_reason": "n/a",
                         "commission_total": closed_trade.total_commission,
                     }
@@ -1835,6 +1838,13 @@ class CausalReplayEngine:
         # ── Feed newly-completed HTF bars ──
         completed_htf = htf_scheduler.get_newly_completed(ts)
         for tf, htf_bar_dict in completed_htf:
+            # ANTI-CHEAT: Verify HTF bar completed before current exec bar
+            if htf_bar_dict["timestamp"] > bar["timestamp"]:
+                self._causality_violations += 1
+                logger.critical(
+                    f"ANTI-CHEAT ALERT: HTF {tf} bar timestamp {htf_bar_dict['timestamp']} "
+                    f"> current exec bar {bar['timestamp']}. FUTURE DATA LEAK!"
+                )
             htf_bar = HTFBar(
                 timestamp=htf_bar_dict["timestamp"],
                 open=htf_bar_dict["open"],
@@ -1854,6 +1864,19 @@ class CausalReplayEngine:
 
         # ── Step 2: Manage active position ──
         await self._manage_active_position(bar)
+
+        # ── Track bar-by-bar equity for accurate drawdown ──
+        unrealized = 0.0
+        if self.executor.has_active_trade:
+            trade = self.executor._active_trade
+            for leg in trade.open_legs:
+                if trade.direction == "long":
+                    pts = bar["close"] - leg.entry_price
+                else:
+                    pts = leg.entry_price - bar["close"]
+                unrealized += pts * POINT_VALUE * leg.contracts
+        current_equity = self._starting_equity + self._cumulative_pnl + unrealized
+        self._equity_series.append(current_equity)
 
         # ── Step 3: Compute features on execution bar ──
         exec_bar = Bar(
@@ -1977,11 +2000,38 @@ def build_complete_trades(trades: List[Dict]) -> List[Dict]:
 
 
 def compute_max_drawdown(
-    complete_trades: List[Dict], starting_equity: float = 50_000.0
+    equity_series: List[float], starting_equity: float = 50_000.0
 ) -> Tuple[float, float, float]:
-    """Compute max drawdown from equity curve.
+    """Compute max drawdown from bar-by-bar equity curve.
+    Includes unrealized PnL from open positions — measures true peak-to-trough.
     Returns (max_dd_dollars, max_dd_pct, final_equity).
     """
+    if not equity_series:
+        return 0.0, 0.0, starting_equity
+
+    peak = equity_series[0]
+    max_dd = 0.0
+    max_dd_pct = 0.0
+
+    for equity in equity_series:
+        peak = max(peak, equity)
+        dd = peak - equity
+        dd_pct = dd / peak * 100 if peak > 0 else 0
+        max_dd = max(max_dd, dd)
+        max_dd_pct = max(max_dd_pct, dd_pct)
+
+    return max_dd, max_dd_pct, equity_series[-1]
+
+
+def compute_max_drawdown_from_trades(
+    complete_trades: List[Dict], starting_equity: float = 50_000.0
+) -> Tuple[float, float, float]:
+    """Compute max drawdown from trade closes only (legacy fallback).
+    Returns (max_dd_dollars, max_dd_pct, final_equity).
+    """
+    if not complete_trades:
+        return 0.0, 0.0, starting_equity
+
     equity = starting_equity
     peak = starting_equity
     max_dd = 0.0
@@ -2040,7 +2090,8 @@ def compute_aggregate_metrics(
         else float("inf")
     )
 
-    max_dd, max_dd_pct, final_equity = compute_max_drawdown(complete_trades)
+    # Use bar-by-bar equity series for accurate intra-trade drawdown
+    max_dd, max_dd_pct, final_equity = compute_max_drawdown(engine._equity_series)
     max_consec_wins, max_consec_losses = compute_consecutive_streaks(pnls)
 
     c1_pnls = [t["c1_pnl"] for t in complete_trades]
@@ -2087,6 +2138,11 @@ def compute_aggregate_metrics(
         "long_pnl": round(long_pnl, 2),
         "short_trades": len(short_trades),
         "short_pnl": round(short_pnl, 2),
+        "causality_check": {
+            "violations_detected": engine._causality_violations,
+            "passed": engine._causality_violations == 0,
+            "status": "CLEAN" if engine._causality_violations == 0 else "CHEATING DETECTED",
+        },
     }
 
 
@@ -2108,7 +2164,7 @@ def compute_yearly_breakdown(complete_trades: List[Dict]) -> Dict:
             if losers and sum(losers) != 0
             else float("inf")
         )
-        _, dd_pct, _ = compute_max_drawdown(trades)
+        _, dd_pct, _ = compute_max_drawdown_from_trades(trades)
 
         results[year] = {
             "trades": len(trades),
@@ -2288,25 +2344,31 @@ def run_verification_checks(
     }
 
     # 3. Commission audit
-    # Expected: $1.29/contract/side × 2 sides × 2 contracts = $5.16/trade
-    expected_per_trade = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 2
+    # Expected: $1.50/contract/side × 2 sides × N contracts per leg
+    # Per-leg commission = $1.50 * 2 * leg.contracts
+    # Total varies by trade (C3 may be blocked)
     total_commission = 0.0
     commission_errors = 0
     for closed_trade in engine.executor._trade_history:
         tc = closed_trade.total_commission
         total_commission += tc
-        if abs(tc - expected_per_trade) > 0.01:
-            commission_errors += 1
+        # Verify each leg has correct per-contract commission
+        for leg in closed_trade.active_legs:
+            expected_leg = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * leg.contracts
+            if leg.contracts > 0 and abs(leg.commission - expected_leg) > 0.01:
+                commission_errors += 1
 
+    # Expected full-trade commission (5 contracts, no C3 block)
+    expected_full_trade = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 5
     results["commission"] = {
         "passed": commission_errors == 0,
         "errors": commission_errors,
         "total_charged": round(total_commission, 2),
-        "expected_per_trade": expected_per_trade,
+        "expected_full_trade": expected_full_trade,
         "total_trades": len(engine.executor._trade_history),
         "description": (
             f"${COMMISSION_PER_CONTRACT_PER_SIDE}/contract/side × "
-            f"2 sides × 2 contracts = ${expected_per_trade:.2f}/trade"
+            f"2 sides × contracts = ${expected_full_trade:.2f}/trade (full 5-contract)"
         ),
     }
 

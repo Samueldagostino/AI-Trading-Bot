@@ -133,7 +133,7 @@ class TestPnLCalculation:
             entry_price=21000.0,
         )
         closed = manager.close_position("P1", 21010.0, "target")
-        # Gross: $20.00, Commission: $1.29, Net: $18.71
+        # Gross: $20.00, Commission: $1.50, Net: $18.50
         assert closed.gross_pnl == 20.0
         assert closed.commission == COMMISSION_PER_CONTRACT
         assert closed.net_pnl == round(20.0 - COMMISSION_PER_CONTRACT, 2)
@@ -194,7 +194,7 @@ class TestPositionTracking:
     def test_close_feeds_pnl_to_executor(self, manager, executor):
         manager.open_position("P1", "B1", "long", 1, 21000.0)
         manager.close_position("P1", 21010.0, "target")
-        # Net P&L = $20.00 - $1.29 = $18.71
+        # Net P&L = $20.00 - $1.50 = $18.50
         expected_net = round(20.0 - COMMISSION_PER_CONTRACT, 2)
         assert executor.daily_pnl == expected_net
 
@@ -218,7 +218,7 @@ class TestPositionTracking:
         manager.open_position("P2", "B2", "long", 1, 21010.0)
         manager.close_position("P2", 21020.0, "target")
 
-        # Two wins: each $20 gross - $1.29 commission
+        # Two wins: each $20 gross - $1.50 commission
         expected = round(2 * (20.0 - COMMISSION_PER_CONTRACT), 2)
         assert manager.daily_realized_pnl == expected
         assert manager.trade_count == 2
@@ -299,9 +299,9 @@ class TestPartialFills:
         manager.close_position("P2", 21030.0, "trailing")
 
         group = manager.get_scale_out_group("G1")
-        # C1: 10pts=$20 - $1.29 = $18.71
-        # C2: 30pts=$60 - $1.29 = $58.71
-        expected = round(18.71 + 58.71, 2)
+        # C1: 10pts=$20 - $1.50 = $18.50
+        # C2: 30pts=$60 - $1.50 = $58.50
+        expected = round(18.50 + 58.50, 2)
         assert group.total_net_pnl == expected
 
     def test_group_fully_closed(self, manager):
@@ -665,7 +665,7 @@ class TestConstants:
     """Verify constants match project-wide values."""
 
     def test_commission(self):
-        assert COMMISSION_PER_CONTRACT == 1.29
+        assert COMMISSION_PER_CONTRACT == 1.50
 
     def test_point_value(self):
         assert MNQ_POINT_VALUE == 2.0

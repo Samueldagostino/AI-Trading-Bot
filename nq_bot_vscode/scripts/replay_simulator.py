@@ -264,10 +264,10 @@ class DynamicSlippageEngine:
     - Volume spikes (>2.0x of 20-bar average)
     - News windows (FOMC, CPI, NFP)
 
-    Slippage tiers (per fill, always adverse):
-      RTH (9:30-16:00 ET):  0.50pt base, +0.50 vol spike, cap 1.50pt
-      ETH (18:01-9:29 ET):  1.00pt base, +0.75 vol spike, cap 2.50pt
-      News window:          +1.00pt addon, cap 3.00pt
+    Slippage tiers (per fill, always adverse, conservative):
+      RTH (9:30-16:00 ET):  0.75pt base, +0.50 vol spike, cap 1.75pt
+      ETH (18:01-9:29 ET):  1.25pt base, +0.75 vol spike, cap 2.75pt
+      News window:          +1.00pt addon, cap 3.25pt
     """
 
     def __init__(self, seed: int = 42):
@@ -327,13 +327,13 @@ class DynamicSlippageEngine:
         tier = self._session_tier(et_time)
 
         if tier == "rth":
-            base = 0.50
+            base = 0.75   # Conservative (real avg ~0.50)
             vol_addon_range = (0.25, 0.50)
-            cap = 1.50
+            cap = 1.75
         else:  # eth
-            base = 1.00
+            base = 1.25   # Conservative (real avg ~1.00)
             vol_addon_range = (0.50, 0.75)
-            cap = 2.50
+            cap = 2.75
 
         # Volume spike addon (>2.0x 20-bar avg)
         vol_addon = 0.0
@@ -962,7 +962,9 @@ class ReplaySimulator:
                 leg.entry_time = now
                 leg.is_filled = True
                 leg.is_open = True
-                leg.commission = executor.risk_config.commission_per_contract
+                # Commission: $1.50/contract/side (conservative — real is $1.29)
+                # Charged as round-trip upfront: $1.50 * 2 sides * contracts
+                leg.commission = 1.50 * 2 * leg.contracts
 
             trade.entry_price = fill_price
             trade.entry_time = now
@@ -1521,10 +1523,10 @@ class ReplaySimulator:
     # ================================================================
 
     # Constants for shadow simulation
-    _SHADOW_COMMISSION_PER_SIDE = 1.29  # $1.29/contract/side
+    _SHADOW_COMMISSION_PER_SIDE = 1.50  # $1.50/contract/side (conservative — real is $1.29)
     _SHADOW_POINT_VALUE = 2.00          # MNQ $2/point
-    _SHADOW_SLIPPAGE_RTH = 0.50         # pts per fill, RTH
-    _SHADOW_SLIPPAGE_ETH = 1.00         # pts per fill, ETH
+    _SHADOW_SLIPPAGE_RTH = 0.75         # pts per fill, RTH (conservative — real avg ~0.50)
+    _SHADOW_SLIPPAGE_ETH = 1.25         # pts per fill, ETH (conservative — real avg ~1.00)
     _SHADOW_OVERFLOW_THRESHOLD = 50_000
 
     def _record_shadow_signal(

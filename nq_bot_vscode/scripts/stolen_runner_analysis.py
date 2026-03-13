@@ -54,7 +54,7 @@ import random
 
 # MNQ constants
 MNQ_POINT_VALUE = 2.0  # $2 per point per contract
-COMMISSION_PER_CONTRACT = 1.29
+COMMISSION_PER_CONTRACT = 1.50  # Conservative (real is $1.29)
 
 
 class BarData:

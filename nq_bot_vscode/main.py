@@ -277,6 +277,17 @@ class TradingOrchestrator:
         if not self._running:
             return None
 
+        # ANTI-CHEAT: Verify bar timestamps are strictly increasing
+        if hasattr(self, '_last_bar_timestamp') and self._last_bar_timestamp is not None:
+            if bar.timestamp <= self._last_bar_timestamp:
+                logger.critical(
+                    f"CAUSALITY VIOLATION: Bar {bar.timestamp} <= previous {self._last_bar_timestamp}. "
+                    f"THE BOT IS CHEATING — HALTING."
+                )
+                self._running = False
+                return None
+        self._last_bar_timestamp = bar.timestamp
+
         self._bars_processed += 1
         self._last_bar = bar
         self._last_rejection = None  # Clear previous rejection
@@ -384,7 +395,7 @@ class TradingOrchestrator:
         # === 4. MANAGE ACTIVE POSITION ===
         if self.executor.has_active_trade:
             try:
-                result = await self.executor.update(bar.close, bar.timestamp)
+                result = await self.executor.update(bar.close, bar.timestamp, bar_high=bar.high, bar_low=bar.low)
                 self._executor_fail_count = 0  # Reset on success
             except Exception as e:
                 self._executor_fail_count += 1

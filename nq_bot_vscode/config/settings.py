@@ -148,20 +148,20 @@ class TradovateConfig:
 @dataclass
 class ScaleOutConfig:
     """
-    4-Contract Scale-Out v3 -- Delayed C3 Runner Architecture.
+    5-Contract Scale-Out v1.3.3 -- Delayed C3 Runner Architecture.
 
     C1 (1): 5-bar time exit -- the "canary" that validates direction.
     C2 (1): Structural target -- exits at nearest swing point.
-    C3 (2): ATR trailing runner -- DELAYED ENTRY (only stays open when
-            C1 exits profitably. If C1 loses, C3 closed immediately).
+    C3 (3): ATR trailing runner -- DELAYED ENTRY (only enters when
+            C1 exits profitably. If C1 loses, C3 never filled).
 
     Win architecture:
-      Best:  C1 wins, C3 trails big move           -> $20 + $800+  = $820+
+      Best:  C1 wins, C3 trails big move           -> $20 + $1200+ = $1220+
       Good:  C1 wins, C2/C3 at breakeven            -> $20 + $0     = $20
-      Ok:    C1 loses, C3 blocked, C2 at stop        -> -$80 (2 contracts only)
-      Worst: All hit initial stop (Phase 1)          -> -$160 (4 contracts)
+      Ok:    C1 loses, C3 never entered, C2 at stop  -> -$80 (2 contracts only)
+      Worst: All hit initial stop (Phase 1)          -> -$100 (C1+C2 only, C3 pending)
     """
-    total_contracts: int = 4              # Max contracts: C1=1, C2=1, C3=2
+    total_contracts: int = 5              # Max contracts: C1=1, C2=1, C3=3
 
     # Contract 1 -- The Scalp (B:5 bars time exit, PF 1.81 validated)
     c1_contracts: int = 1
@@ -196,7 +196,7 @@ class ScaleOutConfig:
     # C3 only stays open when C1 exits profitably.
     # If C1 loses → C3 is closed immediately at market.
     # Backtest: saved $38,430, reduced max DD 8.62% → 1.60%.
-    c3_contracts: int = 2                     # v3: 2 runner contracts
+    c3_contracts: int = 3                     # v1.3.3-fixed: 3 runner contracts
     c3_delayed_entry_enabled: bool = True
 
     # Adaptive Exit Configuration (regime-aware parameters)
@@ -214,7 +214,7 @@ class RiskConfig:
     max_weekly_loss_pct: float = 5.0
     max_total_drawdown_pct: float = 10.0     # $5,000 = kill switch
     
-    max_contracts_micro: int = 4              # v3: C1=1 + C2=1 + C3=2
+    max_contracts_micro: int = 5              # v1.3.3-fixed: C1=1 + C2=1 + C3=3
     max_contracts_mini: int = 0
     use_micro: bool = True
     
@@ -224,7 +224,7 @@ class RiskConfig:
     nq_point_value_micro: float = 2.0
     
     max_slippage_ticks: int = 4
-    commission_per_contract: float = 1.29    # Tradovate MNQ commission
+    commission_per_contract: float = 1.50    # Conservative (real Tradovate is $1.29)
     
     atr_period: int = 14
     atr_multiplier_stop: float = 2.0

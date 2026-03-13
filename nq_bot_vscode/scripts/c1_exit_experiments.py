@@ -49,7 +49,7 @@ DOCS_DIR = str(project_dir / "docs")
 
 # MNQ constants
 POINT_VALUE = 2.0          # $2 per point per contract
-COMMISSION = 1.29          # Per contract (Tradovate MNQ)
+COMMISSION = 1.50          # Per contract (conservative — real is $1.29)
 
 # C2 trailing config (from settings.py -- do NOT change)
 C2_TRAILING_TYPE = "atr"

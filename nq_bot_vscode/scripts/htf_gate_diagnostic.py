@@ -58,10 +58,10 @@ MAINTENANCE_END = 18
 
 # Shadow simulation constants (same as replay_simulator)
 POINT_VALUE = 2.00       # MNQ $2/point
-COMMISSION_PER_SIDE = 1.29
+COMMISSION_PER_SIDE = 1.50  # Conservative (real is $1.29)
 NUM_CONTRACTS = 2
-SLIPPAGE_RTH = 0.50
-SLIPPAGE_ETH = 1.00
+SLIPPAGE_RTH = 0.75  # Conservative (real avg ~0.50)
+SLIPPAGE_ETH = 1.25  # Conservative (real avg ~1.00)
 MAX_WALK_BARS = 120  # 4 hours at 2-min bars
 
 
