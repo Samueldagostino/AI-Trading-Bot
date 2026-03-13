@@ -106,11 +106,11 @@ class TestV3BaselineValues:
     def test_htf_timeframes_5m_15m(self):
         assert V3_BASELINE["htf_timeframes"] == frozenset({"15m", "5m"})
 
-    def test_total_contracts_is_4(self):
-        assert V3_BASELINE["total_contracts"] == 4
+    def test_total_contracts_is_5(self):
+        assert V3_BASELINE["total_contracts"] == 5
 
-    def test_c3_contracts_is_2(self):
-        assert V3_BASELINE["c3_contracts"] == 2
+    def test_c3_contracts_is_3(self):
+        assert V3_BASELINE["c3_contracts"] == 3
 
     def test_c2_be_variant_is_b(self):
         assert V3_BASELINE["c2_be_variant"] == "B"

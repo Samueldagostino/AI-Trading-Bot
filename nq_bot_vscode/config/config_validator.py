@@ -41,10 +41,10 @@ V3_BASELINE = {
     "htf_timeframes":     frozenset({"15m", "5m"}),
 
     # Execution
-    "total_contracts":    4,
+    "total_contracts":    5,
     "c1_contracts":       1,
     "c2_contracts":       1,
-    "c3_contracts":       2,
+    "c3_contracts":       3,
     "c1_time_exit_bars":  5,
     "c1_max_bars_fallback": 12,
     "c2_be_variant":      "B",

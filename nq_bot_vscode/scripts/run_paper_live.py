@@ -187,7 +187,7 @@ class PaperLiveRunner:
         self._safety_rails = SafetyRails(SafetyRailsConfig(
             max_daily_loss=max_daily_loss,
             max_consecutive_losses=5,
-            max_position_size=4,       # v3: C1=1 + C2=1 + C3=2 = 4 contracts
+            max_position_size=5,       # v1.3.3: C1=1 + C2=1 + C3=3 = 5 contracts
             heartbeat_alert_seconds=60.0,
             heartbeat_halt_seconds=300.0,
             log_dir=str(LOGS_DIR),
@@ -1071,7 +1071,7 @@ Port reference:
 Safety Rails:
   - Max daily loss:       $1,500 (configurable via --max-daily-loss)
   - Max consecutive loss: 5 trades -> HALT
-  - Max position size:    4 contracts (v3: C1=1, C2=1, C3=2)
+  - Max position size:    5 contracts (v1.3.3: C1=1, C2=1, C3=3)
   - Heartbeat timeout:    60s alert, 300s halt
   - Config validator:     Blocks trading if config doesn't match v3 backtest
 
