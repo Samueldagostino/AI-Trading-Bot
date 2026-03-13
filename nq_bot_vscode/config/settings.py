@@ -159,9 +159,9 @@ class ScaleOutConfig:
       Best:  C1 wins, C3 trails big move           -> $20 + $800+  = $820+
       Good:  C1 wins, C2/C3 at breakeven            -> $20 + $0     = $20
       Ok:    C1 loses, C3 blocked, C2 at stop        -> -$80 (2 contracts only)
-      Worst: All hit initial stop (Phase 1)          -> -$160 (4 contracts)
+      Worst: All hit initial stop (Phase 1)          -> -$200 (5 contracts)
     """
-    total_contracts: int = 4              # Max contracts: C1=1, C2=1, C3=2
+    total_contracts: int = 5              # Max contracts: C1=1, C2=1, C3=3
 
     # Contract 1 -- The Scalp (B:5 bars time exit, PF 1.81 validated)
     c1_contracts: int = 1
@@ -196,7 +196,7 @@ class ScaleOutConfig:
     # C3 only stays open when C1 exits profitably.
     # If C1 loses → C3 is closed immediately at market.
     # Backtest: saved $38,430, reduced max DD 8.62% → 1.60%.
-    c3_contracts: int = 2                     # v3: 2 runner contracts
+    c3_contracts: int = 3                     # v1.3.1: 3 runner contracts (PF 2.86)
     c3_delayed_entry_enabled: bool = True
 
     # Adaptive Exit Configuration (regime-aware parameters)
@@ -214,7 +214,7 @@ class RiskConfig:
     max_weekly_loss_pct: float = 5.0
     max_total_drawdown_pct: float = 10.0     # $5,000 = kill switch
     
-    max_contracts_micro: int = 4              # v3: C1=1 + C2=1 + C3=2
+    max_contracts_micro: int = 5              # v1.3.1: C1=1 + C2=1 + C3=3
     max_contracts_mini: int = 0
     use_micro: bool = True
     
