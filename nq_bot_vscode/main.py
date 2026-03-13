@@ -25,7 +25,6 @@ from zoneinfo import ZoneInfo
 from config.settings import BotConfig, CONFIG
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
-    HIGH_CONVICTION_MIN_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
     HTF_STRENGTH_GATE,
@@ -33,7 +32,6 @@ from config.constants import (
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
     AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
     MIN_RR_OVERRIDE,
-    get_dollar_risk_budget,
 )
 from config.validator import validate_config
 from database.connection import DatabaseManager
@@ -445,11 +443,16 @@ class TradingOrchestrator:
             return action_result
 
         # === 5. SIGNAL AGGREGATION (only if flat, HTF-gated) ===
+        # V1.3.3: Pass adaptive HC gate and cross-signal boost from GainzAlgo modules
+        _adaptive_gate = getattr(features, "adaptive_hc_gate", None)
+        _cross_boost = getattr(features, "cross_signal_boost", 0.0)
         signal = self.signal_aggregator.aggregate(
             feature_snapshot=features,
             ml_prediction=None,
             htf_bias=htf_bias,
             current_time=bar.timestamp,
+            adaptive_hc_gate=_adaptive_gate,
+            cross_signal_boost=_cross_boost,
         )
 
         # === PATH C+: DUAL-TRIGGER DECISION ENGINE ===
@@ -744,54 +747,22 @@ class TradingOrchestrator:
                            features.atr_14, "NaN stop distance", 4)
             return None
 
-        # -- MINIMUM STOP FLOOR (prevents micro-stops from structural noise) --
-        if HIGH_CONVICTION_MIN_STOP_PTS > 0 and raw_stop < HIGH_CONVICTION_MIN_STOP_PTS:
-            logger.info(
-                "Stop floor applied: %.1f pts -> %.1f pts (min %s)",
-                raw_stop, HIGH_CONVICTION_MIN_STOP_PTS, HIGH_CONVICTION_MIN_STOP_PTS,
-            )
-            raw_stop = HIGH_CONVICTION_MIN_STOP_PTS
-
-        # -- HIGH-CONVICTION GATE 2: Dollar-Tiered Stop Cap --
-        # Conviction score determines max dollar risk -> max stop in points.
-        dollar_budget = get_dollar_risk_budget(entry_score)
-        num_contracts = self.config.scale_out.total_contracts
-        dollar_max_stop = self.risk_engine.dollar_budget_to_max_stop_pts(
-            dollar_budget, num_contracts
-        )
-        # Use the tighter of dollar-tier cap and absolute safety ceiling
-        effective_max_stop = min(dollar_max_stop, HIGH_CONVICTION_MAX_STOP_PTS)
-
-        if raw_stop > effective_max_stop:
-            # UCL v2: route wide-stop sweeps to watch state for post-sweep confirmation
-            if (self._ucl_enabled and entry_source == "sweep"
-                    and entry_direction is not None):
-                self._create_wide_stop_watch(
-                    direction="LONG" if entry_direction == "long" else "SHORT",
-                    score=entry_score,
-                    sweep_low=bar.low,
-                    sweep_high=bar.high,
-                    original_stop=raw_stop,
-                    bar_index=self._bars_processed,
-                    current_bar=bar,
-                )
-                _set_rejection(entry_direction, entry_score, raw_stop,
-                               features.atr_14,
-                               f"Dollar stop cap ${dollar_budget:.0f} -> {effective_max_stop:.1f}pts exceeded -- routed to UCL watch", 5)
-                return None
-
+        # -- HIGH-CONVICTION GATE 2: Max Stop Distance --
+        # Simple flat cap matching validated backtest (V1.3.3: PF 6.1, $198K).
+        # Previous dollar-tiered system removed to align live with backtest.
+        if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
             logger.debug(
                 f"HC REJECT: stop {raw_stop:.1f} pts "
-                f"> {effective_max_stop:.1f} (${dollar_budget:.0f} budget @ {num_contracts} contracts)"
+                f"> {HIGH_CONVICTION_MAX_STOP_PTS} (max stop exceeded)"
             )
             _set_rejection(entry_direction, entry_score, raw_stop,
                            features.atr_14,
-                           f"Dollar stop cap exceeded (${dollar_budget:.0f}/{effective_max_stop:.1f}pts)", 5)
+                           f"Max stop exceeded ({raw_stop:.1f} > {HIGH_CONVICTION_MAX_STOP_PTS})", 5)
             return None
 
         logger.info(
-            "Dollar tier: score=%.2f -> $%.0f budget -> %.1f pts max stop (raw=%.1f pts)",
-            entry_score, dollar_budget, effective_max_stop, raw_stop,
+            "Stop check passed: raw=%.1f pts <= %.1f pts max",
+            raw_stop, HIGH_CONVICTION_MAX_STOP_PTS,
         )
 
         # -- Min R:R Check (disabled when MIN_RR_RATIO=0.0 for C1 time-exit) --

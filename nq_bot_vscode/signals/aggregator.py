@@ -88,6 +88,8 @@ class SignalAggregator:
         ml_prediction: Optional[dict] = None,
         htf_bias: Optional[object] = None,
         current_time: Optional[datetime] = None,
+        adaptive_hc_gate: Optional[float] = None,
+        cross_signal_boost: float = 0.0,
     ) -> Optional[AggregatedSignal]:
         """
         Aggregate all available signals into a single trade decision.
@@ -207,18 +209,27 @@ class SignalAggregator:
         if active_weight > 0:
             combined = combined / active_weight  # Re-normalize to 0-1
 
+        # === V1.3.3: Apply cross-signal synergy boost ===
+        if cross_signal_boost > 0:
+            combined += cross_signal_boost
+
         combined = round(min(combined, 1.0), 3)
 
         # === Minimum confluence check ===
+        # V1.3.3: Use adaptive HC gate if provided, else static config value
+        effective_min_score = (
+            adaptive_hc_gate if adaptive_hc_gate is not None
+            else self.config.min_confluence_score
+        )
         should_trade = (
-            combined >= self.config.min_confluence_score and
+            combined >= effective_min_score and
             len(aligned_signals) >= self.config.min_signals_aligned
         )
 
         rejection_reason = ""
         if not should_trade:
-            if combined < self.config.min_confluence_score:
-                rejection_reason = f"Confluence score too low: {combined:.3f} < {self.config.min_confluence_score}"
+            if combined < effective_min_score:
+                rejection_reason = f"Confluence score too low: {combined:.3f} < {effective_min_score:.3f}"
             elif len(aligned_signals) < self.config.min_signals_aligned:
                 rejection_reason = f"Insufficient aligned signals: {len(aligned_signals)} < {self.config.min_signals_aligned}"
 
@@ -433,6 +444,151 @@ class SignalAggregator:
                 source_category="technical",
                 timestamp=current_time,
                 metadata={"feature": "trend", "strength": snapshot.trend_strength},
+            ))
+
+        # === V1.3.3 GainzAlgo signals (additive -- no changes to above) ===
+        try:
+            from config.constants import (
+                GAINZ_MODULES_ENABLED,
+                GAINZ_EXHAUSTION_SIGNAL_STRENGTH,
+                GAINZ_MOMENTUM_SIGNAL_STRENGTH,
+                GAINZ_CYCLE_SIGNAL_STRENGTH,
+            )
+            if GAINZ_MODULES_ENABLED:
+                gainz_signals = self._extract_gainz_signals(
+                    snapshot, current_time,
+                    GAINZ_EXHAUSTION_SIGNAL_STRENGTH,
+                    GAINZ_MOMENTUM_SIGNAL_STRENGTH,
+                    GAINZ_CYCLE_SIGNAL_STRENGTH,
+                )
+                signals.extend(gainz_signals)
+        except (ImportError, AttributeError):
+            pass  # Graceful degradation if constants not yet defined
+
+        return signals
+
+    def _extract_gainz_signals(
+        self, snapshot, current_time: datetime,
+        exhaustion_strength: float,
+        momentum_strength: float,
+        cycle_strength: float,
+    ) -> List[IndividualSignal]:
+        """
+        Extract V1.3.3 GainzAlgo signals from the enhanced FeatureSnapshot.
+
+        These signals participate in the normal aggregation pipeline:
+        they add confluence for entries but cannot independently trigger
+        trades (that requires sweep or aggregator standalone).
+        """
+        signals = []
+
+        # --- Candle Micro-Reversal (CSMRM) ---
+        # Exhaustion patterns with reversal direction are directional signals
+        if (getattr(snapshot, "reversal_score", 0) > 0.5 and
+            getattr(snapshot, "reversal_direction", "none") != "none"):
+
+            direction = (SignalDirection.LONG
+                        if snapshot.reversal_direction == "bullish"
+                        else SignalDirection.SHORT)
+
+            # Strength scales with reversal_score (0.5-1.0) and pattern quality
+            base_strength = exhaustion_strength
+            if getattr(snapshot, "exhaustion_pattern", "") == "engulfing":
+                base_strength += 0.05  # Engulfing confirmation is stronger
+            if getattr(snapshot, "consecutive_rejections", 0) >= 3:
+                base_strength += 0.05  # Multiple rejections = very strong
+
+            signals.append(IndividualSignal(
+                name=f"csmrm_{snapshot.reversal_direction}",
+                direction=direction,
+                strength=min(base_strength, 0.85),
+                source_category="technical",
+                timestamp=current_time,
+                metadata={
+                    "feature": "CSMRM",
+                    "pattern": getattr(snapshot, "exhaustion_pattern", "none"),
+                    "reversal_score": getattr(snapshot, "reversal_score", 0),
+                    "rejections": getattr(snapshot, "consecutive_rejections", 0),
+                    "structural_stop_price": (
+                        snapshot.structural_stop_long if direction == SignalDirection.LONG
+                        else snapshot.structural_stop_short
+                    ),
+                },
+            ))
+
+        # --- Momentum Acceleration (SAMSM) ---
+        # Exhaustion = deceleration after sustained move → reversal signal
+        if getattr(snapshot, "momentum_exhaustion", False):
+            # Direction: exhaustion in positive velocity → bearish signal (move slowing)
+            vel = getattr(snapshot, "momentum_velocity", 0)
+            if abs(vel) > 0.3:  # Meaningful velocity threshold
+                direction = SignalDirection.SHORT if vel > 0 else SignalDirection.LONG
+                signals.append(IndividualSignal(
+                    name="samsm_exhaustion",
+                    direction=direction,
+                    strength=momentum_strength,
+                    source_category="technical",
+                    timestamp=current_time,
+                    metadata={
+                        "feature": "SAMSM",
+                        "phase": getattr(snapshot, "momentum_phase", "unknown"),
+                        "velocity": vel,
+                        "acceleration": getattr(snapshot, "momentum_acceleration", 0),
+                    },
+                ))
+
+        # Surge = sudden acceleration → continuation signal
+        elif getattr(snapshot, "momentum_surge", False):
+            vel = getattr(snapshot, "momentum_velocity", 0)
+            if abs(vel) > 0.3:
+                direction = SignalDirection.LONG if vel > 0 else SignalDirection.SHORT
+                signals.append(IndividualSignal(
+                    name="samsm_surge",
+                    direction=direction,
+                    strength=momentum_strength,
+                    source_category="technical",
+                    timestamp=current_time,
+                    metadata={
+                        "feature": "SAMSM",
+                        "phase": "surge",
+                        "velocity": vel,
+                    },
+                ))
+
+        # --- Cycle-Slope (CSTA) ---
+        # Correction phases in trending market = pullback entry opportunity
+        phase = getattr(snapshot, "cycle_phase", "unknown")
+        phase_strength = getattr(snapshot, "cycle_phase_duration", 0)
+
+        if phase == "correction_down" and phase_strength >= 2:
+            # Correction in uptrend → buy the dip
+            signals.append(IndividualSignal(
+                name="csta_correction_buy",
+                direction=SignalDirection.LONG,
+                strength=cycle_strength,
+                source_category="technical",
+                timestamp=current_time,
+                metadata={
+                    "feature": "CSTA",
+                    "phase": phase,
+                    "duration": phase_strength,
+                    "cycle_score": getattr(snapshot, "cycle_score", 0),
+                },
+            ))
+        elif phase == "correction_up" and phase_strength >= 2:
+            # Correction in downtrend → sell the rally
+            signals.append(IndividualSignal(
+                name="csta_correction_sell",
+                direction=SignalDirection.SHORT,
+                strength=cycle_strength,
+                source_category="technical",
+                timestamp=current_time,
+                metadata={
+                    "feature": "CSTA",
+                    "phase": phase,
+                    "duration": phase_strength,
+                    "cycle_score": getattr(snapshot, "cycle_score", 0),
+                },
             ))
 
         return signals

@@ -1,4 +1,4 @@
-# NQ Trading Bot — Project Context (Version 1.3.1)
+# NQ Trading Bot — Project Context (Version 1.3.3)
 
 ## Git Workflow (MANDATORY)
 
@@ -18,9 +18,17 @@ This keeps the live GitHub Pages website at https://samueldagostino.github.io/AI
 
 An institutional-grade automated trading bot for **MNQ (Micro Nasdaq-100 Futures)** on IBKR (Interactive Brokers). It uses a multi-timeframe structure analysis pipeline with a **5-contract scale-out execution strategy** (C1=1, C2=1, C3=3), governed by a **High-Conviction Filter** and the **Delayed C3 Runner** architecture.
 
-**Version 1.3.1 — Validated**: 396 trades, PF 2.86, +$47,236, 1.60% max DD ($50K → $97,236).
+**Version 1.3.3 — In Development**: V1.3.2 baseline (Path C+, HTF hysteresis, 5-contract scale-out) + GainzAlgo Suite (5 modules for entry perfection).
 
 This bot's job is **survival first, profit second**. Every design decision prioritizes capital preservation over signal frequency.
+
+### Version History
+
+| Version | Key Changes |
+|---------|-------------|
+| **V1.3.1** | 2-contract scale-out (C1+C2), HC filter, sweep detector. PF 2.86, 396 trades. |
+| **V1.3.2** | 5-contract scale-out (C1=1, C2=1, C3=3), Path C+ dual-trigger, HTF hysteresis (anti-flip-flop), HTF backtest_mode (staleness fix). |
+| **V1.3.3** | GainzAlgo Suite integration — 5 modules (VolPercentile, SAMSM, CSTA, CSMRM, AdaptiveConfidence). Adaptive HC gate, cross-signal synergy boosts. Kill switch: `GAINZ_MODULES_ENABLED`. |
 
 ---
 
@@ -305,7 +313,7 @@ Phase 2 (RUNNING):
 | Symbol | MNQ (Micro Nasdaq-100) |
 | Point Value | $2.00 per point per contract |
 | Tick Size | 0.25 points ($0.50) |
-| Contracts per Trade | 2 (C1 + C2) |
+| Contracts per Trade | 5 (C1=1 + C2=1 + C3=3) |
 | Broker | Tradovate (paper → live) |
 | Commission | $1.29 per contract |
 
@@ -745,6 +753,144 @@ Signal-only trades:  1,025 (PnL +$12,626)
 | B: Fixed TP 6pts | 1.11 | +$3,110 | -$5,786 | 3.8% | NOT READY |
 
 **Any proposed change that degrades Profit Factor below 1.3 or increases Max Drawdown above 3.0% should be rejected unless supported by new backtested evidence across the full 6-month OOS window with calibrated slippage.**
+
+---
+
+## LESSONS LEARNED — NEVER REPEAT THESE MISTAKES
+
+This section documents bugs, design errors, and hard-won lessons. Read this BEFORE making changes.
+
+### 1. HTF Staleness Kills All Backtest Trades (Fixed Mar 2026)
+
+**Bug:** The HTF engine's `_last_update_time` stored the bar's BUCKET START timestamp (e.g., 09:05 for a 5m bar). The staleness check compared this against the current execution bar time. During natural data gaps in the CSV (overnight settlement, pre-market gaps), the age grew to 82+ minutes, exceeding the 15-min staleness limit. Result: HTF bias forced to neutral on EVERY bar → zero trades in entire 179K-bar backtest.
+
+**Fix (two-part):**
+1. `htf_engine.py`: Changed `_last_update_time` to store bar COMPLETION time (`bar.timestamp + timedelta(minutes=tf_period)`) instead of start time.
+2. `htf_engine.py`: Added `backtest_mode=True` parameter that skips staleness checks entirely. In backtests, the HTFScheduler handles causality — staleness is meaningless for pre-built historical data.
+3. `full_backtest.py`: Passes `backtest_mode=True` when instantiating `HTFBiasEngine`.
+
+**Rule:** Live trading keeps `backtest_mode=False` (staleness enforced). Backtests use `backtest_mode=True`. NEVER add staleness to backtest mode.
+
+### 2. Kill Switch Import Caching Bug (Fixed Mar 2026)
+
+**Bug:** `from config.constants import GAINZ_MODULES_ENABLED` creates a LOCAL binding at import time. If the module attribute is changed at runtime (e.g., for testing), the local binding keeps the OLD value. The kill switch appeared broken — setting `GAINZ_MODULES_ENABLED = False` at runtime had no effect.
+
+**Fix:** Changed to `import config.constants as _constants` and check `_constants.GAINZ_MODULES_ENABLED` at runtime. This always reads the CURRENT module attribute.
+
+**Rule:** For any runtime-toggleable flag, NEVER use `from module import FLAG`. Always use `import module` and access `module.FLAG`.
+
+### 3. Backtest Cannot Run in VM — Use Windows Terminal (Mar 2026)
+
+**Issue:** The full backtest processes 179K 2-min bars at 100% CPU. The VM times out (exit code 143 = SIGTERM). Even background execution with `nohup` hits the timeout limit.
+
+**Rule:** Always run backtests from the user's Windows PowerShell terminal:
+```powershell
+cd C:\Users\dagos\OneDrive\Desktop\AI-Trading-Bot\nq_bot_vscode
+Remove-Item .\logs\backtest_checkpoint.json -ErrorAction SilentlyContinue
+py -u scripts/full_backtest.py --run 2>&1 | Tee-Object -FilePath logs/backtest_v133.log
+```
+
+### 4. Old Backtest Checkpoints Cause Ghost Behavior (Mar 2026)
+
+**Bug:** A checkpoint from a pre-Path C+ run was found at bar 25,000 with 0 entries. Resuming from this checkpoint meant the aggregator standalone trigger was never evaluated for the first 25K bars. The backtest appeared to work but produced wrong results.
+
+**Rule:** ALWAYS delete `logs/backtest_checkpoint.json` before running a backtest with new code. Old checkpoints carry stale state from previous versions.
+
+### 5. Python stdout Buffering Hides Progress (Mar 2026)
+
+**Bug:** When running the backtest with `nohup` or piping output, Python buffers stdout. Progress reports were invisible in the log file.
+
+**Rule:** Always use `python -u` (unbuffered) or set `PYTHONUNBUFFERED=1` when running backtests.
+
+### 6. Timestamp Parsing: dateutil Not fromisoformat (Mar 2026)
+
+**Bug:** Real CSV has timestamps like `2025-03-02 19:00:00-0500` (no colon in timezone offset). Python's `datetime.fromisoformat()` cannot parse this format (requires `-05:00`).
+
+**Fix:** Used `dateutil.parser.parse()` which handles all common timestamp formats.
+
+**Rule:** Always use `dateutil.parser.parse()` for CSV timestamp parsing, never `fromisoformat()`.
+
+### 7. Zero Lookahead Bias Invariant (Design Principle)
+
+**Rule:** ALL computations must use only COMPLETED bars. The current bar is NEVER included in historical calculations. This applies to all modules: feature engine, HTF engine, GainzAlgo modules, regime detector. When adding new features, verify: current data is added to history AFTER computation, not before.
+
+### 8. GainzAlgo Modules Are Purely Additive (V1.3.3 Design Principle)
+
+**Rule:** The 5 GainzAlgo modules (VolPercentile, SAMSM, CSTA, CSMRM, AdaptiveConfidence) feed INTO the existing pipeline — they NEVER replace core trigger logic. The adaptive HC gate adjusts within bounds [0.70, 0.82]. Cross-signal boosts are capped at +0.10. The kill switch (`GAINZ_MODULES_ENABLED=False`) instantly reverts to V1.3.2 behavior.
+
+### 9. Backtest Gates Must Match Live Trading Logic (Fixed Mar 2026)
+
+**Bug:** The backtest had two gates that main.py (live trading) did NOT have:
+1. Min stop gate: `if raw_stop < 30.0: return` — combined with the max stop gate (`> 30.0`), the only valid stop was EXACTLY 30.000000 points. ATR-based stop calculations essentially never produce this exact value. Result: 0 trades.
+2. Prime hours gate: `if not is_prime_hours(bar["timestamp"]): return` — restricted trades to 9-10 AM ET only. Not present in live trading. Blocked 90%+ of potential trades.
+
+**Fix:** Removed both gates from `full_backtest.py`. The HC filter should be score >= 0.75 AND stop <= 30pts — matching main.py exactly.
+
+**Rule:** The backtest MUST use the same entry gates as main.py. NEVER add filters to the backtest that don't exist in live trading — backtest results won't reflect live performance. If a new gate is being tested, add it to BOTH files simultaneously.
+
+### 10. HTF Hysteresis Prevents Flip-Flopping (V1.3.2)
+
+**Design:** Two-stage anti-flip-flop for HTF bias direction changes:
+- Stage 1 (margin): opposing direction must exceed `HTF_HYSTERESIS_MARGIN` (0.3) strength
+- Stage 2 (hold): must hold for `HTF_HYSTERESIS_CONFIRM_BARS` (3) consecutive bars
+
+**Rule:** Do NOT reduce these thresholds without backtested evidence. Flip-flopping bias kills profitability.
+
+---
+
+## V1.3.2 Architecture Changes (Mar 2026)
+
+### 5-Contract Scale-Out (C1=1, C2=1, C3=3)
+
+Upgraded from 2-contract (C1+C2) to 5-contract system:
+- C1 (1 contract): 5-bar time exit canary — validates direction
+- C2 (1 contract): Structural target + delayed breakeven
+- C3 (3 contracts): ATR trailing runner — DELAYED ENTRY (only stays if C1 exits profitably; if C1 loses, C3 closes immediately)
+
+C3 constants in `config/constants.py`: `C3_CONTRACTS = 3`
+
+### Path C+ Dual-Trigger Architecture
+
+Both liquidity sweeps AND high-conviction aggregator signals independently trigger trades:
+- Sweep trigger: sweep score >= 0.50, must pass HC >= 0.75
+- Aggregator standalone: aggregator score >= 0.75 (no sweep needed)
+- Confluence: both fire same direction → context boosts applied
+
+Config: `AGGREGATOR_STANDALONE_ENABLED = True`
+
+### HTF Hysteresis (Anti-Flip-Flop)
+
+Two-stage protection against HTF bias direction changes using 5m/15m timeframes. See Lesson #9 above.
+
+---
+
+## V1.3.3 Architecture Changes (Mar 2026) — GainzAlgo Suite
+
+### New File: `features/gainz_modules.py`
+
+Contains 5 GainzAlgo modules aligned with the GainzAlgo Suite 5-Pillar Framework:
+
+1. **VolatilityPercentileNormalizer** — Percentile-ranked ATR (500-bar lookback). Classifies vol_regime: compressed (<20th), normal, expanding (>60th), extreme (>85th). Adapts sweep depth range [2.0, 6.0] based on percentile.
+
+2. **MomentumAccelerationModel (SAMSM)** — Tracks velocity (1st derivative via EMA-smoothed changes) and acceleration (2nd derivative). Detects surge (>2σ) and exhaustion (5+ consecutive deceleration bars). Scores momentum 0.0–1.0.
+
+3. **CycleSlopeTrendAnalyzer (CSTA)** — Dual-EMA slope analysis (fast=8, slow=21). Classifies phases: impulse_up/down, correction_up/down, consolidation. Scores cycle 0.0–1.0.
+
+4. **CandleMicroReversalEvaluator (CSMRM)** — Detects candle patterns: hammer, shooting_star, doji, pin_bar, engulfing. Tracks consecutive rejection bars and pressure asymmetry. Generates reversal score and direction.
+
+5. **AdaptiveConfidenceEngine** — Adjusts HC gate dynamically within bounds [0.70, 0.82] based on vol regime, momentum phase, cycle position, and market regime. Computes cross-signal synergy boosts capped at +0.10.
+
+### Modified Files
+
+- `features/engine.py`: Added 20+ FeatureSnapshot fields, `_compute_gainz_features()`, `_init_gainz_modules()` (lazy init)
+- `signals/aggregator.py`: Added `_extract_gainz_signals()`, adaptive gate support, cross-signal boost
+- `config/constants.py`: Added 17 V1.3.3 constants (VOL_PERCENTILE_LOOKBACK, SAMSM_*, CSTA_*, CSMRM_*, ADAPTIVE_*, GAINZ_*)
+- `main.py`: Passes adaptive_hc_gate + cross_signal_boost to aggregator
+- `scripts/full_backtest.py`: Same adaptive gate integration
+
+### Kill Switch
+
+`GAINZ_MODULES_ENABLED = True` in `config/constants.py`. Set to `False` to instantly revert to V1.3.2 behavior. Uses runtime module reference (`_constants.GAINZ_MODULES_ENABLED`) — see Lesson #2.
 
 ### Validation Tooling
 

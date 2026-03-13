@@ -832,6 +832,7 @@ class CausalReplayEngine:
         self.htf_engine = HTFBiasEngine(
             config=config,
             timeframes=["5m", "15m"],  # Intraday-only HTF for C1 scalp
+            backtest_mode=True,         # Disable staleness — bars are pre-built
         )
         self.signal_aggregator = SignalAggregator(config)
         self.risk_engine = RiskEngine(config)
@@ -903,9 +904,10 @@ class CausalReplayEngine:
         engine_ref = self
         commission_rt = COMMISSION_PER_CONTRACT_PER_SIDE * 2  # $2.58 round-trip per contract
 
-        async def patched_paper_enter(trade, price):
+        async def patched_paper_enter(trade, price, **kwargs):
             fill_price = round(price, 2)
-            sim_time = engine_ref._current_bar_ts or datetime.now(timezone.utc)
+            # Use explicit timestamp if passed, else fall back to engine bar time
+            sim_time = kwargs.get("timestamp") or engine_ref._current_bar_ts or datetime.now(timezone.utc)
 
             for leg in trade.all_legs:
                 if leg.contracts > 0:
@@ -1210,11 +1212,16 @@ class CausalReplayEngine:
         )
 
         # ── Signal aggregation ──
+        # V1.3.3: Pass adaptive HC gate and cross-signal boost from GainzAlgo modules
+        _adaptive_gate = getattr(features, "adaptive_hc_gate", None)
+        _cross_boost = getattr(features, "cross_signal_boost", 0.0)
         signal = self.signal_aggregator.aggregate(
             feature_snapshot=features,
             ml_prediction=None,
             htf_bias=htf_bias,
             current_time=bar["timestamp"],
+            adaptive_hc_gate=_adaptive_gate,
+            cross_signal_boost=_cross_boost,
         )
 
         # ── Determine entry parameters ──
@@ -1277,6 +1284,14 @@ class CausalReplayEngine:
                 entry_source = "aggregator"
                 # Aggregator uses ATR-based stops (no sweep stop override)
                 sweep_stop_override = None
+
+                # Track FVG confluence for aggregator path too
+                fvg_confluence = "none"
+                if features:
+                    if entry_direction == "long" and getattr(features, 'inside_bullish_fvg', False):
+                        fvg_confluence = "inside"
+                    elif entry_direction == "short" and getattr(features, 'inside_bearish_fvg', False):
+                        fvg_confluence = "inside"
 
         if entry_direction is None:
             # Capture HTF rejection if aggregator returned a blocked signal
@@ -1365,23 +1380,11 @@ class CausalReplayEngine:
             self._rejection_count += 1
             return
 
-        # ── HC Gate 2b: Stop Distance (min -- C1 needs room for 5-bar exit) ──
-        # Data: 30-50pt stops = profitable, <30pt stops = net negative
-        if raw_stop < 30.0:
-            self._record_shadow_signal(
-                bar, features, entry_direction, entry_score, raw_stop,
-                "Stop too tight (< 30pts)", 5)
-            self._rejection_count += 1
-            return
-
-        # ── Prime Hours Gate (9-10AM ET only -- data-driven) ──
-        # 9-10AM: 77.4% WR, PF 1.28 | All other hours: net negative
-        if not is_prime_hours(bar["timestamp"]):
-            self._record_shadow_signal(
-                bar, features, entry_direction, entry_score, raw_stop,
-                "Outside prime hours (9-10AM)", 5)
-            self._rejection_count += 1
-            return
+        # NOTE: Previous version had a min-stop gate (< 30pts) and prime-hours
+        # gate (9-10AM only) here. Both were REMOVED because:
+        #   1. Min stop = 30 + Max stop = 30 → only exactly 30.0 passes (impossible)
+        #   2. Prime hours gate not in main.py — backtest must match live logic
+        # See CLAUDE.md Lessons Learned for details.
 
         # ── Min R:R Check (disabled for C1 time-exit: MIN_RR_RATIO=0.0) ──
         if MIN_RR_RATIO > 0:
@@ -2299,8 +2302,9 @@ def run_verification_checks(
     }
 
     # 3. Commission audit
-    # Expected: $1.29/contract/side × 2 sides × 2 contracts = $5.16/trade
-    expected_per_trade = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 2
+    # Expected: $1.29/contract/side × 2 sides × 5 contracts = $12.90/trade
+    total_contracts = 5  # C1=1 + C2=1 + C3=3
+    expected_per_trade = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * total_contracts
     total_commission = 0.0
     commission_errors = 0
     for closed_trade in engine.executor._trade_history:
@@ -2317,7 +2321,7 @@ def run_verification_checks(
         "total_trades": len(engine.executor._trade_history),
         "description": (
             f"${COMMISSION_PER_CONTRACT_PER_SIDE}/contract/side × "
-            f"2 sides × 2 contracts = ${expected_per_trade:.2f}/trade"
+            f"2 sides × {total_contracts} contracts = ${expected_per_trade:.2f}/trade"
         ),
     }
 

@@ -264,12 +264,71 @@ function App() {
     <>
       <StatusBar data={data} isLive={isLive} />
       <PnlHero data={data} trades={trades} />
+      <DailyPnl data={data} trades={trades} />
       {op && <OpenPosition pos={op} />}
       <TradeLog trades={trades} expanded={expanded} setExpanded={setExpanded} />
       <SessionFooter trades={trades} />
       <ActivityFeed decs={decs} />
       <RefreshStrip countdown={countdown} error={error} updated={data.updated} />
     </>
+  );
+}
+
+/* ── DAILY PNL SUMMARY ── */
+function DailyPnl({ data, trades }) {
+  if (!trades || trades.length === 0) return null;
+  // Group trades by date
+  const byDay = {};
+  trades.forEach(t => {
+    const d = t.date || (t.time ? t.time.split(' ')[0] : 'Today');
+    if (!byDay[d]) byDay[d] = { wins: 0, losses: 0, pnl: 0 };
+    byDay[d].pnl += (t.total_pnl || 0);
+    if ((t.total_pnl || 0) > 0) byDay[d].wins++;
+    else byDay[d].losses++;
+  });
+  const days = Object.keys(byDay).sort().reverse();
+  if (days.length === 0) return null;
+  let cum = 0;
+  const cumMap = {};
+  Object.keys(byDay).sort().forEach(d => { cum += byDay[d].pnl; cumMap[d] = cum; });
+
+  return (
+    <div style={{background:'var(--surface)',border:'1px solid var(--border-light)',borderRadius:'var(--radius)',padding:'16px 20px',marginBottom:'16px',boxShadow:'var(--shadow-sm)'}}>
+      <div style={{fontSize:'11px',fontWeight:'700',color:'var(--brown-900)',letterSpacing:'1px',textTransform:'uppercase',marginBottom:'10px'}}>Daily PnL</div>
+      <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontFamily:'var(--mono)',fontSize:'12px'}}>
+          <thead>
+            <tr>
+              <th style={{textAlign:'left',padding:'6px 10px',borderBottom:'2px solid var(--border)',color:'var(--text-muted)',fontSize:'10px',textTransform:'uppercase',letterSpacing:'.5px'}}>Date</th>
+              <th style={{textAlign:'right',padding:'6px 10px',borderBottom:'2px solid var(--border)',color:'var(--text-muted)',fontSize:'10px',textTransform:'uppercase',letterSpacing:'.5px'}}>Trades</th>
+              <th style={{textAlign:'right',padding:'6px 10px',borderBottom:'2px solid var(--border)',color:'var(--text-muted)',fontSize:'10px',textTransform:'uppercase',letterSpacing:'.5px'}}>WR</th>
+              <th style={{textAlign:'right',padding:'6px 10px',borderBottom:'2px solid var(--border)',color:'var(--text-muted)',fontSize:'10px',textTransform:'uppercase',letterSpacing:'.5px'}}>PnL</th>
+              <th style={{textAlign:'right',padding:'6px 10px',borderBottom:'2px solid var(--border)',color:'var(--text-muted)',fontSize:'10px',textTransform:'uppercase',letterSpacing:'.5px'}}>Cumulative</th>
+            </tr>
+          </thead>
+          <tbody>
+            {days.map(d => {
+              const day = byDay[d];
+              const total = day.wins + day.losses;
+              const wr = total > 0 ? ((day.wins / total) * 100).toFixed(0) : '0';
+              const pnlColor = day.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+              const cumColor = cumMap[d] >= 0 ? 'var(--green)' : 'var(--red)';
+              const sign = day.pnl >= 0 ? '+' : '';
+              const cumSign = cumMap[d] >= 0 ? '+' : '';
+              return (
+                <tr key={d}>
+                  <td style={{textAlign:'left',padding:'7px 10px',borderBottom:'1px solid var(--border-light)',fontWeight:'600'}}>{d}</td>
+                  <td style={{textAlign:'right',padding:'7px 10px',borderBottom:'1px solid var(--border-light)'}}>{total}</td>
+                  <td style={{textAlign:'right',padding:'7px 10px',borderBottom:'1px solid var(--border-light)'}}>{wr}%</td>
+                  <td style={{textAlign:'right',padding:'7px 10px',borderBottom:'1px solid var(--border-light)',color:pnlColor,fontWeight:'600'}}>{sign}${Math.abs(day.pnl).toFixed(2)}</td>
+                  <td style={{textAlign:'right',padding:'7px 10px',borderBottom:'1px solid var(--border-light)',color:cumColor,fontWeight:'600'}}>{cumSign}${Math.abs(cumMap[d]).toFixed(2)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -381,9 +440,13 @@ function OpenPosition({ pos }) {
   );
 }
 
-/* ── SECTION D: TRADE LOG ── */
+/* ── SECTION D: TRADE LOG (15 visible, show more) ── */
 function TradeLog({ trades, expanded, setExpanded }) {
+  const [showAll, setShowAll] = useState(false);
+  const VISIBLE_COUNT = 15;
   const rev = [...trades].reverse();
+  const visible = showAll ? rev : rev.slice(0, VISIBLE_COUNT);
+  const hiddenCount = rev.length - VISIBLE_COUNT;
   const toggle = (idx) => setExpanded(expanded === idx ? null : idx);
 
   return (
@@ -398,12 +461,38 @@ function TradeLog({ trades, expanded, setExpanded }) {
           <p>Scanning for high-confluence setups...</p>
         </div>
       ) : (
-        <div className="trade-cards">
-          {rev.map((t, i) => (
-            <TradeCard key={i} idx={i} t={t} open={expanded === i}
-              onClick={() => toggle(i)} />
-          ))}
-        </div>
+        <>
+          <div className="trade-cards">
+            {visible.map((t, i) => (
+              <TradeCard key={i} idx={i} t={t} open={expanded === i}
+                onClick={() => toggle(i)} />
+            ))}
+          </div>
+          {!showAll && hiddenCount > 0 && (
+            <div style={{textAlign:'center',padding:'14px 0'}}>
+              <button onClick={() => setShowAll(true)} style={{
+                background:'var(--surface)',border:'1px solid var(--border)',
+                borderRadius:'8px',padding:'10px 28px',cursor:'pointer',
+                fontFamily:'var(--mono)',fontSize:'12px',fontWeight:'600',
+                color:'var(--accent)',transition:'all .2s',
+                boxShadow:'var(--shadow-sm)'
+              }}
+              onMouseOver={e => {e.target.style.borderColor='var(--accent)';e.target.style.background='var(--accent-soft)'}}
+              onMouseOut={e => {e.target.style.borderColor='var(--border)';e.target.style.background='var(--surface)'}}
+              >Show {hiddenCount} more trades</button>
+            </div>
+          )}
+          {showAll && hiddenCount > 0 && (
+            <div style={{textAlign:'center',padding:'14px 0'}}>
+              <button onClick={() => setShowAll(false)} style={{
+                background:'var(--surface)',border:'1px solid var(--border)',
+                borderRadius:'8px',padding:'10px 28px',cursor:'pointer',
+                fontFamily:'var(--mono)',fontSize:'12px',fontWeight:'600',
+                color:'var(--text-muted)',transition:'all .2s'
+              }}>Show less</button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -533,15 +622,20 @@ function SessionFooter({ trades }) {
   );
 }
 
-/* ── ACTIVITY FEED ── */
+/* ── ACTIVITY FEED (15 visible, show more) ── */
 function ActivityFeed({ decs }) {
+  const [showAllDecs, setShowAllDecs] = useState(false);
   if (!decs || decs.length === 0) return null;
+  const rev = [...decs].reverse();
+  const VISIBLE = 15;
+  const visible = showAllDecs ? rev : rev.slice(0, VISIBLE);
+  const hidden = rev.length - VISIBLE;
 
   return (
     <div>
-      <div className="sec-title"><h2>Recent Activity</h2></div>
+      <div className="sec-title"><h2>Recent Activity</h2><span className="cnt">{decs.length} signals</span></div>
       <div className="af">
-        {[...decs].reverse().map((d, i) => {
+        {visible.map((d, i) => {
           let bc = 'approved';
           if (d.decision === 'REJECTED') bc = 'rejected';
           else if (d.decision === 'EXIT') bc = 'exit';
@@ -554,6 +648,26 @@ function ActivityFeed({ decs }) {
           );
         })}
       </div>
+      {!showAllDecs && hidden > 0 && (
+        <div style={{textAlign:'center',padding:'10px 0'}}>
+          <button onClick={() => setShowAllDecs(true)} style={{
+            background:'var(--surface)',border:'1px solid var(--border)',
+            borderRadius:'8px',padding:'8px 24px',cursor:'pointer',
+            fontFamily:'var(--mono)',fontSize:'11px',fontWeight:'600',
+            color:'var(--accent)',transition:'all .2s'
+          }}>Show {hidden} more signals</button>
+        </div>
+      )}
+      {showAllDecs && hidden > 0 && (
+        <div style={{textAlign:'center',padding:'10px 0'}}>
+          <button onClick={() => setShowAllDecs(false)} style={{
+            background:'var(--surface)',border:'1px solid var(--border)',
+            borderRadius:'8px',padding:'8px 24px',cursor:'pointer',
+            fontFamily:'var(--mono)',fontSize:'11px',fontWeight:'600',
+            color:'var(--text-muted)'
+          }}>Show less</button>
+        </div>
+      )}
     </div>
   );
 }

@@ -68,9 +68,14 @@ class HTFBiasEngine:
     HYSTERESIS_MARGIN = HTF_HYSTERESIS_MARGIN
     CONFIRM_BARS = HTF_HYSTERESIS_CONFIRM_BARS
 
-    def __init__(self, config=None, timeframes: List[str] = None):
+    # Map timeframe labels to their period in minutes (for completion-time tracking)
+    _TF_MINUTES = {"5m": 5, "15m": 15, "30m": 30, "1H": 60, "4H": 240, "1D": 1440}
+
+    def __init__(self, config=None, timeframes: List[str] = None,
+                 backtest_mode: bool = False):
         self.config = config
         self.timeframes = timeframes or ["5m", "15m", "30m", "1H", "4H", "1D"]
+        self.backtest_mode = backtest_mode  # Skip staleness checks in backtests
         self._bars: Dict[str, List[HTFBar]] = {tf: [] for tf in self.timeframes}
         self._biases: Dict[str, str] = {}
         self._last_result: Optional[HTFBiasResult] = None
@@ -93,7 +98,11 @@ class HTFBiasEngine:
         if len(self._bars[timeframe]) > self.WINDOW:
             self._bars[timeframe] = self._bars[timeframe][-self.WINDOW:]
         self._biases[timeframe] = self._compute_tf_bias(timeframe)
-        self._last_update_time[timeframe] = bar.timestamp
+        # Store bar COMPLETION time (start + period) for accurate staleness tracking.
+        # A 5m bar starting at 09:05 represents data through 09:10, so staleness
+        # should measure from 09:10 — not 09:05.
+        tf_min = self._TF_MINUTES.get(timeframe, 0)
+        self._last_update_time[timeframe] = bar.timestamp + timedelta(minutes=tf_min)
         self._total_updates += 1
 
     def get_bias(self, timestamp: datetime = None) -> HTFBiasResult:
@@ -119,6 +128,11 @@ class HTFBiasEngine:
                     "ingested -- staleness check would be silently skipped.  "
                     "Pass the current bar timestamp."
                 )
+            stale_tfs = set()
+        elif self.backtest_mode:
+            # In backtest mode, HTF bars are pre-built and fed causally by
+            # HTFScheduler — staleness is an artifact of CSV data gaps
+            # (overnight, settlement breaks), not a broken data feed.
             stale_tfs = set()
         else:
             stale_tfs = self._check_staleness(timestamp)

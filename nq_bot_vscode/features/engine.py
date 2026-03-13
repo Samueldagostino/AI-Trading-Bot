@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 from datetime import datetime, timezone
 
+import config.constants as _constants
+
 logger = logging.getLogger(__name__)
 
 
@@ -184,6 +186,38 @@ class FeatureSnapshot:
     structural_stop_long: Optional[float] = None    # Tightest stop price for LONG entries
     structural_stop_short: Optional[float] = None   # Tightest stop price for SHORT entries
 
+    # V1.3.3 GainzAlgo Suite fields
+    # -- Volatility Percentile --
+    atr_percentile: float = 50.0           # 0-100: where current ATR sits in history
+    vol_regime: str = "normal"             # "compressed", "normal", "expanding", "extreme"
+    adaptive_sweep_depth: float = 3.0      # Dynamic sweep depth based on vol percentile
+    vol_expansion_rate: float = 0.0        # ATR rate of change
+
+    # -- Momentum Acceleration (SAMSM) --
+    momentum_velocity: float = 0.0         # 1st derivative: rate of price change
+    momentum_acceleration: float = 0.0     # 2nd derivative: change in velocity
+    momentum_phase: str = "neutral"        # "accelerating", "decelerating", "neutral", "reversing"
+    momentum_surge: bool = False           # Rapid acceleration detected
+    momentum_exhaustion: bool = False      # Sustained deceleration (reversal precursor)
+    momentum_score: float = 0.0           # -1 to +1: net momentum direction
+
+    # -- Cycle-Slope (CSTA) --
+    cycle_phase: str = "unknown"           # "impulse_up", "correction_down", etc.
+    cycle_slope: float = 0.0              # Normalized slope of current phase
+    cycle_phase_duration: int = 0          # Bars in current phase
+    cycle_score: float = 0.0              # -1 to +1: cycle-weighted direction
+
+    # -- Candle Micro-Reversal (CSMRM) --
+    exhaustion_pattern: str = "none"       # "hammer", "shooting_star", "doji", "engulfing", etc.
+    pressure_asymmetry: float = 0.0        # -1 (sell) to +1 (buy)
+    reversal_score: float = 0.0           # 0-1: strength of reversal signal
+    reversal_direction: str = "none"       # "bullish", "bearish", "none"
+    consecutive_rejections: int = 0        # Bars showing same-direction rejection
+
+    # -- Adaptive Confidence --
+    adaptive_hc_gate: float = 0.75         # Dynamically adjusted HC gate
+    cross_signal_boost: float = 0.0        # Synergy boost from signal interactions
+
 
 class NQFeatureEngine:
     """
@@ -203,6 +237,14 @@ class NQFeatureEngine:
         self._cumulative_delta: int = 0
         self._session_volume_price_sum: float = 0.0
         self._session_volume_sum: int = 0
+
+        # V1.3.3 GainzAlgo modules (lazy-initialized on first use)
+        self._gainz_initialized = False
+        self._vol_normalizer = None
+        self._momentum_model = None
+        self._cycle_analyzer = None
+        self._candle_evaluator = None
+        self._adaptive_engine = None
 
     def update(self, bar: Bar) -> FeatureSnapshot:
         """
@@ -239,6 +281,10 @@ class NQFeatureEngine:
         self._detect_liquidity_sweeps(snapshot, bar)
         self._update_zone_validity(bar)
         self._compute_proximity_signals(snapshot, bar)
+
+        # === V1.3.3 GainzAlgo Suite (additive -- no change to core) ===
+        if _constants.GAINZ_MODULES_ENABLED:
+            self._compute_gainz_features(snapshot, bar)
 
         return snapshot
 
@@ -767,3 +813,107 @@ class NQFeatureEngine:
             snapshot.structural_stop_long = round(max(long_structural_stops), 2)
         if short_structural_stops:
             snapshot.structural_stop_short = round(min(short_structural_stops), 2)
+
+    # ================================================================
+    # V1.3.3 GainzAlgo Suite -- Additive Feature Computation
+    # ================================================================
+    def _init_gainz_modules(self) -> None:
+        """Lazy-initialize GainzAlgo modules on first use."""
+        if self._gainz_initialized:
+            return
+
+        from features.gainz_modules import (
+            VolatilityPercentileNormalizer,
+            MomentumAccelerationModel,
+            CycleSlopeTrendAnalyzer,
+            CandleMicroReversalEvaluator,
+            AdaptiveConfidenceEngine,
+        )
+        from config.constants import (
+            VOL_PERCENTILE_LOOKBACK,
+            SAMSM_VELOCITY_PERIOD, SAMSM_ACCEL_PERIOD,
+            SAMSM_SURGE_SIGMA, SAMSM_EXHAUSTION_BARS,
+            CSTA_FAST_PERIOD, CSTA_SLOW_PERIOD, CSTA_SLOPE_LOOKBACK,
+            CSMRM_REJECTION_THRESHOLD, CSMRM_DOJI_THRESHOLD,
+            CSMRM_MIN_RANGE_ATR_RATIO,
+        )
+
+        self._vol_normalizer = VolatilityPercentileNormalizer(
+            lookback=VOL_PERCENTILE_LOOKBACK
+        )
+        self._momentum_model = MomentumAccelerationModel(
+            velocity_period=SAMSM_VELOCITY_PERIOD,
+            accel_period=SAMSM_ACCEL_PERIOD,
+            surge_sigma=SAMSM_SURGE_SIGMA,
+            exhaustion_bars=SAMSM_EXHAUSTION_BARS,
+        )
+        self._cycle_analyzer = CycleSlopeTrendAnalyzer(
+            fast_period=CSTA_FAST_PERIOD,
+            slow_period=CSTA_SLOW_PERIOD,
+            slope_lookback=CSTA_SLOPE_LOOKBACK,
+        )
+        self._candle_evaluator = CandleMicroReversalEvaluator(
+            rejection_threshold=CSMRM_REJECTION_THRESHOLD,
+            body_doji_threshold=CSMRM_DOJI_THRESHOLD,
+            min_range_atr_ratio=CSMRM_MIN_RANGE_ATR_RATIO,
+        )
+        self._adaptive_engine = AdaptiveConfidenceEngine()
+        self._gainz_initialized = True
+        logger.info("V1.3.3 GainzAlgo modules initialized")
+
+    def _compute_gainz_features(self, snapshot: FeatureSnapshot, bar: Bar) -> None:
+        """
+        Compute all V1.3.3 GainzAlgo features and populate the snapshot.
+
+        CAUSALITY: All modules use bar close (completed bar) only.
+        No future data contamination.
+        """
+        self._init_gainz_modules()
+
+        try:
+            # 1. Volatility Percentile
+            vol_ctx = self._vol_normalizer.update(snapshot.atr_14)
+            snapshot.atr_percentile = vol_ctx.atr_percentile
+            snapshot.vol_regime = vol_ctx.vol_regime
+            snapshot.adaptive_sweep_depth = vol_ctx.adaptive_sweep_depth
+            snapshot.vol_expansion_rate = vol_ctx.vol_expansion_rate
+
+            # 2. Momentum Acceleration (SAMSM)
+            momentum = self._momentum_model.update(bar.close)
+            snapshot.momentum_velocity = momentum.velocity
+            snapshot.momentum_acceleration = momentum.acceleration
+            snapshot.momentum_phase = momentum.momentum_phase
+            snapshot.momentum_surge = momentum.surge_detected
+            snapshot.momentum_exhaustion = momentum.exhaustion_detected
+            snapshot.momentum_score = momentum.momentum_score
+
+            # 3. Cycle-Slope (CSTA)
+            cycle = self._cycle_analyzer.update(bar.close, snapshot.atr_14)
+            snapshot.cycle_phase = cycle.cycle_phase
+            snapshot.cycle_slope = cycle.slope_angle
+            snapshot.cycle_phase_duration = cycle.phase_duration
+            snapshot.cycle_score = cycle.cycle_score
+
+            # 4. Candle Micro-Reversal (CSMRM)
+            reversal = self._candle_evaluator.update(
+                bar.open, bar.high, bar.low, bar.close, snapshot.atr_14
+            )
+            snapshot.exhaustion_pattern = reversal.exhaustion_pattern
+            snapshot.pressure_asymmetry = reversal.pressure_asymmetry
+            snapshot.reversal_score = reversal.reversal_score
+            snapshot.reversal_direction = reversal.reversal_direction
+            snapshot.consecutive_rejections = reversal.consecutive_rejection_bars
+
+            # 5. Adaptive Confidence (combines all module outputs)
+            adaptive = self._adaptive_engine.compute(
+                vol_ctx=vol_ctx,
+                momentum=momentum,
+                cycle=cycle,
+                reversal=reversal,
+                regime=snapshot.detected_regime,
+            )
+            snapshot.adaptive_hc_gate = adaptive.hc_gate
+            snapshot.cross_signal_boost = adaptive.cross_signal_boost
+
+        except Exception as e:
+            logger.warning("GainzAlgo module error (degraded): %s", e)

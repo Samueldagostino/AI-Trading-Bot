@@ -130,3 +130,43 @@ AGGREGATOR_STANDALONE_MIN_SCORE: float = 0.75  # Must meet HC gate independently
 # Higher TFs (30m, 1H, 4H, 1D) removed -- irrelevant for scalp timing.
 HTF_TIMEFRAMES: frozenset = frozenset({"15m", "5m"})
 EXECUTION_TIMEFRAMES: frozenset = frozenset({"2m", "3m", "1m"})
+
+# ── V1.3.3 GAINZALGO SUITE CONSTANTS ────────────────────────────
+#   GainzAlgo Framework integration (Mar 2026).
+#   These control the 5 enhancement modules that feed into the existing
+#   aggregator as additive signal sources.  The core PATH C+ dual-trigger
+#   architecture is unchanged.
+
+# -- Volatility Percentile Normalizer --
+VOL_PERCENTILE_LOOKBACK: int = 500           # Rolling ATR history for percentile
+VOL_ADAPTIVE_SWEEP_DEPTH_MIN: float = 2.0    # Min sweep depth (pts) at 0th percentile
+VOL_ADAPTIVE_SWEEP_DEPTH_MAX: float = 6.0    # Max sweep depth (pts) at 100th percentile
+
+# -- Momentum Acceleration Model (SAMSM) --
+SAMSM_VELOCITY_PERIOD: int = 5               # EMA period for velocity smoothing
+SAMSM_ACCEL_PERIOD: int = 3                  # EMA period for acceleration smoothing
+SAMSM_SURGE_SIGMA: float = 2.0              # σ threshold for surge detection
+SAMSM_EXHAUSTION_BARS: int = 5              # Consecutive deceleration bars for exhaustion
+
+# -- Cycle-Slope Trend Analyzer (CSTA) --
+CSTA_FAST_PERIOD: int = 8                    # Fast EMA for micro-cycle detection
+CSTA_SLOW_PERIOD: int = 21                   # Slow EMA for macro-direction
+CSTA_SLOPE_LOOKBACK: int = 3                 # Bars for slope computation
+
+# -- Candle Micro-Reversal Evaluator (CSMRM) --
+CSMRM_REJECTION_THRESHOLD: float = 0.55     # Wick ratio to count as rejection
+CSMRM_DOJI_THRESHOLD: float = 0.15          # Body/range < this → doji
+CSMRM_MIN_RANGE_ATR_RATIO: float = 0.3      # Min candle size vs ATR for evaluation
+
+# -- Adaptive Confidence Engine --
+ADAPTIVE_HC_GATE_FLOOR: float = 0.70        # Absolute minimum HC gate
+ADAPTIVE_HC_GATE_CEILING: float = 0.82      # Absolute maximum HC gate
+ADAPTIVE_MAX_CROSS_SIGNAL_BOOST: float = 0.10  # Max synergy boost from cross-signals
+
+# -- GainzAlgo signal strengths in aggregator --
+GAINZ_EXHAUSTION_SIGNAL_STRENGTH: float = 0.70   # Candle exhaustion reversal
+GAINZ_MOMENTUM_SIGNAL_STRENGTH: float = 0.65     # Momentum acceleration/deceleration
+GAINZ_CYCLE_SIGNAL_STRENGTH: float = 0.60        # Cycle-phase pullback entry
+
+# -- Feature flag (master switch for V1.3.3 modules) --
+GAINZ_MODULES_ENABLED: bool = True
