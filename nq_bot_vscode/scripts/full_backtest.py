@@ -66,6 +66,7 @@ from config.constants import (
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_STRENGTH_GATE,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
+    AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
 )
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -909,12 +910,18 @@ class CausalReplayEngine:
         """
         engine_ref = self
 
-        async def patched_paper_enter(trade, price):
+        async def patched_paper_enter(trade, price, timestamp=None):
             fill_price = round(price, 2)
-            sim_time = engine_ref._current_bar_ts or datetime.now(timezone.utc)
+            sim_time = timestamp or engine_ref._current_bar_ts or datetime.now(timezone.utc)
 
             for leg in trade.all_legs:
                 if leg.contracts > 0:
+                    # C3 delayed entry: skip filling C3 when delayed entry enabled
+                    if leg.leg_label == "C3" and C3_DELAYED_ENTRY:
+                        leg.is_filled = False
+                        leg.is_open = False
+                        leg.commission = 0.0
+                        continue
                     leg.entry_price = fill_price
                     leg.entry_time = sim_time
                     leg.is_filled = True
@@ -923,6 +930,9 @@ class CausalReplayEngine:
                     # Commission: $1.50/contract/side (conservative — real is $1.29)
                     # Charged as round-trip upfront: $1.50 * 2 sides * contracts
                     leg.commission = 1.50 * 2 * leg.contracts
+
+            # Mark C3 as pending when delayed entry is enabled
+            trade.c3_pending = C3_DELAYED_ENTRY and trade.c3.contracts > 0
 
             trade.entry_price = fill_price
             trade.entry_time = sim_time
@@ -1224,6 +1234,7 @@ class CausalReplayEngine:
         entry_score = 0.0
         entry_source = None
         sweep_stop_override = None
+        fvg_confluence = "none"
 
         # PATH C: Sweep-only trigger architecture (mirrors main.py)
         if has_sweep:
@@ -1263,7 +1274,19 @@ class CausalReplayEngine:
                     fvg_confluence = "inside"
                 elif entry_direction == "short" and getattr(features, 'inside_bearish_fvg', False):
                     fvg_confluence = "inside"
-        # Aggregator alone cannot trigger (PATH C)
+        # PATH C+: Aggregator standalone trigger (mirrors main.py dual-trigger)
+        elif has_signal and AGGREGATOR_STANDALONE_ENABLED:
+            if signal.combined_score >= AGGREGATOR_STANDALONE_MIN_SCORE:
+                entry_direction = (
+                    "long" if signal.direction == SignalDirection.LONG
+                    else "short"
+                )
+                entry_score = signal.combined_score
+                entry_source = "aggregator"
+                logger.debug(
+                    "Aggregator standalone trigger: %s score=%.3f",
+                    entry_direction, entry_score,
+                )
 
         if entry_direction is None:
             # Capture HTF rejection if aggregator returned a blocked signal
@@ -1352,23 +1375,13 @@ class CausalReplayEngine:
             self._rejection_count += 1
             return
 
-        # ── HC Gate 2b: Stop Distance (min -- C1 needs room for 5-bar exit) ──
-        # Data: 30-50pt stops = profitable, <30pt stops = net negative
-        if raw_stop < 30.0:
-            self._record_shadow_signal(
-                bar, features, entry_direction, entry_score, raw_stop,
-                "Stop too tight (< 30pts)", 5)
-            self._rejection_count += 1
-            return
-
-        # ── Prime Hours Gate (9-10AM ET only -- data-driven) ──
-        # 9-10AM: 77.4% WR, PF 1.28 | All other hours: net negative
-        if not is_prime_hours(bar["timestamp"]):
-            self._record_shadow_signal(
-                bar, features, entry_direction, entry_score, raw_stop,
-                "Outside prime hours (9-10AM)", 5)
-            self._rejection_count += 1
-            return
+        # ── HC Gate 2b: Stop Distance (min -- clamp to floor, matches main.py) ──
+        if HIGH_CONVICTION_MIN_STOP_PTS > 0 and raw_stop < HIGH_CONVICTION_MIN_STOP_PTS:
+            logger.debug(
+                "Stop %.1f below min %.1f — clamping to %.1f",
+                raw_stop, HIGH_CONVICTION_MIN_STOP_PTS, HIGH_CONVICTION_MIN_STOP_PTS,
+            )
+            raw_stop = HIGH_CONVICTION_MIN_STOP_PTS
 
         # ── Min R:R Check (disabled for C1 time-exit: MIN_RR_RATIO=0.0) ──
         if MIN_RR_RATIO > 0:
@@ -2076,7 +2089,19 @@ def compute_aggregate_metrics(
 ) -> Dict:
     """Compute aggregate metrics for the full backtest."""
     if not complete_trades:
-        return {"total_trades": 0, "bars_processed": engine._bars_processed}
+        return {
+            "total_trades": 0, "bars_processed": engine._bars_processed,
+            "win_rate": 0.0, "profit_factor": 0.0, "total_pnl": 0.0,
+            "final_equity": 50000.0, "max_drawdown_dollars": 0.0,
+            "max_drawdown_pct": 0.0, "avg_winner": 0.0, "avg_loser": 0.0,
+            "largest_win": 0.0, "largest_loss": 0.0, "expectancy": 0.0,
+            "c1_total_pnl": 0.0, "c2_total_pnl": 0.0, "c3_total_pnl": 0.0,
+            "c4_total_pnl": 0.0, "max_consec_wins": 0, "max_consec_losses": 0,
+            "total_commission": 0.0, "total_slippage_cost": 0.0,
+            "long_trades": 0, "short_trades": 0,
+            "long_pnl": 0.0, "short_pnl": 0.0,
+            "signal_sources": {}, "shadow_signals_captured": len(engine._shadow_signals),
+        }
 
     pnls = [t["adjusted_pnl"] for t in complete_trades]
     winners = [p for p in pnls if p > 0]
