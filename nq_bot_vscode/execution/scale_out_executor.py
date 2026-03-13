@@ -505,10 +505,15 @@ class ScaleOutExecutor:
     # ================================================================
     # TICK-BY-TICK MANAGEMENT
     # ================================================================
-    async def update(self, current_price: float, current_time: datetime) -> Optional[dict]:
+    async def update(self, current_price: float, current_time: datetime,
+                     bar_high: float = None, bar_low: float = None) -> Optional[dict]:
         """
         Call on every bar close. Manages the full 4-tier lifecycle.
         Returns dict describing any action taken, or None.
+
+        bar_high/bar_low: optional intra-bar extremes for wick-based stop
+        detection. When provided, stops are checked against the worst-case
+        wick (low for longs, high for shorts) rather than the close price.
         """
         trade = self._active_trade
         if not trade or trade.phase in (ScaleOutPhase.DONE, ScaleOutPhase.ERROR, ScaleOutPhase.PENDING):
@@ -518,22 +523,26 @@ class ScaleOutExecutor:
 
         # ---- PHASE 1: All contracts open, C1 5-bar timer running ----
         if trade.phase == ScaleOutPhase.PHASE_1:
-            action = await self._manage_phase_1(trade, current_price, current_time)
+            action = await self._manage_phase_1(trade, current_price, current_time,
+                                                bar_high=bar_high, bar_low=bar_low)
 
         # ---- SCALING: C1 exited, managing remaining legs independently ----
         elif trade.phase == ScaleOutPhase.SCALING:
-            action = await self._manage_scaling(trade, current_price, current_time)
+            action = await self._manage_scaling(trade, current_price, current_time,
+                                                bar_high=bar_high, bar_low=bar_low)
 
         # ---- Legacy phase compat ----
         elif trade.phase in (ScaleOutPhase.C1_HIT, ScaleOutPhase.RUNNING):
-            action = await self._manage_scaling(trade, current_price, current_time)
+            action = await self._manage_scaling(trade, current_price, current_time,
+                                                bar_high=bar_high, bar_low=bar_low)
 
         return action
 
     # ================================================================
     # PHASE 1: All contracts open, C1 5-bar exit
     # ================================================================
-    async def _manage_phase_1(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
+    async def _manage_phase_1(self, trade: ScaleOutTrade, price: float, time: datetime,
+                              bar_high: float = None, bar_low: float = None) -> Optional[dict]:
         """
         Phase 1: All contracts share initial stop. C1 runs its 5-bar timer.
 
@@ -543,14 +552,21 @@ class ScaleOutExecutor:
         cfg = self.scale_config
 
         # --- Check STOP (all contracts) ---
+        # Use intra-bar wick if available: longs stop on bar_low, shorts on bar_high
         stop_hit = False
-        if direction == "long" and price <= trade.initial_stop:
-            stop_hit = True
-        elif direction == "short" and price >= trade.initial_stop:
-            stop_hit = True
+        stop_check_price = price  # default: bar close
+        if direction == "long":
+            stop_check_price = bar_low if bar_low is not None else price
+            if stop_check_price <= trade.initial_stop:
+                stop_hit = True
+        elif direction == "short":
+            stop_check_price = bar_high if bar_high is not None else price
+            if stop_check_price >= trade.initial_stop:
+                stop_hit = True
 
         if stop_hit:
-            return await self._close_all(trade, price, time, "stop")
+            # Execute at stop price (not wick extreme) — the order would fill at stop level
+            return await self._close_all(trade, trade.initial_stop, time, "stop")
 
         # --- Count bars ---
         trade.c1_bars_elapsed += 1
@@ -595,7 +611,7 @@ class ScaleOutExecutor:
         c1_exit_bars = cfg.c1_time_exit_bars
         if trade.c1_bars_elapsed >= c1_exit_bars:
             c1_profit_pts = unrealized
-            c1_in_profit = c1_profit_pts >= 3.0
+            c1_in_profit = c1_profit_pts >= getattr(cfg, 'c1_profit_threshold_pts', 3.0)
             if c1_in_profit:
                 return await self._transition_c1_to_scaling(
                     trade, round(price, 2), time, f"time_{c1_exit_bars}bars"
@@ -733,7 +749,8 @@ class ScaleOutExecutor:
     # ================================================================
     # SCALING: Independent management of C2, C3, C4
     # ================================================================
-    async def _manage_scaling(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
+    async def _manage_scaling(self, trade: ScaleOutTrade, price: float, time: datetime,
+                              bar_high: float = None, bar_low: float = None) -> Optional[dict]:
         """
         Manage remaining legs independently after C1 exits.
 
@@ -749,11 +766,14 @@ class ScaleOutExecutor:
             # Update per-leg tracking
             leg.bars_since_active += 1
 
+            # Use intra-bar extremes for best_price / MFE tracking when available
+            best_update = bar_high if (direction == "long" and bar_high is not None) else (
+                          bar_low if (direction == "short" and bar_low is not None) else price)
             if direction == "long":
-                leg.best_price = max(leg.best_price, price)
+                leg.best_price = max(leg.best_price, best_update)
                 unrealized = price - leg.entry_price
             else:
-                leg.best_price = min(leg.best_price, price)
+                leg.best_price = min(leg.best_price, best_update)
                 unrealized = leg.entry_price - price
 
             if unrealized > 0:
@@ -763,15 +783,21 @@ class ScaleOutExecutor:
                     trade.c2_mfe = max(trade.c2_mfe, unrealized)
 
             # ------ INITIAL STOP CHECK (all legs) ------
+            # Use intra-bar wick for stop detection: longs check bar_low, shorts check bar_high
             stop_hit = False
             stop_to_check = leg.stop_price
-            if direction == "long" and price <= stop_to_check:
-                stop_hit = True
-            elif direction == "short" and price >= stop_to_check:
-                stop_hit = True
+            if direction == "long":
+                wick_price = bar_low if bar_low is not None else price
+                if wick_price <= stop_to_check:
+                    stop_hit = True
+            elif direction == "short":
+                wick_price = bar_high if bar_high is not None else price
+                if wick_price >= stop_to_check:
+                    stop_hit = True
 
             if stop_hit:
                 exit_reason = "trailing" if leg.trailing_stop > 0 else ("breakeven" if leg.be_triggered else "stop")
+                # Execute at stop price (the order fills at the stop level, not the wick extreme)
                 self._close_leg(leg, stop_to_check, time, exit_reason, direction)
                 closed_legs.append(leg.leg_label)
                 continue
@@ -780,21 +806,24 @@ class ScaleOutExecutor:
 
             if leg.exit_strategy == "structural_target":
                 # C2: Exit at structural target (swing point)
+                # Use intra-bar high/low for target detection (symmetric with stop logic)
                 target_hit = False
-                if direction == "long" and price >= leg.target_price:
-                    target_hit = True
-                elif direction == "short" and price <= leg.target_price:
-                    target_hit = True
+                if direction == "long":
+                    target_check = bar_high if bar_high is not None else price
+                    if target_check >= leg.target_price:
+                        target_hit = True
+                elif direction == "short":
+                    target_check = bar_low if bar_low is not None else price
+                    if target_check <= leg.target_price:
+                        target_hit = True
 
                 if target_hit:
                     self._close_leg(leg, leg.target_price, time, "structural_target", direction)
                     closed_legs.append(leg.leg_label)
                     continue
 
-                # C2: Time stop -- max 35 bars (~70 min on 2m bars)
-                # Give structural targets time to play out. Many institutional
-                # trend moves take 45-90 min to reach swing targets.
-                c2_max_bars = 35
+                # C2: Time stop — configurable bar limit for structural target plays
+                c2_max_bars = getattr(cfg, 'c2_time_stop_bars', 35)
                 if leg.bars_since_active >= c2_max_bars:
                     self._close_leg(leg, round(price, 2), time, "time_35bars", direction)
                     closed_legs.append(leg.leg_label)

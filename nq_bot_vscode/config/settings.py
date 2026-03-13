@@ -148,18 +148,18 @@ class TradovateConfig:
 @dataclass
 class ScaleOutConfig:
     """
-    4-Contract Scale-Out v3 -- Delayed C3 Runner Architecture.
+    5-Contract Scale-Out v3 -- Delayed C3 Runner Architecture (V1.3.5).
 
-    C1 (1): 5-bar time exit -- the "canary" that validates direction.
-    C2 (1): Structural target -- exits at nearest swing point.
-    C3 (2): ATR trailing runner -- DELAYED ENTRY (only stays open when
-            C1 exits profitably. If C1 loses, C3 closed immediately).
+    C1 (1 contract): 5-bar time exit -- the "canary" that validates direction.
+    C2 (1 contract): Structural target -- exits at nearest swing point, 35-bar time stop.
+    C3 (3 contracts): ATR trailing runner -- DELAYED ENTRY (only stays open when
+                      C1 exits profitably. If C1 loses, C3 closed immediately).
 
-    Win architecture:
+    Win architecture (MNQ @ $2/pt):
       Best:  C1 wins, C3 trails big move           -> $20 + $800+  = $820+
       Good:  C1 wins, C2/C3 at breakeven            -> $20 + $0     = $20
-      Ok:    C1 loses, C3 blocked, C2 at stop        -> -$80 (2 contracts only)
-      Worst: All hit initial stop (Phase 1)          -> -$200 (5 contracts)
+      Ok:    C1 loses, C3 blocked, C2 at stop        -> -$40 (C1+C2 = 2 contracts)
+      Worst: All hit initial stop (Phase 1)          -> -$100 (5 contracts × 10pt stop)
     """
     total_contracts: int = 5              # Max contracts: C1=1, C2=1, C3=3
 
@@ -168,11 +168,11 @@ class ScaleOutConfig:
     c1_time_exit_bars: int = 5             # Exit C1 at market after N bars if profitable
     c1_max_bars_fallback: int = 12         # Fallback: exit at market if still profitable after N bars
 
-    # Legacy: Trail-from-profit params (archived, use for A/B testing only)
-    c1_profit_threshold_pts: float = 3.0   # Archived: trailing activation threshold
-    c1_trail_distance_pts: float = 2.5     # Archived: trail distance from HWM
+    # C1 profit gate: minimum points profit to trigger C1 exit (below this, wait for fallback)
+    c1_profit_threshold_pts: float = 3.0   # Min profit to exit C1 at 5 bars
+    c1_trail_distance_pts: float = 2.5     # Legacy: trail distance from HWM (unused in B:5 strategy)
 
-    # Contract 2 -- The Medium (15-bar time exit, captures follow-through)
+    # Contract 2 -- Structural Target (swing-point exit, 35-bar time stop)
     c2_contracts: int = 1
     c2_time_exit_bars: int = 15            # Exit C2 at market after N bars post-C1 exit
     c2_move_stop_to_breakeven: bool = True
@@ -182,7 +182,8 @@ class ScaleOutConfig:
     c2_trailing_atr_multiplier: float = 2.0
     c2_trailing_fixed_points: float = 30.0
     c2_max_target_points: float = 150.0
-    c2_time_stop_minutes: int = 120
+    c2_time_stop_bars: int = 35               # Max bars before C2 time exit (~70 min on 2m bars)
+    c2_time_stop_minutes: int = 120           # Legacy/unused — executor uses c2_time_stop_bars
 
     # C2 Breakeven Variant (optimized Feb 2026 -- run scripts/c2_be_optimizer.py to validate)
     # "A" = No BE: C2 keeps initial stop; ATR trail provides sole protection

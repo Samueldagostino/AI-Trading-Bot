@@ -1052,7 +1052,8 @@ class CausalReplayEngine:
         if not self.executor.has_active_trade:
             return None
 
-        result = await self.executor.update(bar["close"], bar["timestamp"])
+        result = await self.executor.update(bar["close"], bar["timestamp"],
+                                           bar_high=bar["high"], bar_low=bar["low"])
 
         if result and result.get("action") == "trade_closed":
             # Get completed trade from executor for accurate per-leg exit times
@@ -1075,6 +1076,9 @@ class CausalReplayEngine:
             c3_pnl_original = result.get("c3_pnl", 0)
             c3_pnl_final = c3_pnl_original
             c3_blocked = False
+            # Check if the executor already applied the C3 PnL adjustment
+            # (happens on Phase 1 stops via _finalize_trade(c3_blocked=True))
+            executor_already_adjusted = result.get("c3_blocked", False)
 
             if C3_DELAYED_ENTRY:
                 self._c3_stats["trades_total"] += 1
@@ -1082,16 +1086,22 @@ class CausalReplayEngine:
                     # C1 lost → C3 never entered → zero its contribution
                     c3_blocked = True
                     c3_pnl_final = 0.0
-                    # Also remove C3's exit slippage cost
+
+                    # Remove C3's exit slippage (backtest always adds it for all legs)
                     c3_slip = leg_slippages.get("C3", SLIPPAGE_RTH_PTS)
                     c3_contracts = closed_trade.c3.contracts
                     c3_slip_cost = c3_slip * c3_contracts * POINT_VALUE
-                    # Also remove C3's commission (already in raw_pnl from executor)
-                    c3_commission = closed_trade.c3.commission
+                    # Always remove C3 exit slippage (we charged it above for all legs)
+                    adjusted_pnl = adjusted_pnl + c3_slip_cost
 
-                    # Adjust PnL: remove C3 loss + its slippage + add back its commission
-                    # (commission was already subtracted in executor's raw_pnl)
-                    adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_slip_cost + c3_commission
+                    if not executor_already_adjusted:
+                        # Executor did NOT adjust — we must remove C3's PnL and commission
+                        # This happens when C3 is blocked at C1 transition but C2 continues
+                        c3_commission = closed_trade.c3.commission
+                        adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_commission
+                    # else: executor already removed C3 gross and commission from total_pnl
+                    # We only needed to remove exit slippage (done above)
+
                     self._c3_stats["c3_blocked"] += 1
                     self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
                 else:
@@ -1787,6 +1797,7 @@ class CausalReplayEngine:
                     c1_pnl = result.get("c1_pnl", 0)
                     c3_pnl_original = result.get("c3_pnl", 0)
                     c3_blocked = False
+                    executor_already_adjusted_2 = result.get("c3_blocked", False)
                     if C3_DELAYED_ENTRY:
                         self._c3_stats["trades_total"] += 1
                         if c1_pnl <= 0:
@@ -1794,8 +1805,11 @@ class CausalReplayEngine:
                             c3_slip = SLIPPAGE_RTH_PTS
                             c3_contracts = closed_trade.c3.contracts
                             c3_slip_cost = c3_slip * c3_contracts * POINT_VALUE
-                            c3_commission = closed_trade.c3.commission
-                            adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_slip_cost + c3_commission
+                            # Always remove C3 exit slippage
+                            adjusted_pnl = adjusted_pnl + c3_slip_cost
+                            if not executor_already_adjusted_2:
+                                c3_commission = closed_trade.c3.commission
+                                adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_commission
                             self._c3_stats["c3_blocked"] += 1
                             self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
                         else:
