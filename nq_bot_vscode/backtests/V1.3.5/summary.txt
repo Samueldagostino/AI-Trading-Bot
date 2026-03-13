@@ -1,0 +1,104 @@
+========================================================================
+  FULL 4-YEAR BACKTEST -- CAUSAL REPLAY RESULTS
+========================================================================
+  Generated:  2026-03-13 15:46:38
+  Engine:     CausalReplayEngine (zero look-ahead, 2m execution bars)
+
+  Configuration:
+    HC min score:       0.75
+    HC max stop:        30.0 pts
+    HTF gate:           0.3 (Config D)
+    Slippage RTH:       0.5 pts/fill
+    Slippage ETH:       1.0 pts/fill
+    Commission:         $1.29/contract/side
+    Point value:        $2.0/pt (MNQ)
+    Daily loss limit:   $500.0
+    Kill switch:        $1000.0
+    Warmup:             30 bars/session
+    Min R:R:            0.0
+
+------------------------------------------------------------------------
+  AGGREGATE METRICS
+------------------------------------------------------------------------
+  Bars Processed............................ 42,936
+  Total Trades.............................. 550
+  Win Rate.................................. 73.6%
+  Profit Factor............................. 4.46
+  Net PnL................................... $+48,507.62
+  Final Equity.............................. $98,507.62
+  Max Drawdown.............................. $430.18 (0.65%)
+  Avg Winner................................ $+154.34
+  Avg Loser................................. $-96.56
+  Largest Win............................... $+2,471.72
+  Largest Loss.............................. $-237.16
+  Expectancy/Trade.......................... $+88.20
+  C1 PnL (Time Exit)........................ $-3,469.50
+  C2 PnL (Structural)....................... $-4,023.74
+  C3 PnL (Runner)........................... $+32,923.50
+  Max Consecutive Wins...................... 14
+  Max Consecutive Losses.................... 4
+
+  Signals Generated......................... 1,565
+  Signals Blocked........................... 1,015
+  Signals Executed.......................... 550
+
+  Signal Sources:
+    aggregator.......... 368
+    sweep............... 182
+
+  Direction Breakdown:
+    Long:  294 trades, $+27,983.52
+    Short: 256 trades, $+20,524.10
+
+------------------------------------------------------------------------
+  YEARLY BREAKDOWN
+------------------------------------------------------------------------
+  Year      Trades       WR       PF            PnL   Max DD
+  -------- ------- -------- -------- -------------- --------
+  2025         198    73.2%     4.12 $   13,868.22    0.65%
+  2026         352    73.9%     4.63 $   34,639.40    0.68%
+
+------------------------------------------------------------------------
+  MONTHLY PnL SERIES
+------------------------------------------------------------------------
+  Month       Trades       WR            PnL        Avg
+  ---------- ------- -------- -------------- ----------
+  2025-12        198    73.2% $   13,868.22 $   70.04
+  2026-01        188    70.7% $   18,399.64 $   97.87
+  2026-02        164    77.4% $   16,239.76 $   99.02
+
+  Profitable Months: 3/3
+  Max Consecutive Profitable: 3
+  Losing Months: NONE
+
+------------------------------------------------------------------------
+  WALK-FORWARD ANALYSIS (6-MONTH WINDOWS)
+------------------------------------------------------------------------
+  Not enough data for walk-forward windows.
+
+------------------------------------------------------------------------
+  REGIME PERFORMANCE
+------------------------------------------------------------------------
+  Regime                Trades       WR       PF            PnL
+  -------------------- ------- -------- -------- --------------
+  high_volatility            9    77.8%     5.08 $      749.10
+  low_liquidity             18    55.6%     3.55 $    1,270.40
+  ranging                  121    74.4%     4.12 $    9,859.06
+  trending_down            113    70.8%     4.09 $   10,814.44
+  trending_up              155    72.3%     4.31 $   12,432.14
+  unknown                  134    79.1%     5.61 $   13,382.48
+
+------------------------------------------------------------------------
+  VERIFICATION CHECKS
+------------------------------------------------------------------------
+  [PASS] causality: Signal at bar N -> entry at bar N+1 (no look-ahead)
+  [FAIL] commission: $1.29/contract/side × 2 sides × 5 contracts = $12.90/trade
+  [PASS] pnl_sum: Sum of individual trade PnLs matches cumulative PnL
+  [PASS] slippage_directional: All entry slippage in adverse direction (long->higher, short->lower)
+  [PASS] warmup: First 30 bars per session blocked from trading
+
+  *** SOME VERIFICATION CHECKS FAILED -- REVIEW ABOVE ***
+
+========================================================================
+  BACKTEST COMPLETE
+========================================================================

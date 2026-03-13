@@ -818,14 +818,14 @@ class TradingOrchestrator:
                     raw_stop *= modifier_result.stop_multiplier
                     atr_for_entry = features.atr_14 * modifier_result.runner_multiplier
 
-                # Re-check dollar-tier stop cap after modifier widening
-                if raw_stop > effective_max_stop:
+                # Re-check max stop after modifier widening
+                if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
                     logger.info(
-                        "HC REJECT post-modifier: stop %.1f pts > %.1f ($%.0f budget, modifier widened)",
-                        raw_stop, effective_max_stop, dollar_budget,
+                        "HC REJECT post-modifier: stop %.1f pts > %.1f (modifier widened beyond max)",
+                        raw_stop, HIGH_CONVICTION_MAX_STOP_PTS,
                     )
                     _set_rejection(entry_direction, entry_score, raw_stop,
-                                   features.atr_14, "Dollar stop cap exceeded after modifier", 5)
+                                   features.atr_14, "Max stop exceeded after modifier", 5)
                     return None
 
                 if (modifier_result
@@ -872,8 +872,7 @@ class TradingOrchestrator:
                     "regime": self._current_regime,
                     "htf_bias": htf_dir,
                     "htf_strength": round(htf_str, 3),
-                    "dollar_risk_budget": dollar_budget,
-                    "dollar_max_stop_pts": effective_max_stop,
+                    "max_stop_pts": HIGH_CONVICTION_MAX_STOP_PTS,
                 }
                 # Attach institutional modifier metadata
                 if modifier_result is not None:

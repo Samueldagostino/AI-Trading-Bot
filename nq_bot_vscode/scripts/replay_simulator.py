@@ -891,7 +891,8 @@ class ReplaySimulator:
 
             # ── Dashboard update ──
             dashboard_update_counter += 1
-            if not self.validate and dashboard_update_counter >= dashboard_interval:
+            suppress_display = os.environ.get("SUPPRESS_DASHBOARD", "0") == "1"
+            if not self.validate and not suppress_display and dashboard_update_counter >= dashboard_interval:
                 dashboard_update_counter = 0
                 elapsed = time.time() - t0
                 os.system("clear" if os.name != "nt" else "cls")
@@ -1304,13 +1305,16 @@ class ReplaySimulator:
                 return await patched_close_c2(trade, trade.c2.stop_price, time, exit_reason)
 
             points_from_entry = abs(price - trade.entry_price)
-            if points_from_entry >= cfg.c2_max_target_points:
-                return await patched_close_c2(trade, price, time, "max_target")
+            # Use C3's own wider caps (falls back to C2's if not set)
+            c3_max_target = getattr(cfg, 'c3_max_target_points', cfg.c2_max_target_points)
+            if points_from_entry >= c3_max_target:
+                return await patched_close_c2(trade, price, time, "c3_max_target")
 
             if trade.entry_time:
                 elapsed_minutes = (time - trade.entry_time).total_seconds() / 60
-                if elapsed_minutes >= cfg.c2_time_stop_minutes:
-                    return await patched_close_c2(trade, price, time, "time_stop")
+                c3_time_stop = getattr(cfg, 'c3_time_stop_minutes', cfg.c2_time_stop_minutes)
+                if elapsed_minutes >= c3_time_stop:
+                    return await patched_close_c2(trade, price, time, "c3_time_stop")
 
             return None
 

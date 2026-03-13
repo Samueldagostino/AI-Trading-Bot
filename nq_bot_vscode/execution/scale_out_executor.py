@@ -790,12 +790,12 @@ class ScaleOutExecutor:
                     closed_legs.append(leg.leg_label)
                     continue
 
-                # C2: Time stop -- max 20 bars (~40 min on 2m bars)
-                # Tighter than before (was 30). If structural target hasn't
-                # been hit in 40 min, the setup has likely failed.
-                c2_max_bars = 20
+                # C2: Time stop -- max 35 bars (~70 min on 2m bars)
+                # Give structural targets time to play out. Many institutional
+                # trend moves take 45-90 min to reach swing targets.
+                c2_max_bars = 35
                 if leg.bars_since_active >= c2_max_bars:
-                    self._close_leg(leg, round(price, 2), time, "time_20bars", direction)
+                    self._close_leg(leg, round(price, 2), time, "time_35bars", direction)
                     closed_legs.append(leg.leg_label)
                     continue
 
@@ -830,20 +830,24 @@ class ScaleOutExecutor:
 
             elif leg.exit_strategy == "atr_trail":
                 # C3: Pure ATR trailing stop (runner)
-                self._update_atr_trail(trade, leg, cfg, direction)
+                # Uses C3's own wider ATR multiplier — runner needs more room
+                self._update_atr_trail(trade, leg, cfg, direction,
+                                       atr_mult_override=getattr(cfg, 'c3_trailing_atr_multiplier', cfg.c2_trailing_atr_multiplier))
 
-                # C3: Max target safety valve
+                # C3: Max target safety valve (C3's own wider cap)
+                c3_max_target = getattr(cfg, 'c3_max_target_points', cfg.c2_max_target_points)
                 points_from_entry = abs(price - leg.entry_price)
-                if points_from_entry >= cfg.c2_max_target_points:
-                    self._close_leg(leg, round(price, 2), time, "max_target", direction)
+                if points_from_entry >= c3_max_target:
+                    self._close_leg(leg, round(price, 2), time, "c3_max_target", direction)
                     closed_legs.append(leg.leg_label)
                     continue
 
-                # C3: Time stop (2 hours max)
+                # C3: Time stop (C3's own longer runway)
+                c3_time_stop = getattr(cfg, 'c3_time_stop_minutes', cfg.c2_time_stop_minutes)
                 if trade.entry_time:
                     elapsed_minutes = (time - trade.entry_time).total_seconds() / 60
-                    if elapsed_minutes >= cfg.c2_time_stop_minutes:
-                        self._close_leg(leg, round(price, 2), time, "time_stop", direction)
+                    if elapsed_minutes >= c3_time_stop:
+                        self._close_leg(leg, round(price, 2), time, "c3_time_stop", direction)
                         closed_legs.append(leg.leg_label)
                         continue
 
@@ -933,12 +937,16 @@ class ScaleOutExecutor:
             )
 
     def _update_atr_trail(self, trade: ScaleOutTrade, leg: ContractLeg,
-                          cfg, direction: str) -> None:
-        """Update ATR-based trailing stop for a leg."""
+                          cfg, direction: str, atr_mult_override: float = None) -> None:
+        """Update ATR-based trailing stop for a leg.
+
+        atr_mult_override: If provided, uses this multiplier instead of cfg.c2_trailing_atr_multiplier.
+                           Used by C3 runner which needs a wider trail than C2.
+        """
         if not cfg.c2_trailing_stop_enabled:
             return
 
-        multiplier = cfg.c2_trailing_atr_multiplier
+        multiplier = atr_mult_override if atr_mult_override is not None else cfg.c2_trailing_atr_multiplier
         distance = trade.atr_at_entry * multiplier
 
         if direction == "long":

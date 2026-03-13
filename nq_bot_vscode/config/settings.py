@@ -195,9 +195,12 @@ class ScaleOutConfig:
     # ── C3 Runner (THE KEY EDGE) ─────────────────────────────────
     # C3 only stays open when C1 exits profitably.
     # If C1 loses → C3 is closed immediately at market.
-    # Backtest: saved $38,430, reduced max DD 8.62% → 1.60%.
+    # Motto: "Let winners win BIG" — C3 is the profit multiplier.
     c3_contracts: int = 3                     # v1.3.1: 3 runner contracts (PF 2.86)
     c3_delayed_entry_enabled: bool = True
+    c3_trailing_atr_multiplier: float = 3.0   # Wider trail than C2 — runner needs room to breathe
+    c3_max_target_points: float = 300.0       # 2x C2's cap — let fat-tail moves pay out
+    c3_time_stop_minutes: int = 240           # 4 hours — full session runway for trend days
 
     # Adaptive Exit Configuration (regime-aware parameters)
     # Requires walk-forward validation before enabling in production.
