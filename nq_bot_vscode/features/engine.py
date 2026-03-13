@@ -143,24 +143,20 @@ class FeatureSnapshot:
     
     # Volatility
     atr_14: float = 0.0
-    realized_vol: float = 0.0
-    
+    # realized_vol: REMOVED v1.3.6 — computed but never consumed by signals or risk
+
     # VWAP
     session_vwap: float = 0.0
     price_vs_vwap: float = 0.0
-    vwap_upper_1: float = 0.0
-    vwap_lower_1: float = 0.0
-    vwap_upper_2: float = 0.0
-    vwap_lower_2: float = 0.0
-    
+    # vwap_upper/lower bands: REMOVED v1.3.6 — computed but never consumed by any gate
+
     # Order Flow
     cumulative_delta: int = 0
     delta_divergence: bool = False
-    volume_imbalance: float = 0.0
-    
+    volume_imbalance: float = 0.0    # Used by ML feature_builder only
+
     # Structure
-    is_swing_high: bool = False
-    is_swing_low: bool = False
+    # is_swing_high/low: REMOVED v1.3.6 — computed but never consumed by signals
     trend_direction: str = "none"
     trend_strength: float = 0.0
     
@@ -203,13 +199,13 @@ class FeatureSnapshot:
 
     # -- Cycle-Slope (CSTA) --
     cycle_phase: str = "unknown"           # "impulse_up", "correction_down", etc.
-    cycle_slope: float = 0.0              # Normalized slope of current phase
+    # cycle_slope: REMOVED v1.3.6 — redundant with cycle_score, never consumed externally
     cycle_phase_duration: int = 0          # Bars in current phase
     cycle_score: float = 0.0              # -1 to +1: cycle-weighted direction
 
     # -- Candle Micro-Reversal (CSMRM) --
     exhaustion_pattern: str = "none"       # "hammer", "shooting_star", "doji", "engulfing", etc.
-    pressure_asymmetry: float = 0.0        # -1 (sell) to +1 (buy)
+    # pressure_asymmetry: REMOVED v1.3.6 — never consumed externally, internal to gainz only
     reversal_score: float = 0.0           # 0-1: strength of reversal signal
     reversal_direction: str = "none"       # "bullish", "bearish", "none"
     consecutive_rejections: int = 0        # Bars showing same-direction rejection
@@ -346,14 +342,7 @@ class NQFeatureEngine:
         atr_val = float(np.mean(true_ranges))
         snapshot.atr_14 = round(atr_val, 2) if math.isfinite(atr_val) else 0.0
 
-        # Realized volatility (annualized from 1-min returns)
-        if len(self._bars) >= 20:
-            closes = [b.close for b in self._bars[-21:]]
-            # Guard against zero/negative closes that would produce NaN in log
-            if all(c > 0 for c in closes):
-                returns = [np.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
-                rv = float(np.std(returns) * np.sqrt(390))
-                snapshot.realized_vol = round(rv, 4) if math.isfinite(rv) else 0.0
+        # realized_vol computation REMOVED v1.3.6 — was never consumed by any gate or signal
 
     # ================================================================
     # VWAP + Deviation Bands
@@ -369,17 +358,8 @@ class NQFeatureEngine:
         snapshot.session_vwap = round(vwap, 2)
         snapshot.price_vs_vwap = round(bar.close - vwap, 2)
 
-        # Compute VWAP standard deviation for bands
-        if len(self._bars) >= 10:
-            deviations = []
-            for b in self._bars[-min(len(self._bars), 100):]:
-                deviations.append((b.close - vwap) ** 2)
-            std_dev = np.sqrt(np.mean(deviations))
-
-            snapshot.vwap_upper_1 = round(vwap + std_dev, 2)
-            snapshot.vwap_lower_1 = round(vwap - std_dev, 2)
-            snapshot.vwap_upper_2 = round(vwap + 2 * std_dev, 2)
-            snapshot.vwap_lower_2 = round(vwap - 2 * std_dev, 2)
+        # VWAP band computation REMOVED v1.3.6 — was never consumed by any gate or signal
+        # Kept session_vwap and price_vs_vwap which ARE used by the aggregator
 
     # ================================================================
     # Order Flow / Delta
@@ -424,15 +404,9 @@ class NQFeatureEngine:
         if not left_bars or not right_bars:
             return
 
-        # Swing High: pivot high > highs on both sides
-        if (pivot.high > max(b.high for b in left_bars) and 
-            pivot.high > max(b.high for b in right_bars)):
-            snapshot.is_swing_high = True
-
-        # Swing Low: pivot low < lows on both sides
-        if (pivot.low < min(b.low for b in left_bars) and 
-            pivot.low < min(b.low for b in right_bars)):
-            snapshot.is_swing_low = True
+        # is_swing_high/low writes REMOVED v1.3.6 — fields were never consumed
+        # Swing detection is still performed in _detect_order_blocks() and
+        # find_structural_target() where the results ARE used.
 
     # ================================================================
     # Trend Detection
@@ -919,7 +893,6 @@ class NQFeatureEngine:
             # 3. Cycle-Slope (CSTA)
             cycle = self._cycle_analyzer.update(bar.close, snapshot.atr_14)
             snapshot.cycle_phase = cycle.cycle_phase
-            snapshot.cycle_slope = cycle.slope_angle
             snapshot.cycle_phase_duration = cycle.phase_duration
             snapshot.cycle_score = cycle.cycle_score
 
@@ -928,7 +901,6 @@ class NQFeatureEngine:
                 bar.open, bar.high, bar.low, bar.close, snapshot.atr_14
             )
             snapshot.exhaustion_pattern = reversal.exhaustion_pattern
-            snapshot.pressure_asymmetry = reversal.pressure_asymmetry
             snapshot.reversal_score = reversal.reversal_score
             snapshot.reversal_direction = reversal.reversal_direction
             snapshot.consecutive_rejections = reversal.consecutive_rejection_bars
