@@ -362,11 +362,22 @@ class IBKRLiveRunner:
     def _on_bar_wrapper(self, bar, original_on_bar) -> None:
         """
         Intercepts every bar for:
+          0. Data quality validation -- reject bad bars
           1. Warmup tracking -- count bars, suppress trading until primed
           2. Session transition detection
           3. Decision logging
           4. Dry-run mode (log only, no trading)
         """
+        # Data quality gate — reject bad bars before they reach any logic
+        import math
+        for val in [bar.open, bar.high, bar.low, bar.close]:
+            if not math.isfinite(val) or val <= 0:
+                logger.warning("BAD BAR REJECTED (NaN/zero price): %s", bar.timestamp)
+                return
+        if bar.high < bar.low:
+            logger.warning("BAD BAR REJECTED (high < low): %s", bar.timestamp)
+            return
+
         self._warmup_bar_count += 1
 
         # Detect RTH/ETH transitions

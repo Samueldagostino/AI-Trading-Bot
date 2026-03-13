@@ -724,6 +724,12 @@ class TWSLiveRunner:
 
     def _on_2min_candle(self, candle: Bar) -> None:
         """Process a completed 2-minute candle."""
+        # Data quality gate — reject bad bars before they reach any logic
+        from Broker.tws_adapter import validate_bar
+        if not validate_bar(candle):
+            logger.warning("BAD BAR REJECTED: %s @ %s", candle.close, candle.timestamp)
+            return
+
         # Warmup phase -- prime indicators only, validate before trading
         if not self._warmup_complete:
             self._warmup_count += 1

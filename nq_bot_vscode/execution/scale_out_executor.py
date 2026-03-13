@@ -495,6 +495,27 @@ class ScaleOutExecutor:
         )
 
         if result.get("success"):
+            filled = result.get("filled_contracts", trade.total_contracts)
+            if filled < trade.total_contracts:
+                # Partial fill — redistribute using priority allocation
+                logger.warning(
+                    "PARTIAL FILL: %d/%d contracts filled — redistributing",
+                    filled, trade.total_contracts
+                )
+                adjusted = self.adjust_for_partial_fill(
+                    {"c1": trade.c1.contracts, "c2": trade.c2.contracts,
+                     "c3": trade.c3.contracts, "c4": 0, "total": trade.total_contracts},
+                    filled
+                )
+                trade.c1.contracts = adjusted["c1"]
+                trade.c2.contracts = adjusted["c2"]
+                trade.c3.contracts = adjusted["c3"]
+                # Zero out unfilled legs
+                for leg in trade.all_legs:
+                    if leg.contracts == 0:
+                        leg.is_filled = False
+                        leg.is_open = False
+
             trade._set_phase(ScaleOutPhase.PHASE_1)
             for leg in trade.active_legs:
                 leg.best_price = trade.entry_price

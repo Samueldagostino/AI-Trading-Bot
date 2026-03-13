@@ -1118,19 +1118,21 @@ class IBKRLivePipeline:
 
                 # C3: Max target safety valve (150pts)
                 points_from_entry = abs(price - self._entry_price)
-                max_target_pts = self._scale_config.c2_max_target_points
+                max_target_pts = getattr(self._scale_config, 'c3_max_target_points',
+                                         self._scale_config.c2_max_target_points)
                 if points_from_entry >= max_target_pts:
                     self._close_leg(pos_id, round(price, 2), current_time,
-                                    "max_target")
+                                    "c3_max_target")
                     closed_legs.append(pos_id.split("-")[-1])
                     continue
 
-                # C3: Time stop (2 hours max)
+                # C3: Time stop (4 hours — full session runway)
                 if self._entry_time:
                     elapsed_min = (
                         (current_time - self._entry_time).total_seconds() / 60
                     )
-                    if elapsed_min >= self._scale_config.c2_time_stop_minutes:
+                    if elapsed_min >= getattr(self._scale_config, 'c3_time_stop_minutes',
+                                              self._scale_config.c2_time_stop_minutes):
                         self._close_leg(pos_id, round(price, 2), current_time,
                                         "time_stop")
                         closed_legs.append(pos_id.split("-")[-1])
@@ -1221,12 +1223,13 @@ class IBKRLivePipeline:
 
     def _update_atr_trail(self, state: Dict[str, Any], direction: str) -> None:
         """
-        Update ATR-based trailing stop: trail = best_price - (ATR × 2.0).
+        Update ATR-based trailing stop for C3 runner: trail = best_price - (ATR × multiplier).
 
         Mirrors scale_out_executor._update_atr_trail() exactly.
         Only tightens (never widens the stop).
         """
-        multiplier = self._scale_config.c2_trailing_atr_multiplier
+        multiplier = getattr(self._scale_config, 'c3_trailing_atr_multiplier',
+                             self._scale_config.c2_trailing_atr_multiplier)
         distance = self._atr_at_entry * multiplier
 
         if direction == "long":
