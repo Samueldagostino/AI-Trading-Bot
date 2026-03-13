@@ -429,8 +429,21 @@ class ScaleOutExecutor:
     async def _paper_enter(self, trade: ScaleOutTrade, price: float, timestamp: Optional[datetime] = None) -> None:
         """Simulated entry fill."""
         import random
+        from zoneinfo import ZoneInfo
+        from datetime import time as dt_time
 
-        slippage = random.randint(0, self.config.execution.simulated_slippage_ticks) * 0.25
+        # Conservative slippage: 0.75pt RTH, 1.25pt ETH (real avg is ~0.96pt)
+        # We exaggerate to stress-test
+        if timestamp:
+            et = timestamp.astimezone(ZoneInfo("America/New_York"))
+            is_rth = dt_time(9, 30) <= et.time() < dt_time(16, 0)
+        else:
+            is_rth = True
+        base_slip = 0.75 if is_rth else 1.25
+        # Add random component: base ± 0.25
+        slippage = base_slip + random.choice([-0.25, 0, 0.25, 0.50])
+        slippage = max(0.25, slippage)  # Minimum 1 tick slippage always
+
         if trade.direction == "long":
             fill_price = price + slippage
         else:
@@ -446,7 +459,9 @@ class ScaleOutExecutor:
                 leg.is_filled = True
                 leg.is_open = True
                 leg.best_price = fill_price
-                leg.commission = self.risk_config.get_commission(self._instrument)
+                # Commission: $1.50/contract/side (conservative — real is $1.29)
+                # Charged as round-trip upfront: $1.50 * 2 sides * contracts
+                leg.commission = 1.50 * 2 * leg.contracts
             else:
                 leg.is_filled = False
                 leg.is_open = False
@@ -497,10 +512,15 @@ class ScaleOutExecutor:
     # ================================================================
     # TICK-BY-TICK MANAGEMENT
     # ================================================================
-    async def update(self, current_price: float, current_time: datetime) -> Optional[dict]:
+    async def update(self, current_price: float, current_time: datetime,
+                     bar_high: float = None, bar_low: float = None) -> Optional[dict]:
         """
         Call on every bar close. Manages the full 4-tier lifecycle.
         Returns dict describing any action taken, or None.
+
+        bar_high/bar_low: intra-bar extremes for realistic stop/target checks.
+        If a bar's low dips below a long stop, the stop is triggered even if
+        the bar closes above it. Same logic for shorts with bar_high.
         """
         trade = self._active_trade
         if not trade or trade.phase in (ScaleOutPhase.DONE, ScaleOutPhase.ERROR, ScaleOutPhase.PENDING):
@@ -510,22 +530,26 @@ class ScaleOutExecutor:
 
         # ---- PHASE 1: All contracts open, C1 5-bar timer running ----
         if trade.phase == ScaleOutPhase.PHASE_1:
-            action = await self._manage_phase_1(trade, current_price, current_time)
+            action = await self._manage_phase_1(trade, current_price, current_time,
+                                                bar_high=bar_high, bar_low=bar_low)
 
         # ---- SCALING: C1 exited, managing remaining legs independently ----
         elif trade.phase == ScaleOutPhase.SCALING:
-            action = await self._manage_scaling(trade, current_price, current_time)
+            action = await self._manage_scaling(trade, current_price, current_time,
+                                                bar_high=bar_high, bar_low=bar_low)
 
         # ---- Legacy phase compat ----
         elif trade.phase in (ScaleOutPhase.C1_HIT, ScaleOutPhase.RUNNING):
-            action = await self._manage_scaling(trade, current_price, current_time)
+            action = await self._manage_scaling(trade, current_price, current_time,
+                                                bar_high=bar_high, bar_low=bar_low)
 
         return action
 
     # ================================================================
     # PHASE 1: All contracts open, C1 5-bar exit
     # ================================================================
-    async def _manage_phase_1(self, trade: ScaleOutTrade, price: float, time: datetime) -> Optional[dict]:
+    async def _manage_phase_1(self, trade: ScaleOutTrade, price: float, time: datetime,
+                              bar_high: float = None, bar_low: float = None) -> Optional[dict]:
         """
         Phase 1: All contracts share initial stop. C1 runs its 5-bar timer.
 
@@ -535,11 +559,17 @@ class ScaleOutExecutor:
         cfg = self.scale_config
 
         # --- Check STOP (all contracts) ---
+        # Check intra-bar: if the bar's low (for longs) or high (for shorts) touched the stop,
+        # the stop was triggered during this bar regardless of where price closed
         stop_hit = False
-        if direction == "long" and price <= trade.initial_stop:
+        check_low = bar_low if bar_low is not None else price
+        check_high = bar_high if bar_high is not None else price
+        if direction == "long" and check_low <= trade.initial_stop:
             stop_hit = True
-        elif direction == "short" and price >= trade.initial_stop:
+            price = trade.initial_stop  # Fill at stop price (worst case)
+        elif direction == "short" and check_high >= trade.initial_stop:
             stop_hit = True
+            price = trade.initial_stop  # Fill at stop price (worst case)
 
         if stop_hit:
             return await self._close_all(trade, price, time, "stop")
@@ -861,7 +891,26 @@ class ScaleOutExecutor:
     # ================================================================
     def _close_leg(self, leg: ContractLeg, price: float, time: datetime, reason: str, direction: str) -> None:
         """Close a single contract leg."""
-        leg.exit_price = round(price, 2)
+        # Apply exit slippage (adverse direction)
+        import random
+        from zoneinfo import ZoneInfo
+        from datetime import time as dt_time
+        if time:
+            et = time.astimezone(ZoneInfo("America/New_York"))
+            is_rth = dt_time(9, 30) <= et.time() < dt_time(16, 0)
+        else:
+            is_rth = True
+        exit_slip = 0.75 if is_rth else 1.25
+        exit_slip += random.choice([-0.25, 0, 0.25])
+        exit_slip = max(0.25, exit_slip)
+
+        # Slippage is adverse: longs get worse exit, shorts get worse exit
+        if direction == "long":
+            slipped_price = round(price - exit_slip, 2)
+        else:
+            slipped_price = round(price + exit_slip, 2)
+
+        leg.exit_price = slipped_price
         leg.exit_time = time
         leg.exit_reason = reason
         leg.is_open = False
