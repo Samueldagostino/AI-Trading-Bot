@@ -260,9 +260,10 @@ class ScaleOutExecutor:
     @staticmethod
     def score_based_contracts(signal_score: float, regime_multiplier: float = 1.0) -> dict:
         """
-        4 contracts: C1 (1) + C2 (1) + C3 (2).
+        5 contracts: C1 (1) + C2 (1) + C3 (3).
 
-        C3 (runner) gets 2× allocation -- delayed entry + ATR trail captures
+        C3 (runner) gets 3× allocation -- matches v1.3.1 validated backtest
+        (PF 2.86, 396 trades, +$47,236).  Delayed entry + ATR trail captures
         fat tails while C1 canary validates direction first.
 
         C4 is unused (kept for backward compat).
@@ -270,8 +271,8 @@ class ScaleOutExecutor:
         Partial fill handling: if fewer contracts fill, priority order is
         C3 first (moneymaker), then C1 (quick feedback), then C2 (structural).
         """
-        alloc = {"c1": 1, "c2": 1, "c3": 2, "c4": 0}
-        alloc["total"] = 4
+        alloc = {"c1": 1, "c2": 1, "c3": 3, "c4": 0}
+        alloc["total"] = 5
         return alloc
 
     @staticmethod
@@ -288,8 +289,8 @@ class ScaleOutExecutor:
         adjusted = {"c1": 0, "c2": 0, "c3": 0, "c4": 0}
         remaining = filled_contracts
 
-        # C3 gets up to 2 contracts
-        adjusted["c3"] = min(2, remaining)
+        # C3 gets up to 3 contracts
+        adjusted["c3"] = min(3, remaining)
         remaining -= adjusted["c3"]
 
         # C1 gets 1 if available

@@ -420,7 +420,7 @@ function TradeCard({ t, idx, open, onClick }) {
   const legData = [
     { name: 'C1', pnl: t.c1_pnl || 0, reason: t.c1_reason || '', contracts: 1 },
     { name: 'C2', pnl: t.c2_pnl || 0, reason: t.c2_reason || '', contracts: 1 },
-    { name: 'C3', pnl: t.c3_pnl || 0, reason: t.c3_reason || '', contracts: 2 },
+    { name: 'C3', pnl: t.c3_pnl || 0, reason: t.c3_reason || '', contracts: 3 },
     { name: 'C4', pnl: t.c4_pnl || 0, reason: t.c4_reason || '', contracts: 0 },
   ];
 
@@ -438,7 +438,7 @@ function TradeCard({ t, idx, open, onClick }) {
         </div>
         <div className="tc-right">
           <div className={'tc-pnl ' + (w ? 'pos' : 'neg')}>{sP}${Math.abs(pnl).toFixed(2)}</div>
-          <div className="tc-pts">{t.contracts || 4} contracts</div>
+          <div className="tc-pts">{t.contracts || 5} contracts</div>
         </div>
       </div>
       <div className="tc-chips">

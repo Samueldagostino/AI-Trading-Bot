@@ -484,7 +484,7 @@ class PaperLiveRunner:
                     c3_reason=result.get("c3_exit_reason", ""),
                     c4_pnl=result.get("c4_pnl", 0),
                     c4_reason=result.get("c4_exit_reason", ""),
-                    contracts=result.get("contracts", 4),
+                    contracts=result.get("contracts", 5),
                     metadata={
                         "inst_position_mult": result.get("inst_position_mult"),
                         "inst_stop_mult": result.get("inst_stop_mult"),

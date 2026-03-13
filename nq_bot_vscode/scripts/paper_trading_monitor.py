@@ -66,7 +66,7 @@ class PaperTradeRecord:
     c3_reason: str = ""
     c4_pnl: float = 0.0
     c4_reason: str = ""
-    contracts: int = 4
+    contracts: int = 5
     metadata: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
@@ -165,7 +165,7 @@ class PaperTradingMonitor:
         c3_reason: str = "",
         c4_pnl: float = 0.0,
         c4_reason: str = "",
-        contracts: int = 4,
+        contracts: int = 5,
         metadata: Optional[Dict] = None,
     ) -> None:
         """Record a completed paper trade."""

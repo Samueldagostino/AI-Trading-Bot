@@ -25,8 +25,8 @@ HIGH_CONVICTION_MIN_STOP_PTS: float = 15.0   # Floor: prevents micro-stops that 
 #   Within each tier, dollar budget interpolates linearly from min->max.
 #   Higher conviction = more room (wider stop) because the signal is stronger.
 #
-#   With 4 MNQ contracts @ $2/pt:
-#     $150 -> 18.75 pts | $200 -> 25 pts | $240 -> 30 pts (HC cap)
+#   With 5 MNQ contracts @ $2/pt = $10/pt total:
+#     $150 -> 15 pts | $200 -> 20 pts | $300 -> 30 pts (HC cap)
 #     Higher tiers still exist but are capped by HC_MAX_STOP_PTS = 30.0
 #
 #   Format: (score_min, score_max, dollar_min, dollar_max)

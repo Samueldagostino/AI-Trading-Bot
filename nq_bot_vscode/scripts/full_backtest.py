@@ -66,6 +66,7 @@ from config.constants import (
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_STRENGTH_GATE,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
+    AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
 )
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -1265,7 +1266,17 @@ class CausalReplayEngine:
                     fvg_confluence = "inside"
                 elif entry_direction == "short" and getattr(features, 'inside_bearish_fvg', False):
                     fvg_confluence = "inside"
-        # Aggregator alone cannot trigger (PATH C)
+        # PATH C+: Aggregator standalone trigger (dual-trigger architecture)
+        # Mirrors main.py: if aggregator hits high conviction on its own, trigger trade
+        elif has_signal and AGGREGATOR_STANDALONE_ENABLED:
+            if signal.combined_score >= AGGREGATOR_STANDALONE_MIN_SCORE:
+                entry_direction = (
+                    "long" if signal.direction == SignalDirection.LONG else "short"
+                )
+                entry_score = signal.combined_score
+                entry_source = "aggregator"
+                # Aggregator uses ATR-based stops (no sweep stop override)
+                sweep_stop_override = None
 
         if entry_direction is None:
             # Capture HTF rejection if aggregator returned a blocked signal
