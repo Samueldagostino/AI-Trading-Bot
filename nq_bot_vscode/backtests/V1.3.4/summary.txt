@@ -1,0 +1,77 @@
+========================================================================
+  BACKTEST V1.3.4 -- REPLAY SIMULATOR RESULTS
+========================================================================
+  Generated:  2026-03-13
+  Engine:     ReplaySimulator (production pipeline, zero look-ahead)
+  Data:       FirstRate 1m (Dec 2025 - Feb 2026)
+
+  Configuration:
+    HC min score:       0.75
+    HC max stop:        30.0 pts
+    HTF gate:           0.3 (Config D)
+    C1 variant:         C -- Trail from profit (>=3pts -> trail 2.5pt, 12-bar fallback)
+    Sweep detector:     ENABLED
+    Slippage:           Calibrated v2 (RTH 0.50pt base, ETH 1.00pt base)
+    Commission:         $1.29/contract/side (actual Tradovate rate)
+    Point value:        $2.0/pt (MNQ)
+
+------------------------------------------------------------------------
+  AGGREGATE METRICS
+------------------------------------------------------------------------
+  Bars Processed............................ 41,576
+  Total Trades.............................. 937
+  Win Rate.................................. 50.6%
+  Profit Factor............................. 0.84
+  Net PnL................................... $-4,402.80
+  Max Drawdown.............................. 10.35%
+  C1 PnL.................................... $+1,682.04
+  C2 PnL.................................... $-6,084.84
+  Avg Slippage/Fill......................... 0.88 pts
+  Total Slippage Cost....................... $3,723.50
+
+------------------------------------------------------------------------
+  MONTHLY BREAKDOWN
+------------------------------------------------------------------------
+  Month       Trades     WR       PF        PnL       C1        C2
+  ---------- ------- -------- -------- ---------- --------- ---------
+  2025-12       285    48.4%    0.90    $   -637  $   +572  $ -1,209
+  2026-01       362    51.4%    0.79    $ -2,402  $    +72  $ -2,473
+  2026-02       290    51.7%    0.86    $ -1,364  $ +1,039  $ -2,403
+
+  Profitable Months: 0/3
+
+------------------------------------------------------------------------
+  SLIPPAGE REPORT
+------------------------------------------------------------------------
+  Total fills:           2,122
+  Avg slippage/fill:     0.88 pts
+  Entry slippage total:  822.0 pts
+  Exit slippage total:   1,039.8 pts
+  Volume spike fills:    227
+  News window fills:     9
+
+------------------------------------------------------------------------
+  VS OOS BASELINE (6-month validated)
+------------------------------------------------------------------------
+  Metric              V1.3.4          OOS Baseline     Delta
+  ------------------- --------------- ---------------- ----------
+  Trades              937             582              +61%
+  Win Rate            50.6%           62.0%            -11.4pp
+  Profit Factor       0.84            1.61             -47.8%
+  PnL                 $-4,402.80      $+7,947          -155%
+  Max Drawdown        10.35%          1.4%             +8.95pp
+  C1 PnL              $+1,682.04      (positive)       OK
+
+------------------------------------------------------------------------
+  NOTES
+------------------------------------------------------------------------
+  - C1 remains net positive ($+1,682), indicating the canary works
+  - C2 runner is the main source of losses ($-6,085)
+  - Trade count is 61% higher than baseline (937 vs 582),
+    suggesting filter gates may have been loosened or codebase
+    has changed since the baseline was established
+  - This represents the CURRENT codebase state as of Mar 2026
+  - Realistic slippage: 0.50pt RTH / 1.00pt ETH (not inflated)
+  - Commission: $1.29/contract/side (actual Tradovate rate)
+
+========================================================================

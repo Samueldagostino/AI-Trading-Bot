@@ -1066,7 +1066,7 @@ class ReplaySimulator:
 
         # ── Phase 1 manager factory (per variant) ──────────────
 
-        async def phase1_baseline(trade, price, time):
+        async def phase1_baseline(trade, price, time, **kwargs):
             """BASELINE: Original Time 10 bars, exit if profitable."""
             from execution.scale_out_executor import ScaleOutPhase
             direction = trade.direction
@@ -1095,7 +1095,7 @@ class ReplaySimulator:
                 trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
             return None
 
-        async def phase1_variant_a(trade, price, time):
+        async def phase1_variant_a(trade, price, time, **kwargs):
             """VARIANT A: Minimum Profit Gate -- exit only if profit >= 4.0pts."""
             from execution.scale_out_executor import ScaleOutPhase
             direction = trade.direction
@@ -1154,7 +1154,7 @@ class ReplaySimulator:
                 trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
             return None
 
-        async def phase1_variant_b(trade, price, time):
+        async def phase1_variant_b(trade, price, time, **kwargs):
             """VARIANT B: Fixed TP at entry+6pts (limit = 0 slippage)."""
             from execution.scale_out_executor import ScaleOutPhase
             direction = trade.direction
@@ -1195,7 +1195,7 @@ class ReplaySimulator:
                 trade.c2_best_price = min(trade.c2_best_price, price) if trade.c2_best_price > 0 else price
             return None
 
-        async def phase1_variant_c(trade, price, time):
+        async def phase1_variant_c(trade, price, time, **kwargs):
             """VARIANT C: Trailing from profit >= 3pts, trail 2.5pts."""
             from execution.scale_out_executor import ScaleOutPhase
             direction = trade.direction
@@ -1274,7 +1274,7 @@ class ReplaySimulator:
 
         # ── Patched runner (same for all variants) ────────────
 
-        async def patched_manage_runner(trade, price, time):
+        async def patched_manage_runner(trade, price, time, **kwargs):
             """C2 runner with calibrated slippage."""
             direction = trade.direction
             cfg = executor.scale_config
