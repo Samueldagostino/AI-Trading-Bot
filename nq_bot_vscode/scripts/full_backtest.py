@@ -67,6 +67,8 @@ from config.constants import (
     HTF_STRENGTH_GATE,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
     AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
+    RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE,
+    MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE,
 )
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -1058,8 +1060,11 @@ class CausalReplayEngine:
         if not self.executor.has_active_trade:
             return None
 
+        # BUG FIX 2.5: Validate bar_high and bar_low — prevent NaN from bypassing stop checks
+        bar_high = bar["high"] if math.isfinite(bar["high"]) else None
+        bar_low = bar["low"] if math.isfinite(bar["low"]) else None
         result = await self.executor.update(bar["close"], bar["timestamp"],
-                                           bar_high=bar["high"], bar_low=bar["low"])
+                                           bar_high=bar_high, bar_low=bar_low)
 
         if result and result.get("action") == "trade_closed":
             # Get completed trade from executor for accurate per-leg exit times
@@ -1104,7 +1109,8 @@ class CausalReplayEngine:
                         # Executor did NOT adjust — we must remove C3's PnL and commission
                         # This happens when C3 is blocked at C1 transition but C2 continues
                         c3_commission = closed_trade.c3.commission
-                        adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_commission
+                        # BUG FIX 2.3: Commission is a cost — subtract it, don't add
+                        adjusted_pnl = adjusted_pnl - c3_pnl_original - c3_commission
                     # else: executor already removed C3 gross and commission from total_pnl
                     # We only needed to remove exit slippage (done above)
 
@@ -1189,10 +1195,10 @@ class CausalReplayEngine:
             return
         if self._check_daily_limits():
             return
-        # Maintenance window entry cutoff -- no new entries after 4:30 PM ET
+        # Maintenance window entry cutoff -- no new entries after 3:30 PM ET
         if getattr(self, '_maintenance_entry_blocked', False):
             logger.debug(
-                "BLOCKED: New entry rejected -- past 4:30 PM ET cutoff "
+                "BLOCKED: New entry rejected -- past 3:30 PM ET cutoff "
                 "(maintenance window protection)"
             )
             return
@@ -1388,19 +1394,21 @@ class CausalReplayEngine:
             self._rejection_count += 1
             return
 
-        # ── HC Gate 2: Stop Distance (max) ──
-        if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+        # ── HC Gate 2: Stop Distance (min) ──
+        if raw_stop < HIGH_CONVICTION_MIN_STOP_PTS:
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, raw_stop,
-                "Max stop exceeded", 5)
+                "Min stop too small", 5)
             self._rejection_count += 1
             return
 
-        # NOTE: Previous version had a min-stop gate (< 30pts) and prime-hours
-        # gate (9-10AM only) here. Both were REMOVED because:
-        #   1. Min stop = 30 + Max stop = 30 → only exactly 30.0 passes (impossible)
-        #   2. Prime hours gate not in main.py — backtest must match live logic
-        # See CLAUDE.md Lessons Learned for details.
+        # ── HC Gate 3: Stop Distance (max) ──
+        if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, raw_stop,
+                "Max stop exceeded", 6)
+            self._rejection_count += 1
+            return
 
         # ── Min R:R Check (disabled for C1 time-exit: MIN_RR_RATIO=0.0) ──
         if MIN_RR_RATIO > 0:
@@ -1408,7 +1416,7 @@ class CausalReplayEngine:
             if raw_stop > 0 and target_distance / raw_stop < MIN_RR_RATIO:
                 self._record_shadow_signal(
                     bar, features, entry_direction, entry_score, raw_stop,
-                    "Min R:R failed", 6)
+                    "Min R:R failed", 7)
                 self._rejection_count += 1
                 return
 
@@ -1416,7 +1424,7 @@ class CausalReplayEngine:
         if regime_adj["size_multiplier"] == 0:
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, raw_stop,
-                "Regime gate block", 7)
+                "Regime gate block", 8)
             self._rejection_count += 1
             return
 
@@ -1426,7 +1434,7 @@ class CausalReplayEngine:
         ):
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, raw_stop,
-                "Risk decision rejected", 8)
+                "Risk decision rejected", 9)
             self._rejection_count += 1
             return
 
@@ -1783,7 +1791,7 @@ class CausalReplayEngine:
 
         # CME maintenance window: 4:45-5:00 PM ET (futures close 4:59, reopen 6:00 PM)
         # Hard flatten at 4:50 PM ET, block processing until 6:00 PM ET
-        if time(16, 50) <= current_time_et <= time(18, 0):
+        if time(MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE) <= current_time_et <= time(18, 0):
             if self.executor.has_active_trade:
                 result = await self.executor.maintenance_flatten(
                     bar["close"], ts
@@ -1815,7 +1823,8 @@ class CausalReplayEngine:
                             adjusted_pnl = adjusted_pnl + c3_slip_cost
                             if not executor_already_adjusted_2:
                                 c3_commission = closed_trade.c3.commission
-                                adjusted_pnl = adjusted_pnl - c3_pnl_original + c3_commission
+                                # BUG FIX 2.3: Commission is a cost — subtract it, don't add
+                                adjusted_pnl = adjusted_pnl - c3_pnl_original - c3_commission
                             self._c3_stats["c3_blocked"] += 1
                             self._c3_stats["c3_pnl_saved"] += abs(c3_pnl_original)
                         else:
@@ -1858,9 +1867,9 @@ class CausalReplayEngine:
                     self.trades.append(exit_record)
             return  # No further processing after 4:50 PM ET
 
-        # Entry cutoff at 4:30 PM ET -- block new entries but continue managing positions
+        # Entry cutoff at 3:30 PM ET -- block new entries but continue managing positions
         self._maintenance_entry_blocked = (
-            time(16, 30) <= current_time_et < time(16, 50)
+            time(RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE) <= current_time_et < time(MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE)
         )
 
         # ── Session boundary check ──
@@ -2322,26 +2331,39 @@ def run_verification_checks(
     }
 
     # 3. Commission audit
-    # Expected: $1.29/contract/side × 2 sides × 5 contracts = $12.90/trade
-    total_contracts = 5  # C1=1 + C2=1 + C3=3
-    expected_per_trade = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * total_contracts
+    # BUG FIX 2.9: Expected commission depends on whether C3 was entered or blocked
+    # C3-entered trades: $1.29/contract/side × 2 sides × 5 contracts = $12.90/trade
+    # C3-blocked trades:  $1.29/contract/side × 2 sides × 2 contracts = $5.16/trade
     total_commission = 0.0
     commission_errors = 0
     for closed_trade in engine.executor._trade_history:
         tc = closed_trade.total_commission
         total_commission += tc
-        if abs(tc - expected_per_trade) > 0.01:
+
+        # Determine if C3 was blocked (c3_blocked=True in the trade record)
+        c3_blocked = closed_trade.c3_blocked if hasattr(closed_trade, 'c3_blocked') else False
+
+        if c3_blocked:
+            # C3-blocked: C1 + C2 only = 2 contracts
+            expected_commission = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 2
+        else:
+            # C3-entered: C1 + C2 + C3 = 5 contracts
+            expected_commission = COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 5
+
+        if abs(tc - expected_commission) > 0.01:
             commission_errors += 1
 
     results["commission"] = {
         "passed": commission_errors == 0,
         "errors": commission_errors,
         "total_charged": round(total_commission, 2),
-        "expected_per_trade": expected_per_trade,
+        "expected_c3_entered": round(COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 5, 2),
+        "expected_c3_blocked": round(COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 2, 2),
         "total_trades": len(engine.executor._trade_history),
         "description": (
-            f"${COMMISSION_PER_CONTRACT_PER_SIDE}/contract/side × "
-            f"2 sides × {total_contracts} contracts = ${expected_per_trade:.2f}/trade"
+            f"${COMMISSION_PER_CONTRACT_PER_SIDE}/contract/side × 2 sides × "
+            f"5 contracts (C3-entered) = ${COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 5:.2f}; "
+            f"2 contracts (C3-blocked) = ${COMMISSION_PER_CONTRACT_PER_SIDE * 2 * 2:.2f}"
         ),
     }
 
@@ -2418,6 +2440,7 @@ def generate_summary_report(
     lines.append("")
     lines.append("  Configuration:")
     lines.append(f"    HC min score:       {HIGH_CONVICTION_MIN_SCORE}")
+    lines.append(f"    HC min stop:        {HIGH_CONVICTION_MIN_STOP_PTS} pts")
     lines.append(f"    HC max stop:        {HIGH_CONVICTION_MAX_STOP_PTS} pts")
     lines.append(f"    HTF gate:           {HTF_STRENGTH_GATE} (Config D)")
     lines.append(f"    Slippage RTH:       {SLIPPAGE_RTH_PTS} pts/fill")
@@ -2974,6 +2997,7 @@ def main():
         print()
         print("  Engine configuration:")
         print(f"    HC min score:       {HIGH_CONVICTION_MIN_SCORE}")
+        print(f"    HC min stop:        {HIGH_CONVICTION_MIN_STOP_PTS} pts")
         print(f"    HC max stop:        {HIGH_CONVICTION_MAX_STOP_PTS} pts")
         print(f"    HTF gate:           {HTF_STRENGTH_GATE} (Config D)")
         print(f"    Slippage RTH:       {SLIPPAGE_RTH_PTS} pts/fill")

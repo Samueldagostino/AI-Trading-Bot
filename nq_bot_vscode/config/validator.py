@@ -129,3 +129,141 @@ def validate_config(config: BotConfig) -> list:
         logger.critical("Fix the above config errors and restart.")
 
     return errors
+
+
+def validate_scale_out_config(config: BotConfig) -> list:
+    """
+    BUG FIX 2.8: Validate all 13 scale-out config fields exist and are in valid ranges.
+
+    Returns:
+        List of ConfigValidationError. Empty list means all OK.
+    """
+    errors = []
+    warnings = []
+
+    def _check(field, value, condition, reason):
+        if not condition:
+            errors.append(ConfigValidationError(field, value, reason))
+
+    def _warn(field, value, reason):
+        msg = f"  CONFIG WARNING: {field} = {value!r} -- {reason}"
+        warnings.append(msg)
+        logger.warning(msg)
+
+    s = config.scale_out
+
+    # Check all 13 scale-out fields exist and are valid
+    # 1. c1_time_exit_bars
+    if not hasattr(s, 'c1_time_exit_bars'):
+        _warn("scale_out.c1_time_exit_bars", None, "missing field, using default 5")
+    else:
+        _check("scale_out.c1_time_exit_bars", s.c1_time_exit_bars,
+               isinstance(s.c1_time_exit_bars, int) and s.c1_time_exit_bars > 0,
+               "must be positive integer")
+
+    # 2. c1_max_bars_fallback
+    if not hasattr(s, 'c1_max_bars_fallback'):
+        _warn("scale_out.c1_max_bars_fallback", None, "missing field, using default 12")
+    else:
+        _check("scale_out.c1_max_bars_fallback", s.c1_max_bars_fallback,
+               isinstance(s.c1_max_bars_fallback, int) and
+               s.c1_max_bars_fallback > getattr(s, 'c1_time_exit_bars', 5),
+               "must be greater than c1_time_exit_bars")
+
+    # 3. c1_profit_threshold_pts
+    if not hasattr(s, 'c1_profit_threshold_pts'):
+        _warn("scale_out.c1_profit_threshold_pts", None, "missing field, using default 0")
+    else:
+        _check("scale_out.c1_profit_threshold_pts", s.c1_profit_threshold_pts,
+               isinstance(s.c1_profit_threshold_pts, (int, float)) and s.c1_profit_threshold_pts >= 0,
+               "must be non-negative number")
+
+    # 4. c2_time_stop_bars
+    if not hasattr(s, 'c2_time_stop_bars'):
+        _warn("scale_out.c2_time_stop_bars", None, "missing field, using default 15")
+    else:
+        _check("scale_out.c2_time_stop_bars", s.c2_time_stop_bars,
+               isinstance(s.c2_time_stop_bars, int) and s.c2_time_stop_bars > 0,
+               "must be positive integer")
+
+    # 5. c2_be_variant
+    if not hasattr(s, 'c2_be_variant'):
+        _warn("scale_out.c2_be_variant", None, "missing field, using default 'B'")
+    else:
+        _check("scale_out.c2_be_variant", s.c2_be_variant,
+               s.c2_be_variant in ("A", "B", "C", "D"),
+               "must be one of 'A', 'B', 'C', 'D'")
+
+    # 6. c2_be_delay_multiplier
+    if not hasattr(s, 'c2_be_delay_multiplier'):
+        _warn("scale_out.c2_be_delay_multiplier", None, "missing field, using default 2.0")
+    else:
+        _check("scale_out.c2_be_delay_multiplier", s.c2_be_delay_multiplier,
+               isinstance(s.c2_be_delay_multiplier, (int, float)) and s.c2_be_delay_multiplier > 0,
+               "must be positive number")
+
+    # 7. c2_breakeven_buffer_points
+    if not hasattr(s, 'c2_breakeven_buffer_points'):
+        _warn("scale_out.c2_breakeven_buffer_points", None, "missing field, using default 1.5")
+    else:
+        _check("scale_out.c2_breakeven_buffer_points", s.c2_breakeven_buffer_points,
+               isinstance(s.c2_breakeven_buffer_points, (int, float)) and s.c2_breakeven_buffer_points >= 0,
+               "must be non-negative number")
+
+    # 8. c3_trailing_atr_multiplier
+    if not hasattr(s, 'c3_trailing_atr_multiplier'):
+        _warn("scale_out.c3_trailing_atr_multiplier", None, "missing field, using default 2.0")
+    else:
+        _check("scale_out.c3_trailing_atr_multiplier", s.c3_trailing_atr_multiplier,
+               isinstance(s.c3_trailing_atr_multiplier, (int, float)) and s.c3_trailing_atr_multiplier > 0,
+               "must be positive number")
+
+    # 9. c3_max_target_points
+    if not hasattr(s, 'c3_max_target_points'):
+        _warn("scale_out.c3_max_target_points", None, "missing field, using default 30.0")
+    else:
+        _check("scale_out.c3_max_target_points", s.c3_max_target_points,
+               isinstance(s.c3_max_target_points, (int, float)) and s.c3_max_target_points > 0,
+               "must be positive number")
+
+    # 10. c3_time_stop_minutes
+    if not hasattr(s, 'c3_time_stop_minutes'):
+        _warn("scale_out.c3_time_stop_minutes", None, "missing field, using default 120")
+    else:
+        _check("scale_out.c3_time_stop_minutes", s.c3_time_stop_minutes,
+               isinstance(s.c3_time_stop_minutes, int) and s.c3_time_stop_minutes > 0,
+               "must be positive integer")
+
+    # 11. c3_contracts
+    if not hasattr(s, 'c3_contracts'):
+        _warn("scale_out.c3_contracts", None, "missing field, using default 1")
+    else:
+        _check("scale_out.c3_contracts", s.c3_contracts,
+               isinstance(s.c3_contracts, int) and s.c3_contracts >= 1,
+               "must be at least 1")
+
+    # 12. c3_delayed_entry_enabled
+    if not hasattr(s, 'c3_delayed_entry_enabled'):
+        _warn("scale_out.c3_delayed_entry_enabled", None, "missing field, using default False")
+    else:
+        _check("scale_out.c3_delayed_entry_enabled", s.c3_delayed_entry_enabled,
+               isinstance(s.c3_delayed_entry_enabled, bool),
+               "must be boolean")
+
+    # 13. c2_contracts (derived, but check it's consistent)
+    if not hasattr(s, 'c2_contracts'):
+        _warn("scale_out.c2_contracts", None, "missing field, using default 1")
+    else:
+        _check("scale_out.c2_contracts", s.c2_contracts,
+               isinstance(s.c2_contracts, int) and s.c2_contracts >= 1,
+               "must be at least 1")
+
+    if errors:
+        logger.critical("=" * 60)
+        logger.critical("SCALE-OUT CONFIG VALIDATION FAILED -- %d errors:", len(errors))
+        for err in errors:
+            logger.critical(str(err))
+        logger.critical("=" * 60)
+        logger.critical("Fix the above config errors and restart.")
+
+    return errors

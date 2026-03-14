@@ -757,6 +757,15 @@ class ScaleOutExecutor:
         if not trade.open_legs:
             return self._finalize_trade(trade, time, c3_blocked=c3_blocked_at_transition)
 
+        # BUG FIX 2.4: Initialize remaining legs' MFE from trade-level MFE tracked during Phase 1
+        # This ensures breakeven calculations use the correct MFE (Variant B relies on MFE >= 1.5x stop_distance)
+        for leg in trade.open_legs:
+            if leg.leg_label == "C2":
+                leg.mfe = trade.c2_mfe  # C2 tracked separately
+            else:
+                # C3, C4: use trade.c1_mfe (all legs tracked together in Phase 1)
+                leg.mfe = trade.c1_mfe
+
         trade._set_phase(ScaleOutPhase.SCALING)
 
         return {
@@ -846,7 +855,7 @@ class ScaleOutExecutor:
                 # C2: Time stop — configurable bar limit for structural target plays
                 c2_max_bars = getattr(cfg, 'c2_time_stop_bars', 35)
                 if leg.bars_since_active >= c2_max_bars:
-                    self._close_leg(leg, round(price, 2), time, "time_35bars", direction)
+                    self._close_leg(leg, round(price, 2), time, f"time_{c2_max_bars}bars", direction)
                     closed_legs.append(leg.leg_label)
                     continue
 

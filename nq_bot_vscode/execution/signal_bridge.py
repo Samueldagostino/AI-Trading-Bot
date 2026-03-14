@@ -28,7 +28,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from config.settings import RiskConfig
-from config.constants import HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS
+from config.constants import (
+    HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    HIGH_CONVICTION_MIN_STOP_PTS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 MIN_SIGNAL_SCORE = HIGH_CONVICTION_MIN_SCORE
 MAX_STOP_DISTANCE_PTS = HIGH_CONVICTION_MAX_STOP_PTS
+MIN_STOP_DISTANCE_PTS = HIGH_CONVICTION_MIN_STOP_PTS
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -191,7 +195,15 @@ class SignalBridge:
                     stop_distance * self._config.min_rr_ratio, 2
                 )
 
-        # ── SAFETY GATE 5: max stop distance ──
+        # ── SAFETY GATE 5: minimum stop distance ──
+        if stop_distance < MIN_STOP_DISTANCE_PTS:
+            return self._reject(
+                f"stop {stop_distance:.1f}pts < "
+                f"min {MIN_STOP_DISTANCE_PTS}pts",
+                metadata,
+            )
+
+        # ── SAFETY GATE 6: max stop distance ──
         if stop_distance > MAX_STOP_DISTANCE_PTS:
             return self._reject(
                 f"stop {stop_distance:.1f}pts > "

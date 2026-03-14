@@ -18,7 +18,7 @@ Do not loosen these gates without new backtested evidence across the full
 #   Dollar-based stop tiers handle conviction-scaled risk within the 30pt cap.
 HIGH_CONVICTION_MIN_SCORE: float = 0.75
 HIGH_CONVICTION_MAX_STOP_PTS: float = 30.0   # v3 validated: 30pt hard cap (reverted from 50pt -- matches PF 2.86 backtest)
-HIGH_CONVICTION_MIN_STOP_PTS: float = 15.0   # Floor: prevents micro-stops that get clipped by noise
+HIGH_CONVICTION_MIN_STOP_PTS: float = 12.0   # Floor: prevents micro-stops that get clipped by noise
 
 # ── DOLLAR-BASED STOP TIERS ────────────────────────────────────────
 #   Conviction score determines max dollar risk per trade (all contracts combined).
@@ -170,3 +170,13 @@ GAINZ_CYCLE_SIGNAL_STRENGTH: float = 0.60        # Cycle-phase pullback entry
 
 # -- Feature flag (master switch for V1.3.3 modules) --
 GAINZ_MODULES_ENABLED: bool = True
+
+# ── TRADING HOURS & SESSION MANAGEMENT ──────────────────────────
+#   RTH entry cutoff: 3:30 PM ET (allow 1 hour 20 minutes to close before maintenance)
+#   Maintenance window: 4:50 PM - 6:00 PM ET (forced flatten at 4:50 PM)
+#   Evening session opens: 6:00 PM ET (immediately after maintenance)
+RTH_ENTRY_CUTOFF_HOUR: int = 15      # 3:00 PM ET
+RTH_ENTRY_CUTOFF_MINUTE: int = 30    # 3:30 PM ET
+MAINTENANCE_FLATTEN_HOUR: int = 16   # 4:00 PM ET
+MAINTENANCE_FLATTEN_MINUTE: int = 50 # 4:50 PM ET (forced flatten start)
+EVENING_SESSION_OPEN_HOUR: int = 18  # 6:00 PM ET (post-maintenance reopening)

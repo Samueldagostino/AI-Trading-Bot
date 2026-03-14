@@ -38,7 +38,7 @@ ET_TZ = ZoneInfo("America/New_York")  # DST-aware US Eastern
 # NQ futures schedule (ET)
 NQ_OPEN_HOUR = 18       # 6:00 PM ET (prior day)
 NQ_CLOSE_HOUR = 17      # 5:00 PM ET
-MAINTENANCE_START = (16, 30)  # 4:30 PM ET
+MAINTENANCE_START = (15, 30)  # 3:30 PM ET
 MAINTENANCE_END = (18, 0)     # 6:00 PM ET
 
 # MNQ contract specs
@@ -278,7 +278,7 @@ def detect_gaps(candles: List[dict], expected_interval_ms: int, tracker: Anomaly
                 gap_type = "weekend"
             elif prev_dt.weekday() >= 5 or curr_dt.weekday() >= 5:
                 gap_type = "weekend"
-            elif (prev_dt.hour == 16 and prev_dt.minute >= 30) or prev_dt.hour == 17:
+            elif (prev_dt.hour == 15 and prev_dt.minute >= 30) or prev_dt.hour >= 16:
                 gap_type = "maintenance"  # ET times
             elif (prev_dt.hour == 21 and prev_dt.minute >= 30) or prev_dt.hour == 22:
                 gap_type = "maintenance"  # UTC equivalent (ET+5)

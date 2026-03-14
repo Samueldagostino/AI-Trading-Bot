@@ -47,8 +47,12 @@ from execution.signal_bridge import SignalBridge, TradeDecision
 from config.settings import BotConfig, CONFIG
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    HIGH_CONVICTION_MIN_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS, HTF_TIMEFRAMES,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
+    RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE,
+    MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE,
+    EVENING_SESSION_OPEN_HOUR,
 )
 from data_feeds.market_context import MarketContext
 from data_feeds.quantdata_client import QuantDataClient
@@ -330,7 +334,7 @@ class IBKRLivePipeline:
         current_time_et = bar_et.time()
 
         # Hard flatten at 4:50 PM ET -- close ALL positions unconditionally
-        if current_time_et >= dt_time(16, 50):
+        if current_time_et >= dt_time(MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE):
             if self._active_group_id is not None:
                 logger.warning(
                     "MAINTENANCE FLATTEN: Closing all positions -- "
@@ -343,8 +347,8 @@ class IBKRLivePipeline:
                 self._active_group_id = None
             return None  # No further processing after 4:50 PM ET
 
-        # Entry cutoff at 4:30 PM ET -- block new entries
-        self._maintenance_entry_blocked = current_time_et >= dt_time(16, 30)
+        # Entry cutoff at 3:30 PM ET -- block new entries
+        self._maintenance_entry_blocked = current_time_et >= dt_time(RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE)
 
         # === 0. SESSION VALIDITY -- halt if gateway session expired ===
         if hasattr(self, '_client') and self._client and not self._client.is_connected:
@@ -414,7 +418,7 @@ class IBKRLivePipeline:
         # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
         if getattr(self, '_maintenance_entry_blocked', False):
             logger.info(
-                "BLOCKED: New entry rejected -- past 4:30 PM ET cutoff "
+                "BLOCKED: New entry rejected -- past 3:30 PM ET cutoff "
                 "(maintenance window protection)"
             )
             return None
@@ -529,7 +533,17 @@ class IBKRLivePipeline:
             logger.error("HC REJECT: stop distance is NaN/Inf -- blocking trade")
             return None
 
-        # === 8. HIGH-CONVICTION GATE 2 -- stop distance cap ===
+        # === 8. HIGH-CONVICTION GATE 2 -- stop distance floor ===
+        if raw_stop < HIGH_CONVICTION_MIN_STOP_PTS:
+            logger.info(
+                "STOP FLOOR REJECT: %s stop=%.1f < %.1f min [score=%.2f, source=%s, levels=%s]",
+                entry_direction, raw_stop, HIGH_CONVICTION_MIN_STOP_PTS,
+                entry_score, entry_source,
+                getattr(sweep_signal, 'swept_levels', []) if sweep_signal else [],
+            )
+            return None
+
+        # === 9. HIGH-CONVICTION GATE 3 -- stop distance cap ===
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
             logger.info(
                 "STOP CAP REJECT: %s stop=%.1f > %.1f max [score=%.2f, source=%s, levels=%s]",
@@ -890,7 +904,9 @@ class IBKRLivePipeline:
         # --- B:5 time-based exit: exit C1 after 5 bars if profitable ---
         c1_exit_bars = self._scale_config.c1_time_exit_bars
         if self._c1_bars_elapsed >= c1_exit_bars:
-            c1_in_profit = unrealized >= 3.0
+            c1_profit_threshold = getattr(self._scale_config, 'c1_profit_threshold_pts', 3.0)
+
+            c1_in_profit = unrealized >= c1_profit_threshold
             if c1_in_profit:
                 return await self._transition_c1_to_scaling(
                     round(price, 2), current_time,
@@ -1102,10 +1118,11 @@ class IBKRLivePipeline:
                         closed_legs.append(pos_id.split("-")[-1])
                         continue
 
-                # C2: Time stop -- max 20 bars (~40 min on 2m bars)
-                if state["bars_since_active"] >= 20:
+                # C2: Time stop -- max bars (configurable, default 35 bars)
+                c2_max_bars = getattr(self._scale_config, 'c2_time_stop_bars', 35)
+                if state["bars_since_active"] >= c2_max_bars:
                     self._close_leg(pos_id, round(price, 2), current_time,
-                                    "time_20bars")
+                                    f"time_{c2_max_bars}bars")
                     closed_legs.append(pos_id.split("-")[-1])
                     continue
 

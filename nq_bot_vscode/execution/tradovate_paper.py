@@ -53,8 +53,8 @@ HEARTBEAT_INTERVAL_SECONDS = 10
 # Daily maintenance: 5:00 PM - 6:00 PM ET
 SESSION_OPEN_HOUR_ET = 18       # 6:00 PM ET
 SESSION_OPEN_MINUTE_ET = 1      # 6:01 PM ET (skip first minute)
-SESSION_CLOSE_HOUR_ET = 16      # 4:00 PM ET
-SESSION_CLOSE_MINUTE_ET = 30    # 4:30 PM ET (flat before maintenance)
+SESSION_CLOSE_HOUR_ET = 15      # 3:00 PM ET
+SESSION_CLOSE_MINUTE_ET = 30    # 3:30 PM ET (flat before maintenance)
 MAINTENANCE_START_HOUR_ET = 17  # 5:00 PM ET
 MAINTENANCE_END_HOUR_ET = 18    # 6:00 PM ET
 
@@ -432,7 +432,7 @@ class TradovatePaperConnector:
     def is_within_session(et_time: datetime = None) -> bool:
         """Check if current ET time is within trading session.
 
-        Session: 6:01 PM ET -> 4:30 PM ET next day.
+        Session: 6:01 PM ET -> 3:30 PM ET next day.
         Maintenance: 5:00 PM - 6:00 PM ET.
         """
         if et_time is None:
@@ -450,7 +450,7 @@ class TradovatePaperConnector:
         if h > SESSION_OPEN_HOUR_ET:
             return True
 
-        # Before 4:30 PM ET (must be flat)
+        # Before 3:30 PM ET (must be flat)
         if h < SESSION_CLOSE_HOUR_ET:
             return True
         if h == SESSION_CLOSE_HOUR_ET and m < SESSION_CLOSE_MINUTE_ET:
@@ -466,7 +466,7 @@ class TradovatePaperConnector:
 
         h, m = et_time.hour, et_time.minute
 
-        # Flat by 4:30 PM ET
+        # Flat by 3:30 PM ET
         if h == SESSION_CLOSE_HOUR_ET and m >= SESSION_CLOSE_MINUTE_ET:
             return True
         if h == MAINTENANCE_START_HOUR_ET:

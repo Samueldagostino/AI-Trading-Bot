@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 from config.settings import BotConfig, CONFIG
 from config.constants import (
     HIGH_CONVICTION_MIN_SCORE, HIGH_CONVICTION_MAX_STOP_PTS,
+    HIGH_CONVICTION_MIN_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS,
     HTF_TIMEFRAMES, EXECUTION_TIMEFRAMES,
     HTF_STRENGTH_GATE,
@@ -32,8 +33,11 @@ from config.constants import (
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
     AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
     MIN_RR_OVERRIDE,
+    RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE,
+    MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE,
+    EVENING_SESSION_OPEN_HOUR,
 )
-from config.validator import validate_config
+from config.validator import validate_config, validate_scale_out_config
 from database.connection import DatabaseManager
 from features.engine import NQFeatureEngine, Bar
 from features.htf_engine import HTFBiasEngine, HTFBar, HTFBiasResult
@@ -178,6 +182,15 @@ class TradingOrchestrator:
                 "See log output above. Fix and restart."
             )
         logger.info("Config validation: PASSED")
+
+        # ── Scale-Out Config Validation (BUG FIX 2.8) ──
+        so_errors = validate_scale_out_config(self.config)
+        if so_errors:
+            raise SystemExit(
+                f"Scale-out configuration validation failed with {len(so_errors)} errors. "
+                "See log output above. Fix and restart."
+            )
+        logger.info("Scale-out config validation: PASSED")
         logger.info("=" * 60)
         logger.info("NQ TRADING BOT - INITIALIZING (MULTI-TIMEFRAME)")
         logger.info(f"  Environment:  {self.config.environment}")
@@ -287,7 +300,7 @@ class TradingOrchestrator:
 
         # CME maintenance window: 4:45-5:00 PM ET (futures close 4:59, reopen 6:00 PM)
         # Hard flatten at 4:50 PM ET, block processing until 6:00 PM ET
-        _in_maintenance = dt_time(16, 50) <= current_time_et <= dt_time(18, 0)
+        _in_maintenance = dt_time(MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE) <= current_time_et <= dt_time(EVENING_SESSION_OPEN_HOUR, 0)
         if _in_maintenance:
             if self.executor.has_active_trade:
                 result = await self.executor.maintenance_flatten(
@@ -313,9 +326,9 @@ class TradingOrchestrator:
                     action_result = result
             return action_result  # No processing during CME maintenance window
 
-        # Entry cutoff at 4:30 PM ET -- block new entries, continue position management
+        # Entry cutoff at 3:30 PM ET -- block new entries, continue position management
         self._maintenance_entry_blocked = (
-            dt_time(16, 30) <= current_time_et < dt_time(16, 50)
+            dt_time(RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE) <= current_time_et < dt_time(MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE)
         )
 
         # === SESSION BOUNDARY DETECTION -- reset VWAP at new trading day ===
@@ -341,9 +354,12 @@ class TradingOrchestrator:
         # trailing, and exits to fire. The safety gate only blocks NEW entries.
         if self.executor.has_active_trade:
             try:
+                # BUG FIX 2.5: Validate bar_high and bar_low — prevent NaN from bypassing stop checks
+                bar_high = bar.high if math.isfinite(bar.high) else None
+                bar_low = bar.low if math.isfinite(bar.low) else None
                 result = await self.executor.update(
                     bar.close, bar.timestamp,
-                    bar_high=bar.high, bar_low=bar.low,
+                    bar_high=bar_high, bar_low=bar_low,
                 )
                 self._executor_fail_count = 0  # Reset on success
             except Exception as e:
@@ -359,7 +375,8 @@ class TradingOrchestrator:
                         self._executor_fail_count,
                     )
                     last_price = self._get_last_price()
-                    await self.executor.emergency_flatten(last_price)
+                    # BUG FIX 2.7: Return the flatten result, not the stale action_result
+                    action_result = await self.executor.emergency_flatten(last_price)
                     self._executor_fail_count = 0
                 return action_result
             if result:
@@ -450,7 +467,7 @@ class TradingOrchestrator:
         # === 4b. MAINTENANCE WINDOW ENTRY CUTOFF ===
         if getattr(self, '_maintenance_entry_blocked', False):
             logger.info(
-                "BLOCKED: New entry rejected -- past 4:30 PM ET cutoff "
+                "BLOCKED: New entry rejected -- past 3:30 PM ET cutoff "
                 "(maintenance window protection)"
             )
             return action_result
@@ -686,7 +703,21 @@ class TradingOrchestrator:
         # -- HTF DIRECTIONAL GATE (softened: score penalty instead of hard block) --
         # A sweep IS a reversal signal -- HTF bias disagreement is expected
         # at the moment of reversal. Penalize score by 0.10 instead of blocking.
+        # BUG FIX 2.6: Check HTF bias staleness — if older than 30 minutes, allow both directions
+        _htf_bias_stale = False
         if entry_direction is not None and htf_bias is not None:
+            # Check if HTF bias is stale (older than 30 minutes)
+            if htf_bias.timestamp is not None and bar.timestamp is not None:
+                staleness_delta = bar.timestamp - htf_bias.timestamp
+                if staleness_delta > timedelta(minutes=30):
+                    _htf_bias_stale = True
+                    logger.warning(
+                        "HTF BIAS STALENESS WARNING: HTF bias is %.0f minutes old "
+                        "(threshold=30 min) -- treating as stale, allowing both directions",
+                        staleness_delta.total_seconds() / 60
+                    )
+
+        if entry_direction is not None and htf_bias is not None and not _htf_bias_stale:
             htf_disagrees = False
             if entry_direction == "long" and not htf_bias.htf_allows_long:
                 htf_disagrees = True
@@ -760,7 +791,19 @@ class TradingOrchestrator:
                            features.atr_14, "NaN stop distance", 4)
             return None
 
-        # -- HIGH-CONVICTION GATE 2: Max Stop Distance --
+        # -- HIGH-CONVICTION GATE 2: Min Stop Distance --
+        # Floor prevents micro-stops that get clipped by market noise.
+        if raw_stop < HIGH_CONVICTION_MIN_STOP_PTS:
+            logger.debug(
+                f"HC REJECT: stop {raw_stop:.1f} pts "
+                f"< {HIGH_CONVICTION_MIN_STOP_PTS} (min stop too small)"
+            )
+            _set_rejection(entry_direction, entry_score, raw_stop,
+                           features.atr_14,
+                           f"Min stop too small ({raw_stop:.1f} < {HIGH_CONVICTION_MIN_STOP_PTS})", 5)
+            return None
+
+        # -- HIGH-CONVICTION GATE 3: Max Stop Distance --
         # Simple flat cap matching validated backtest (V1.3.3: PF 6.1, $198K).
         # Previous dollar-tiered system removed to align live with backtest.
         if raw_stop > HIGH_CONVICTION_MAX_STOP_PTS:
@@ -770,12 +813,12 @@ class TradingOrchestrator:
             )
             _set_rejection(entry_direction, entry_score, raw_stop,
                            features.atr_14,
-                           f"Max stop exceeded ({raw_stop:.1f} > {HIGH_CONVICTION_MAX_STOP_PTS})", 5)
+                           f"Max stop exceeded ({raw_stop:.1f} > {HIGH_CONVICTION_MAX_STOP_PTS})", 6)
             return None
 
         logger.info(
-            "Stop check passed: raw=%.1f pts <= %.1f pts max",
-            raw_stop, HIGH_CONVICTION_MAX_STOP_PTS,
+            "Stop check passed: raw=%.1f pts in valid range [%.1f, %.1f]",
+            raw_stop, HIGH_CONVICTION_MIN_STOP_PTS, HIGH_CONVICTION_MAX_STOP_PTS,
         )
 
         # -- Min R:R Check (disabled when MIN_RR_RATIO=0.0 for C1 time-exit) --
@@ -787,14 +830,14 @@ class TradingOrchestrator:
                 f"< {MIN_RR_RATIO} (unfavorable risk/reward)"
             )
             _set_rejection(entry_direction, entry_score, raw_stop,
-                           features.atr_14, "Min R:R failed", 6)
+                           features.atr_14, "Min R:R failed", 7)
             return None
 
         # Regime gate
         if regime_adj["size_multiplier"] == 0:
             logger.debug(f"Regime {self._current_regime} blocks new trades")
             _set_rejection(entry_direction, entry_score, raw_stop,
-                           features.atr_14, "Regime gate block", 7)
+                           features.atr_14, "Regime gate block", 8)
             return None
 
         if risk_assessment.decision in (RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE):

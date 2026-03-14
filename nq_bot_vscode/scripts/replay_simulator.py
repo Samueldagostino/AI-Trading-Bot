@@ -18,7 +18,7 @@ Pipeline (identical to run_paper.py):
 
 Session rules enforced:
   - No entries before 6:01 PM ET
-  - Flat by 4:30 PM ET
+  - No new entries after 3:30 PM ET, flat by 4:50 PM ET
   - No trading during maintenance (5:00-6:00 PM ET)
   - Daily loss limit: $500 -> halt for the day
   - Max position: 2 contracts
@@ -110,7 +110,7 @@ OOS_BASELINE = {
 # ── Session rules (ET times) ──
 SESSION_OPEN_HOUR = 18    # 6:00 PM ET
 SESSION_OPEN_MINUTE = 1   # 6:01 PM ET
-SESSION_CLOSE_HOUR = 16   # 4:30 PM ET
+SESSION_CLOSE_HOUR = 15   # 3:30 PM ET (last new entry)
 SESSION_CLOSE_MINUTE = 30
 MAINTENANCE_START = 17    # 5:00 PM ET
 MAINTENANCE_END = 18      # 6:00 PM ET
@@ -191,7 +191,7 @@ def bar_to_et(bar_time: datetime) -> datetime:
 
 
 def is_within_session(et_time: datetime) -> bool:
-    """Check if ET time is within trading session (6:01 PM - 4:30 PM next day)."""
+    """Check if ET time is within trading session (6:01 PM - 3:30 PM next day)."""
     h, m = et_time.hour, et_time.minute
 
     # Maintenance window 5:00-6:00 PM ET
@@ -200,7 +200,7 @@ def is_within_session(et_time: datetime) -> bool:
     # Before session open (6:01 PM)
     if h == SESSION_OPEN_HOUR and m < SESSION_OPEN_MINUTE:
         return False
-    # After session close (4:30 PM)
+    # After session close (3:30 PM)
     if h == SESSION_CLOSE_HOUR and m >= SESSION_CLOSE_MINUTE:
         return False
     if SESSION_CLOSE_HOUR < h < MAINTENANCE_START:
