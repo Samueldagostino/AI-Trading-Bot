@@ -409,7 +409,7 @@
     </div>
     <div id="daily-pnl-container" style="overflow-x:auto">
       <table id="daily-pnl-table">
-        <thead><tr><th style="text-align:left">Date</th><th>Time</th><th>Trades</th><th>Win Rate</th><th>PnL</th><th>Cumulative</th></tr></thead>
+        <thead><tr><th style="text-align:left">Date</th><th>Time</th><th>Direction</th><th>Result</th><th>PnL</th><th>Cumulative</th></tr></thead>
         <tbody id="daily-pnl-body">
           <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Loading paper trading data...</td></tr>
         </tbody>
@@ -492,7 +492,8 @@ function renderPnlRows() {
     var cumCls = cum >= 0 ? 'pos' : 'neg';
     var sign = r.pnl >= 0 ? '+' : '';
     var cumSign = cum >= 0 ? '+' : '';
-    html += '<tr><td style="text-align:left">' + r.date + '</td><td>' + r.time + '</td><td>' + r.tradeCount + '</td><td>' + r.wr + '%</td>' +
+    var resCls = r.result === 'WIN' ? 'pos' : r.result === 'LOSS' ? 'neg' : '';
+    html += '<tr><td style="text-align:left">' + r.dateDisplay + '</td><td>' + r.time + '</td><td>' + r.direction + '</td><td class="' + resCls + '">' + r.result + '</td>' +
       '<td class="' + pnlCls + '">' + sign + '$' + Math.abs(r.pnl).toFixed(2) + '</td>' +
       '<td class="' + cumCls + '">' + cumSign + '$' + Math.abs(cum).toFixed(2) + '</td></tr>';
   });
@@ -517,28 +518,36 @@ function renderPnlRows() {
         return;
       }
       var dateSet = {};
+      function fmtDate(iso) {
+        var parts = iso.split('-');
+        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return months[parseInt(parts[1],10)-1] + ' ' + parseInt(parts[2],10) + ', ' + parts[0];
+      }
       trades.forEach(function(t) {
-        var d = t.date || (t.time ? t.time.split(' ')[0] : 'Unknown');
-        var tm = t.time ? t.time.split(' ')[1] || '--:--' : '--:--';
-        if (tm.length > 5) tm = tm.substring(0, 5);
+        var d = t.date || 'Unknown';
+        /* time field is "HH:MM:SS ET" — extract HH:MM ET */
+        var rawTime = t.time || '';
+        var timeParts = rawTime.replace(/ ET$/, '').split(':');
+        var tm = timeParts.length >= 2 ? timeParts[0] + ':' + timeParts[1] + ' ET' : rawTime;
         dateSet[d] = true;
         allTradeRows.push({
           date: d,
+          dateDisplay: d !== 'Unknown' ? fmtDate(d) : 'Unknown',
           time: tm,
-          tradeCount: 1,
-          wr: (t.total_pnl || 0) > 0 ? 100 : 0,
+          direction: t.direction || '—',
+          result: (t.total_pnl || 0) > 0 ? 'WIN' : (t.total_pnl || 0) < 0 ? 'LOSS' : 'FLAT',
           pnl: t.total_pnl || 0
         });
       });
       allTradeRows.sort(function(a, b) {
-        if (a.date !== b.date) return b.date.localeCompare(a.date);
-        return b.time.localeCompare(a.time);
+        if (a.date !== b.date) return a.date.localeCompare(b.date);
+        return a.time.localeCompare(b.time);
       });
       var picker = document.getElementById('pnl-date-picker');
       var dates = Object.keys(dateSet).sort().reverse();
       dates.forEach(function(d) {
         var opt = document.createElement('option');
-        opt.value = d; opt.textContent = d;
+        opt.value = d; opt.textContent = d !== 'Unknown' ? fmtDate(d) : d;
         picker.appendChild(opt);
       });
       picker.addEventListener('change', function() {
