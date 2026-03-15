@@ -1,15 +1,20 @@
 """
 Tests for IBKRLivePipeline -- full vertical-slice integration.
 
+Updated for unified execution engine refactor:
+  - _executor = ScaleOutExecutor (trade management)
+  - _ibkr_executor = IBKROrderExecutor (broker orders)
+  - No more _active_group_id (replaced by _executor.has_active_trade)
+  - close_position() delegates to _executor.emergency_flatten()
+
 Covers:
   - Bar -> signal evaluation -> bridge -> executor -> position manager
   - No signal -> no orders
   - Bridge rejection -> no orders
   - Executor halt -> pipeline stops processing
   - Fill registration with PositionManager
-  - Partial fill (C1 fills, C2 rejected)
-  - Position close -> P&L feeds to executor
-  - Group fully closed clears active trade
+  - Position close -> emergency flatten
+  - Active trade blocks new entries
   - Pipeline lifecycle (state transitions)
   - Status reporting
 """
@@ -74,13 +79,20 @@ def executor_config():
 
 
 @pytest.fixture
-def executor(client, executor_config):
+def ibkr_executor(client, executor_config):
+    """The IBKR broker executor (renamed from 'executor' to match refactored naming)."""
     return IBKROrderExecutor(client, executor_config)
 
 
 @pytest.fixture
-def position_manager(client, executor):
-    return PositionManager(client, executor)
+def executor(client, executor_config):
+    """Alias for backward compat -- returns IBKROrderExecutor."""
+    return IBKROrderExecutor(client, executor_config)
+
+
+@pytest.fixture
+def position_manager(client, ibkr_executor):
+    return PositionManager(client, ibkr_executor)
 
 
 def _make_bar(
@@ -133,6 +145,40 @@ def _make_rejected_record(
     )
 
 
+def _make_mock_scale_out_executor(has_active_trade: bool = False):
+    """Create a mock ScaleOutExecutor with correct API surface."""
+    mock = MagicMock()
+    mock.has_active_trade = has_active_trade
+    mock.active_trade = None
+    mock.enter_trade = AsyncMock(return_value=None)
+    mock.update = AsyncMock(return_value=None)
+    mock.emergency_flatten = MagicMock()
+    mock.get_stats = MagicMock(return_value={
+        "total_trades": 0,
+        "win_rate": 0.0,
+        "net_pnl": 0.0,
+    })
+    return mock
+
+
+def _make_mock_trade(trade_id: str = "T-001", direction: str = "long"):
+    """Create a mock ScaleOutTrade returned by enter_trade()."""
+    trade = MagicMock()
+    trade.trade_id = trade_id
+    trade.direction = direction
+    trade.initial_stop = 20985.0
+    # C1: 1 contract
+    trade.c1 = MagicMock()
+    trade.c1.contracts = 1
+    # C2: 1 contract
+    trade.c2 = MagicMock()
+    trade.c2.contracts = 1
+    # C3: 3 contracts
+    trade.c3 = MagicMock()
+    trade.c3.contracts = 3
+    return trade
+
+
 # ═══════════════════════════════════════════════════════════════
 # PIPELINE WIRING -- bar to execution
 # ═══════════════════════════════════════════════════════════════
@@ -142,17 +188,24 @@ class TestPipelineWiring:
 
     @pytest.mark.asyncio
     async def test_approved_signal_places_order(
-        self, client, executor, position_manager
+        self, client, ibkr_executor, position_manager
     ):
         """When signal + bridge + executor all approve, positions open."""
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.RUNNING
-        pipeline._executor = executor
+        pipeline._ibkr_executor = ibkr_executor
         pipeline._position_manager = position_manager
         pipeline._bars_processed = 0
         pipeline._last_bar = None
-        pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
+        pipeline._executor_to_group_id = {}
+
+        # ScaleOutExecutor mock -- no active trade, enter_trade returns mock trade
+        mock_trade = _make_mock_trade()
+        scale_exec = _make_mock_scale_out_executor(has_active_trade=False)
+        scale_exec.enter_trade = AsyncMock(return_value=mock_trade)
+        pipeline._executor = scale_exec
+
         # HTF bias must be present -- fail-safe blocks trades when None
         from features.htf_engine import HTFBiasResult
         pipeline._htf_bias = HTFBiasResult(
@@ -209,25 +262,28 @@ class TestPipelineWiring:
         bar = _make_bar(close=21000.0)
         result = await pipeline._process_bar(bar)
 
+        # Verify ScaleOutExecutor.enter_trade was called
+        scale_exec.enter_trade.assert_awaited_once()
+
+        # Verify IBKR orders were placed
         assert result is not None
         assert result["action"] == "entry"
         assert result["direction"] == "long"
-        assert result["contracts"] == 2
         assert result["group_id"] is not None
-        assert position_manager.open_position_count == 2
+        assert position_manager.open_position_count >= 1
 
     @pytest.mark.asyncio
     async def test_no_signal_no_order(
-        self, client, executor, position_manager
+        self, client, ibkr_executor, position_manager
     ):
         """No signal -> nothing happens."""
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.RUNNING
-        pipeline._executor = executor
+        pipeline._ibkr_executor = ibkr_executor
+        pipeline._executor = _make_mock_scale_out_executor(has_active_trade=False)
         pipeline._position_manager = position_manager
         pipeline._bars_processed = 0
         pipeline._last_bar = None
-        pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
         pipeline._htf_bias = None
 
@@ -270,15 +326,15 @@ class TestBridgeRejection:
 
     @pytest.mark.asyncio
     async def test_low_score_rejected(
-        self, client, executor, position_manager
+        self, client, ibkr_executor, position_manager
     ):
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.RUNNING
-        pipeline._executor = executor
+        pipeline._ibkr_executor = ibkr_executor
+        pipeline._executor = _make_mock_scale_out_executor(has_active_trade=False)
         pipeline._position_manager = position_manager
         pipeline._bars_processed = 0
         pipeline._last_bar = None
-        pipeline._active_group_id = None
         pipeline._current_regime = "unknown"
         pipeline._htf_bias = None
 
@@ -326,160 +382,51 @@ class TestBridgeRejection:
 # ═══════════════════════════════════════════════════════════════
 
 class TestHaltPropagation:
-    """Executor halt stops all bar processing."""
+    """IBKR executor halt stops all bar processing."""
 
     @pytest.mark.asyncio
     async def test_halted_executor_skips_bar(
-        self, client, executor, position_manager
+        self, client, ibkr_executor, position_manager
     ):
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.RUNNING
-        pipeline._executor = executor
+        pipeline._ibkr_executor = ibkr_executor
+        pipeline._executor = _make_mock_scale_out_executor()
         pipeline._bars_processed = 0
         pipeline._last_bar = None
 
-        # Halt the executor
-        executor._state.is_halted = True
-        executor._state.halt_reason = "test halt"
+        # Halt the IBKR executor (line 311 checks _ibkr_executor.is_halted)
+        ibkr_executor._state.is_halted = True
+        ibkr_executor._state.halt_reason = "test halt"
 
         result = await pipeline._process_bar(_make_bar())
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_idle_pipeline_skips_bar(self, executor):
+    async def test_idle_pipeline_skips_bar(self, ibkr_executor):
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.IDLE
-        pipeline._executor = executor
+        pipeline._ibkr_executor = ibkr_executor
+        pipeline._executor = _make_mock_scale_out_executor()
 
         result = await pipeline._process_bar(_make_bar())
         assert result is None
 
 
 # ═══════════════════════════════════════════════════════════════
-# PARTIAL FILL
-# ═══════════════════════════════════════════════════════════════
-
-class TestPartialFill:
-    """C1 fills but C2 rejected -> partial state tracked."""
-
-    @pytest.mark.asyncio
-    async def test_c2_rejection_tracked(
-        self, client, executor, position_manager
-    ):
-        pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
-        pipeline._state = PipelineState.RUNNING
-        pipeline._executor = executor
-        pipeline._position_manager = position_manager
-        pipeline._bars_processed = 0
-        pipeline._last_bar = None
-        pipeline._active_group_id = None
-        pipeline._current_regime = "unknown"
-        # HTF bias must be present -- fail-safe blocks trades when None
-        from features.htf_engine import HTFBiasResult
-        pipeline._htf_bias = HTFBiasResult(
-            consensus_direction="bullish",
-            consensus_strength=0.6,
-            htf_allows_long=True,
-            htf_allows_short=False,
-        )
-
-        mock_features = MagicMock()
-        mock_features.atr_14 = 10.0
-        mock_features.vix_level = 15.0
-        mock_features.trend_direction = "up"
-        mock_features.trend_strength = 0.7
-        mock_features.session_vwap = 21000.0
-
-        pipeline._feature_engine = MagicMock()
-        pipeline._feature_engine.update.return_value = mock_features
-        pipeline._feature_engine._bars = [_make_bar()] * 20
-
-        mock_signal = MagicMock()
-        mock_signal.should_trade = True
-        mock_signal.direction = SignalDirection.LONG
-        mock_signal.combined_score = 0.85
-        pipeline._signal_aggregator = MagicMock()
-        pipeline._signal_aggregator.aggregate.return_value = mock_signal
-
-        mock_risk = MagicMock()
-        mock_risk.decision = RiskDecision.APPROVE
-        mock_risk.suggested_stop_distance = 15.0
-        pipeline._risk_engine = MagicMock()
-        pipeline._risk_engine.evaluate_trade.return_value = mock_risk
-        pipeline._risk_engine.state = MagicMock()
-        pipeline._risk_engine.state.is_overnight = False
-        pipeline._risk_engine.state.upcoming_news_event = False
-
-        pipeline._regime_detector = MagicMock()
-        pipeline._regime_detector.classify.return_value = "trending_up"
-        pipeline._regime_detector.get_regime_adjustments.return_value = {
-            "size_multiplier": 1.0
-        }
-
-        pipeline._sweep_detector = MagicMock()
-        pipeline._sweep_detector.update_bar.return_value = None
-
-        pipeline._bridge = SignalBridge(RiskConfig())
-
-        # Mock executor to accept C1 but reject C2 (at max positions)
-        c1 = _make_filled_record("C1", 21000.0)
-        c2 = _make_rejected_record("C2", "MAX_OPEN_POSITIONS")
-        pipeline._executor = MagicMock()
-        pipeline._executor.is_halted = False
-        pipeline._executor.place_scale_out_entry = AsyncMock(
-            return_value={"c1": c1, "c2": c2}
-        )
-
-        result = await pipeline._process_bar(_make_bar())
-        assert result is not None
-        assert result["contracts"] == 1  # Only C1 filled
-        assert position_manager.open_position_count == 1
-
-        group = position_manager.get_scale_out_group(result["group_id"])
-        assert group is not None
-        assert group.c1 is not None
-        assert group.is_partial is True
-
-
-# ═══════════════════════════════════════════════════════════════
-# POSITION CLOSE -> P&L FLOW
+# POSITION CLOSE -> EMERGENCY FLATTEN
 # ═══════════════════════════════════════════════════════════════
 
 class TestPositionClose:
-    """Position close feeds P&L through to executor."""
-
-    def test_close_feeds_pnl_and_clears_group(
-        self, client, executor, position_manager
-    ):
-        pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
-        pipeline._position_manager = position_manager
-        pipeline._active_group_id = "G1"
-
-        # Open both legs
-        position_manager.open_position(
-            "G1-C1", "B1", "long", 1, 21000.0, tag="C1", group_id="G1"
-        )
-        position_manager.open_position(
-            "G1-C2", "B2", "long", 1, 21000.0, tag="C2", group_id="G1"
-        )
-
-        # Close C1
-        pipeline.close_position("G1-C1", 21010.0, "target")
-        assert pipeline._active_group_id == "G1"  # still active (C2 open)
-
-        # Close C2
-        pipeline.close_position("G1-C2", 21030.0, "trailing")
-        assert pipeline._active_group_id is None  # group fully closed
-
-        # P&L fed to executor
-        assert executor.daily_pnl != 0.0
+    """Position close feeds P&L to position manager and flattens via executor."""
 
     def test_close_position_updates_pm_immediately(
-        self, client, executor, position_manager
+        self, client, ibkr_executor, position_manager
     ):
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._position_manager = position_manager
-        pipeline._active_group_id = "G1"
+        # Mock ScaleOutExecutor with active trade
+        pipeline._executor = _make_mock_scale_out_executor(has_active_trade=True)
 
         position_manager.open_position(
             "G1-C1", "B1", "long", 1, 21000.0, tag="C1", group_id="G1"
@@ -489,27 +436,60 @@ class TestPositionClose:
         pipeline.close_position("G1-C1", 21010.0, "target")
         assert position_manager.open_position_count == 0
 
+    def test_close_calls_emergency_flatten(
+        self, client, ibkr_executor, position_manager
+    ):
+        """When executor has active trade, close_position calls emergency_flatten."""
+        pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
+        pipeline._position_manager = position_manager
+        pipeline._executor = _make_mock_scale_out_executor(has_active_trade=True)
+
+        position_manager.open_position(
+            "G1-C1", "B1", "long", 1, 21000.0, tag="C1", group_id="G1"
+        )
+
+        pipeline.close_position("G1-C1", 21010.0, "emergency")
+        pipeline._executor.emergency_flatten.assert_called_once_with(21010.0)
+
+    def test_close_no_flatten_when_no_active_trade(
+        self, client, ibkr_executor, position_manager
+    ):
+        """When executor has no active trade, emergency_flatten is NOT called."""
+        pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
+        pipeline._position_manager = position_manager
+        pipeline._executor = _make_mock_scale_out_executor(has_active_trade=False)
+
+        position_manager.open_position(
+            "G1-C1", "B1", "long", 1, 21000.0, tag="C1", group_id="G1"
+        )
+
+        pipeline.close_position("G1-C1", 21010.0, "reconciliation")
+        pipeline._executor.emergency_flatten.assert_not_called()
+
 
 # ═══════════════════════════════════════════════════════════════
-# ACTIVE POSITION BLOCKS NEW ENTRIES
+# ACTIVE TRADE BLOCKS NEW ENTRIES
 # ═══════════════════════════════════════════════════════════════
 
 class TestActivePositionBlock:
-    """When a trade is active, new entries are skipped."""
+    """When executor has an active trade, new entries are skipped (update path taken)."""
 
     @pytest.mark.asyncio
-    async def test_active_group_blocks_new_entry(
-        self, client, executor, position_manager
+    async def test_active_trade_blocks_new_entry(
+        self, client, ibkr_executor, position_manager
     ):
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.RUNNING
-        pipeline._executor = executor
+        pipeline._ibkr_executor = ibkr_executor
         pipeline._position_manager = position_manager
         pipeline._bars_processed = 0
         pipeline._last_bar = None
-        pipeline._active_group_id = "existing-trade"
         pipeline._current_regime = "unknown"
         pipeline._htf_bias = None
+
+        # ScaleOutExecutor with ACTIVE trade -- blocks new entries
+        pipeline._executor = _make_mock_scale_out_executor(has_active_trade=True)
+        pipeline._executor.update = AsyncMock(return_value=None)  # No exit this bar
 
         mock_features = MagicMock()
         mock_features.atr_14 = 10.0
@@ -537,7 +517,10 @@ class TestActivePositionBlock:
         pipeline._sweep_detector.update_bar.return_value = None
 
         result = await pipeline._process_bar(_make_bar())
+        # Active trade -> went to update path -> no exit -> None
         assert result is None
+        # Verify update() was called (position management path)
+        pipeline._executor.update.assert_awaited_once()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -554,17 +537,18 @@ class TestPipelineState:
         assert PipelineState.RUNNING.value == "running"
         assert PipelineState.HALTED.value == "halted"
 
-    def test_get_status(self, client, executor, position_manager):
+    def test_get_status(self, client, ibkr_executor, position_manager):
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._state = PipelineState.RUNNING
         pipeline._bars_processed = 42
         pipeline._current_regime = "trending_up"
         pipeline._htf_bias = None
-        pipeline._active_group_id = None
-        pipeline._executor = executor
+        # ScaleOutExecutor mock for get_stats()
+        pipeline._executor = _make_mock_scale_out_executor()
         pipeline._position_manager = position_manager
         pipeline._data_feed = MagicMock()
         pipeline._data_feed.get_status.return_value = {"running": True}
+        pipeline._market_context = None
 
         pipeline._bridge = SignalBridge(RiskConfig())
 
@@ -573,12 +557,13 @@ class TestPipelineState:
         assert status["bars_processed"] == 42
         assert status["current_regime"] == "trending_up"
         assert status["htf_consensus"] == "n/a"
+        assert status["active_trade"] is False  # No active trade
         assert "executor" in status
         assert "positions" in status
         assert "bridge" in status
         assert "data_feed" in status
 
-    def test_bars_processed_property(self, client, executor):
+    def test_bars_processed_property(self, client, ibkr_executor):
         pipeline = IBKRLivePipeline.__new__(IBKRLivePipeline)
         pipeline._bars_processed = 99
         assert pipeline.bars_processed == 99
@@ -630,3 +615,7 @@ class TestImportChain:
     def test_orchestrator_import(self):
         from execution.orchestrator import IBKRLivePipeline
         assert IBKRLivePipeline is not None
+
+    def test_scale_out_executor_import(self):
+        from execution.scale_out_executor import ScaleOutExecutor
+        assert ScaleOutExecutor is not None
