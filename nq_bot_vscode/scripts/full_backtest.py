@@ -67,6 +67,7 @@ from config.constants import (
     HTF_STRENGTH_GATE,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
     AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
+    RANGING_BLOCK_LONGS,
     RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE,
     MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE,
 )
@@ -1425,6 +1426,15 @@ class CausalReplayEngine:
             self._record_shadow_signal(
                 bar, features, entry_direction, entry_score, raw_stop,
                 "Regime gate block", 8)
+            self._rejection_count += 1
+            return
+
+        # ── Ranging longs filter ──
+        # Shadow analysis: ranging longs toxic (28.6% WR), shorts OK
+        if RANGING_BLOCK_LONGS and self._current_regime == "ranging" and entry_direction == "long":
+            self._record_shadow_signal(
+                bar, features, entry_direction, entry_score, raw_stop,
+                "Ranging long blocked", 8.5)
             self._rejection_count += 1
             return
 

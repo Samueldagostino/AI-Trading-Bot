@@ -33,6 +33,7 @@ from config.constants import (
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
     AGGREGATOR_STANDALONE_ENABLED, AGGREGATOR_STANDALONE_MIN_SCORE,
     MIN_RR_OVERRIDE,
+    RANGING_BLOCK_LONGS,
     RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE,
     MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE,
     EVENING_SESSION_OPEN_HOUR,
@@ -838,6 +839,13 @@ class TradingOrchestrator:
             logger.debug(f"Regime {self._current_regime} blocks new trades")
             _set_rejection(entry_direction, entry_score, raw_stop,
                            features.atr_14, "Regime gate block", 8)
+            return None
+
+        # Ranging longs filter: ranging longs are toxic (28.6% WR), shorts are OK
+        if RANGING_BLOCK_LONGS and self._current_regime == "ranging" and entry_direction == "long":
+            logger.debug("RANGING LONG REJECT: longs blocked in ranging regime")
+            _set_rejection(entry_direction, entry_score, raw_stop,
+                           features.atr_14, "Ranging long blocked", 8.5)
             return None
 
         if risk_assessment.decision in (RiskDecision.APPROVE, RiskDecision.REDUCE_SIZE):

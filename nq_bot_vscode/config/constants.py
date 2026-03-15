@@ -171,6 +171,12 @@ GAINZ_CYCLE_SIGNAL_STRENGTH: float = 0.60        # Cycle-phase pullback entry
 # -- Feature flag (master switch for V1.3.3 modules) --
 GAINZ_MODULES_ENABLED: bool = True
 
+# ── REGIME FILTER ────────────────────────────────────────────────
+#   Shadow analysis showed ranging longs are toxic: 28.6% WR (needs 32.5%),
+#   net -$2,032.  Ranging shorts are acceptable (33.9% WR, slightly above BE).
+#   Block ranging longs, allow ranging shorts.
+RANGING_BLOCK_LONGS: bool = True   # True = reject long entries during ranging regime
+
 # ── TRADING HOURS & SESSION MANAGEMENT ──────────────────────────
 #   RTH entry cutoff: 3:30 PM ET (allow 1 hour 20 minutes to close before maintenance)
 #   Maintenance window: 4:50 PM - 6:00 PM ET (forced flatten at 4:50 PM)

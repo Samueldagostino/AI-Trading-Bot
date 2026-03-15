@@ -50,6 +50,7 @@ from config.constants import (
     HIGH_CONVICTION_MIN_STOP_PTS,
     SWEEP_MIN_SCORE, SWEEP_CONFLUENCE_BONUS, HTF_TIMEFRAMES,
     CONTEXT_AGGREGATOR_BOOST, CONTEXT_OB_BOOST, CONTEXT_FVG_BOOST,
+    RANGING_BLOCK_LONGS,
     RTH_ENTRY_CUTOFF_HOUR, RTH_ENTRY_CUTOFF_MINUTE,
     MAINTENANCE_FLATTEN_HOUR, MAINTENANCE_FLATTEN_MINUTE,
     EVENING_SESSION_OPEN_HOUR,
@@ -552,6 +553,14 @@ class IBKRLivePipeline:
             logger.info(
                 "REGIME REJECT: %s blocked -- regime size_multiplier=0 [score=%.2f]",
                 entry_direction, entry_score,
+            )
+            return None
+
+        # Ranging longs filter: ranging longs are toxic (28.6% WR), shorts are OK
+        if RANGING_BLOCK_LONGS and self._current_regime == "ranging" and entry_direction == "long":
+            logger.info(
+                "RANGING LONG REJECT: longs blocked in ranging regime [score=%.2f]",
+                entry_score,
             )
             return None
 
