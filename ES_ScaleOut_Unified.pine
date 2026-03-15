@@ -1,0 +1,647 @@
+// ═══════════════════════════════════════════════════════════════════════
+// MakeMoneyMarkets — ES/MES Algo (Unified Multi-Timeframe)
+// ═══════════════════════════════════════════════════════════════════════
+// One indicator, two strategies. Auto-detects your chart timeframe:
+//   ULTRA SCALPER (1m-5m):  Fast entries, tight stops, 5m+15m HTF bias
+//   SCALPER       (10m+):   Wider entries, bigger targets, 1H+4H HTF bias
+//
+// HTF-REFINED ENTRY (Ultra Scalper TF only):
+//   When on a 2m chart, the algo also watches for Scalper setups forming
+//   on 15m structure. Two-phase entry:
+//     SCOUT (1 contract):  2m confirms direction while 15m bar forming
+//     FULL LOAD:           15m bar closes + confirms → add heavy contracts
+//
+// Drop on any ES/MES chart. The indicator adapts automatically.
+// ═══════════════════════════════════════════════════════════════════════
+
+//@version=5
+indicator("MakeMoneyMarkets — ES/MES Algo", shorttitle="MMM-ES", overlay=true,
+     max_labels_count=500, max_bars_back=5000, max_lines_count=500)
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SYMBOL VALIDATION — only run on ES / MES charts
+// ══════════════════════════════════════════════════════════════════════
+
+rootSym     = syminfo.root
+tickerUp    = str.upper(syminfo.ticker)
+validSymbol = (rootSym == "ES" or rootSym == "MES"
+     or str.startswith(tickerUp, "ES") or str.startswith(tickerUp, "MES"))
+
+
+// ══════════════════════════════════════════════════════════════════════
+// TIMEFRAME AUTO-DETECTION
+// ══════════════════════════════════════════════════════════════════════
+
+tfSeconds = timeframe.in_seconds()
+isSwingMode = tfSeconds >= 600   // 10 minutes or higher = scalper mode
+modeLabel   = isSwingMode ? "SCALPER" : "ULTRA SCALPER"
+
+
+// ══════════════════════════════════════════════════════════════════════
+// ADAPTIVE INPUTS — auto-set based on mode, user can override
+// ══════════════════════════════════════════════════════════════════════
+
+grp_hc = "── High-Conviction Gates ──"
+i_minScore       = input.float(0.75, "Min Signal Score (Ultra Scalper)", minval=0.5, maxval=1.0, step=0.01, group=grp_hc)
+i_minScoreSwing  = input.float(0.78, "Min Signal Score (Scalper)",      minval=0.5, maxval=1.0, step=0.01, group=grp_hc)
+i_minStopScalp   = input.float(4.0,  "Min Stop Ultra Scalper (pts)",    minval=1.0, maxval=30.0, step=0.5, group=grp_hc)
+i_maxStopScalp   = input.float(15.0, "Max Stop Ultra Scalper (pts)",    minval=5.0, maxval=50.0, step=0.5, group=grp_hc)
+i_minStopSwing   = input.float(6.0,  "Min Stop Scalper (pts)",          minval=1.0, maxval=30.0, step=1.0, group=grp_hc)
+i_maxStopSwing   = input.float(20.0, "Max Stop Scalper (pts)",          minval=5.0, maxval=60.0, step=1.0, group=grp_hc)
+
+// Select active parameters based on mode
+activeMinScore = isSwingMode ? i_minScoreSwing : i_minScore
+activeMinStop  = isSwingMode ? i_minStopSwing  : i_minStopScalp
+activeMaxStop  = isSwingMode ? i_maxStopSwing  : i_maxStopScalp
+
+grp_regime = "── Regime Detection ──"
+i_atrLen         = input.int(14, "ATR Period",               minval=5, maxval=50, group=grp_regime)
+i_trendEmaFast   = input.int(9, "Trend EMA Fast",           minval=3, maxval=30, group=grp_regime)
+i_trendEmaSlow   = input.int(21, "Trend EMA Slow",          minval=10, maxval=100, group=grp_regime)
+i_trendStrThresh = input.float(0.5, "Trend Strength Thresh", minval=0.1, maxval=1.0, step=0.1, group=grp_regime)
+i_rangingStrMax  = input.float(0.3, "Ranging Max Strength",  minval=0.1, maxval=0.5, step=0.05, group=grp_regime)
+i_highVolMult    = input.float(1.5, "High-Vol ATR Mult",     minval=1.1, maxval=3.0, step=0.1, group=grp_regime)
+i_blockRangingLongs = input.bool(true, "Block Ranging Longs", group=grp_regime)
+
+grp_htf = "── HTF Bias ──"
+i_htfStrGate     = input.float(0.3, "HTF Strength Gate",    minval=0.0, maxval=1.0, step=0.1, group=grp_htf)
+i_htfHystBars    = input.int(3, "HTF Hysteresis Bars",       minval=1, maxval=10, group=grp_htf)
+i_htfPenalty     = input.float(0.10, "HTF Disagree Penalty", minval=0.0, maxval=0.3, step=0.01, group=grp_htf)
+
+grp_sig = "── Signal Scoring ──"
+i_rsiLen         = input.int(14, "RSI Period",               minval=5, maxval=30, group=grp_sig)
+i_macdFast       = input.int(12, "MACD Fast",               minval=5, maxval=20, group=grp_sig)
+i_macdSlow       = input.int(26, "MACD Slow",               minval=15, maxval=50, group=grp_sig)
+i_macdSignal     = input.int(9, "MACD Signal",              minval=3, maxval=15, group=grp_sig)
+i_obvLen         = input.int(20, "OBV MA Period",            minval=5, maxval=50, group=grp_sig)
+
+grp_exit = "── Scale-Out Exits ──"
+i_c1BarsScalp    = input.int(5, "C1 Exit Bars (Ultra Scalper)", minval=1, maxval=20, group=grp_exit)
+i_c1BarsSwing    = input.int(4, "C1 Exit Bars (Scalper)",      minval=1, maxval=20, group=grp_exit)
+i_c2BarsScalp    = input.int(35, "C2 Time Stop (Ultra Scalper)", minval=10, maxval=100, group=grp_exit)
+i_c2BarsSwing    = input.int(20, "C2 Time Stop (Scalper)",      minval=5, maxval=60, group=grp_exit)
+
+activeC1Bars = isSwingMode ? i_c1BarsSwing : i_c1BarsScalp
+activeC2Bars = isSwingMode ? i_c2BarsSwing : i_c2BarsScalp
+
+grp_time = "── Session Times (ET) ──"
+i_cutoffHour     = input.int(15, "Entry Cutoff Hour",        minval=0, maxval=23, group=grp_time)
+i_cutoffMin      = input.int(30, "Entry Cutoff Minute",      minval=0, maxval=59, group=grp_time)
+i_flattenHour    = input.int(16, "Flatten Hour",             minval=0, maxval=23, group=grp_time)
+i_flattenMin     = input.int(50, "Flatten Minute",           minval=0, maxval=59, group=grp_time)
+
+grp_htfr = "── HTF-Refined Entry (Ultra Scalper Only) ──"
+i_htfrEnabled    = input.bool(true,  "Enable HTF-Refined Entries", group=grp_htfr, tooltip="On 1m-5m charts: detect Scalper setups on 15m, enter scout via 2m confirmation, load up on 15m close")
+i_scoutScore     = input.float(0.70, "Scout Min 2m Score",        minval=0.5, maxval=1.0, step=0.01, group=grp_htfr, tooltip="Lower than full HC gate — this is the early scout entry")
+i_confirmWindow  = input.int(8,      "Confirm Window (bars)",     minval=2, maxval=30, group=grp_htfr, tooltip="Max bars to wait for 15m close confirmation after scout entry")
+
+grp_vis = "── Display ──"
+i_showDash       = input.bool(true,  "Show Dashboard",       group=grp_vis)
+i_showLevels     = input.bool(true,  "Show Key Levels",      group=grp_vis)
+
+
+// ══════════════════════════════════════════════════════════════════════
+// COLOR PALETTE
+// ══════════════════════════════════════════════════════════════════════
+
+color C_BULL     = #26A69A
+color C_BEAR     = #EF5350
+color C_RANGING  = #FFA726
+color C_HIVOL    = #AB47BC
+color C_LOWLIQ   = #78909C
+color C_NEUTRAL  = #607D8B
+color C_DIMTEXT  = #9E9E9E
+color C_DASHBG   = #1B1B1B
+color C_DASHBORD = #333333
+color C_SWING    = #FFD700   // Gold accent for scalper mode
+color C_SCOUT_L  = #FFD700   // Gold — scout long entry
+color C_SCOUT_S  = #FF6D00   // Deep orange — scout short entry
+color C_CONFIRM  = #00E676   // Bright green — full confirmation load
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 1: CORE CALCULATIONS
+// ══════════════════════════════════════════════════════════════════════
+
+atr14 = ta.atr(i_atrLen)
+
+emaFast = ta.ema(close, i_trendEmaFast)
+emaSlow = ta.ema(close, i_trendEmaSlow)
+
+trendRaw       = atr14 > 0 ? (emaFast - emaSlow) / atr14 : 0.0
+trendStrength  = math.min(math.abs(trendRaw) / 2.0, 1.0)
+trendDirection = emaFast > emaSlow ? "up" : "down"
+
+vwapVal = ta.vwap(hlc3)
+rsiVal  = ta.rsi(close, i_rsiLen)
+
+[macdLine, signalLine, macdHist] = ta.macd(close, i_macdFast, i_macdSlow, i_macdSignal)
+
+obv         = ta.cum(close > close[1] ? volume : close < close[1] ? -volume : 0)
+obvMa       = ta.sma(obv, i_obvLen)
+obvTrending = obv > obvMa
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 2: REGIME DETECTION
+// ══════════════════════════════════════════════════════════════════════
+
+atrAvg20     = ta.sma(atr14, 20)
+atrExpansion = atrAvg20 > 0 ? atr14 / atrAvg20 : 1.0
+
+volAvg   = ta.sma(volume, 20)
+volRatio = volAvg > 0 ? volume / volAvg : 1.0
+
+sessionHour = hour(time, "America/New_York")
+isOvernight = sessionHour < 9 or sessionHour >= 17
+
+var string regime = "unknown"
+if atrExpansion > i_highVolMult
+    regime := "high_volatility"
+else if trendStrength > i_trendStrThresh
+    regime := trendDirection == "up" ? "trending_up" : "trending_down"
+else if trendStrength < i_rangingStrMax and atrExpansion < 1.2
+    regime := "ranging"
+else if isOvernight and volRatio < 0.3
+    regime := "low_liquidity"
+else
+    regime := "unknown"
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 3: HTF BIAS — Fetch ALL timeframes, select by mode
+// ══════════════════════════════════════════════════════════════════════
+
+ema9_5m   = request.security(syminfo.tickerid, "5",  ta.ema(close, 9),  lookahead=barmerge.lookahead_off)
+ema21_5m  = request.security(syminfo.tickerid, "5",  ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+atr14_5m  = request.security(syminfo.tickerid, "5",  ta.atr(14),        lookahead=barmerge.lookahead_off)
+bias5m    = ema9_5m > ema21_5m ? 1.0 : -1.0
+str5m     = atr14_5m > 0 ? math.min(math.abs(ema9_5m - ema21_5m) / atr14_5m, 1.0) : 0.0
+
+ema9_15m  = request.security(syminfo.tickerid, "15", ta.ema(close, 9),  lookahead=barmerge.lookahead_off)
+ema21_15m = request.security(syminfo.tickerid, "15", ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+atr14_15m = request.security(syminfo.tickerid, "15", ta.atr(14),        lookahead=barmerge.lookahead_off)
+bias15m   = ema9_15m > ema21_15m ? 1.0 : -1.0
+str15m    = atr14_15m > 0 ? math.min(math.abs(ema9_15m - ema21_15m) / atr14_15m, 1.0) : 0.0
+
+ema9_1h   = request.security(syminfo.tickerid, "60",  ta.ema(close, 9),  lookahead=barmerge.lookahead_off)
+ema21_1h  = request.security(syminfo.tickerid, "60",  ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+atr14_1h  = request.security(syminfo.tickerid, "60",  ta.atr(14),        lookahead=barmerge.lookahead_off)
+bias1h    = ema9_1h > ema21_1h ? 1.0 : -1.0
+str1h     = atr14_1h > 0 ? math.min(math.abs(ema9_1h - ema21_1h) / atr14_1h, 1.0) : 0.0
+
+ema9_4h   = request.security(syminfo.tickerid, "240", ta.ema(close, 9),  lookahead=barmerge.lookahead_off)
+ema21_4h  = request.security(syminfo.tickerid, "240", ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+atr14_4h  = request.security(syminfo.tickerid, "240", ta.atr(14),        lookahead=barmerge.lookahead_off)
+bias4h    = ema9_4h > ema21_4h ? 1.0 : -1.0
+str4h     = atr14_4h > 0 ? math.min(math.abs(ema9_4h - ema21_4h) / atr14_4h, 1.0) : 0.0
+
+biasA = isSwingMode ? bias1h  : bias5m
+biasB = isSwingMode ? bias4h  : bias15m
+strA  = isSwingMode ? str1h   : str5m
+strB  = isSwingMode ? str4h   : str15m
+
+htfRawBias     = (biasA + biasB) / 2.0
+htfRawStrength = (strA + strB) / 2.0
+
+var int   htfConfirmCount = 0
+var float htfLockedBias   = 0.0
+
+if math.sign(htfRawBias) != math.sign(htfLockedBias) and math.abs(htfRawBias) > 0.3
+    htfConfirmCount += 1
+else
+    htfConfirmCount := 0
+
+if htfConfirmCount >= i_htfHystBars
+    htfLockedBias   := htfRawBias
+    htfConfirmCount := 0
+
+htfBullish = htfLockedBias > 0 and htfRawStrength >= i_htfStrGate
+htfBearish = htfLockedBias < 0 and htfRawStrength >= i_htfStrGate
+htfNeutral = not htfBullish and not htfBearish
+htfDir     = htfBullish ? "BULL" : htfBearish ? "BEAR" : "FLAT"
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 4: SIGNAL SCORING (identical logic, mode-aware threshold)
+// ══════════════════════════════════════════════════════════════════════
+
+emaCrossLong  = ta.crossover(emaFast, emaSlow)
+emaCrossShort = ta.crossunder(emaFast, emaSlow)
+var int lastCross = 0
+if emaCrossLong
+    lastCross := 1
+if emaCrossShort
+    lastCross := -1
+
+rsiLong  = rsiVal > 50 and rsiVal < 75
+rsiShort = rsiVal < 50 and rsiVal > 25
+rsiScore = rsiLong ? (rsiVal - 50) / 25.0 : rsiShort ? (50 - rsiVal) / 25.0 : 0.0
+rsiDir   = rsiLong ? 1 : rsiShort ? -1 : 0
+
+macdDir   = macdHist > 0 ? 1 : macdHist < 0 ? -1 : 0
+macdScore = atr14 > 0 ? math.min(math.abs(macdHist) / (atr14 * 0.1), 1.0) : 0.0
+
+vwapDir   = close > vwapVal ? 1 : close < vwapVal ? -1 : 0
+vwapDist  = atr14 > 0 ? math.abs(close - vwapVal) / atr14 : 0.0
+vwapScore = math.min(vwapDist / 2.0, 1.0)
+
+obvDir   = obvTrending ? 1 : -1
+obvScore = 0.6
+
+sessionHi  = ta.highest(high, 60)
+sessionLo  = ta.lowest(low, 60)
+sweepLong  = low <= sessionLo * 1.001 and close > open
+sweepShort = high >= sessionHi * 0.999 and close < open
+sweepDir   = sweepLong ? 1 : sweepShort ? -1 : 0
+sweepScore = (sweepLong or sweepShort) ? 0.80 : 0.0
+
+longSignals  = (lastCross == 1 ? 1 : 0) + (rsiDir == 1 ? 1 : 0) + (macdDir == 1 ? 1 : 0) + (vwapDir == 1 ? 1 : 0) + (obvDir == 1 ? 1 : 0) + (sweepDir == 1 ? 1 : 0)
+shortSignals = (lastCross == -1 ? 1 : 0) + (rsiDir == -1 ? 1 : 0) + (macdDir == -1 ? 1 : 0) + (vwapDir == -1 ? 1 : 0) + (obvDir == -1 ? 1 : 0) + (sweepDir == -1 ? 1 : 0)
+
+hasLongSignal  = longSignals >= 3
+hasShortSignal = shortSignals >= 3
+
+longScore = hasLongSignal ? (lastCross == 1 ? trendStrength * 0.25 : 0.0) + (rsiDir == 1 ? rsiScore * 0.20 : 0.0) + (macdDir == 1 ? macdScore * 0.20 : 0.0) + (vwapDir == 1 ? vwapScore * 0.15 : 0.0) + (obvDir == 1 ? obvScore * 0.10 : 0.0) + (sweepDir == 1 ? sweepScore * 0.10 : 0.0) : 0.0
+shortScore = hasShortSignal ? (lastCross == -1 ? trendStrength * 0.25 : 0.0) + (rsiDir == -1 ? rsiScore * 0.20 : 0.0) + (macdDir == -1 ? macdScore * 0.20 : 0.0) + (vwapDir == -1 ? vwapScore * 0.15 : 0.0) + (obvDir == -1 ? obvScore * 0.10 : 0.0) + (sweepDir == -1 ? sweepScore * 0.10 : 0.0) : 0.0
+
+longActive  = (lastCross == 1 ? 0.25 : 0.0) + (rsiDir == 1 ? 0.20 : 0.0) + (macdDir == 1 ? 0.20 : 0.0) + (vwapDir == 1 ? 0.15 : 0.0) + (obvDir == 1 ? 0.10 : 0.0) + (sweepDir == 1 ? 0.10 : 0.0)
+shortActive = (lastCross == -1 ? 0.25 : 0.0) + (rsiDir == -1 ? 0.20 : 0.0) + (macdDir == -1 ? 0.20 : 0.0) + (vwapDir == -1 ? 0.15 : 0.0) + (obvDir == -1 ? 0.10 : 0.0) + (sweepDir == -1 ? 0.10 : 0.0)
+
+normLongScore  = longActive > 0 ? math.min(longScore / longActive, 1.0) : 0.0
+normShortScore = shortActive > 0 ? math.min(shortScore / shortActive, 1.0) : 0.0
+
+sigDir   = normLongScore > normShortScore and hasLongSignal ? 1 : normShortScore > normLongScore and hasShortSignal ? -1 : 0
+sigScore = sigDir == 1 ? normLongScore : sigDir == -1 ? normShortScore : 0.0
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 5: ENTRY GATES (mode-aware thresholds)
+// ══════════════════════════════════════════════════════════════════════
+
+sessionMin = minute(time, "America/New_York")
+pastCutoff = sessionHour > i_cutoffHour or (sessionHour == i_cutoffHour and sessionMin >= i_cutoffMin)
+inFlatten  = sessionHour > i_flattenHour or (sessionHour == i_flattenHour and sessionMin >= i_flattenMin)
+
+stopDistance = atr14
+
+passScore   = sigScore >= activeMinScore
+passMinStop = stopDistance >= activeMinStop
+passMaxStop = stopDistance <= activeMaxStop
+
+htfAgrees = (sigDir == 1 and htfBullish) or (sigDir == -1 and htfBearish) or htfNeutral
+
+adjustedScore = sigScore
+if not htfAgrees and not htfNeutral
+    adjustedScore := sigScore - i_htfPenalty
+
+rangingLongBlocked = i_blockRangingLongs and regime == "ranging" and sigDir == 1
+
+entryLong  = sigDir == 1  and passScore and passMinStop and passMaxStop and adjustedScore >= activeMinScore and not pastCutoff and not rangingLongBlocked
+entryShort = sigDir == -1 and passScore and passMinStop and passMaxStop and adjustedScore >= activeMinScore and not pastCutoff
+
+var int lastEntryBar = 0
+minGap     = activeC1Bars + 5
+freshLong  = validSymbol and entryLong  and (bar_index - lastEntryBar > minGap)
+freshShort = validSymbol and entryShort and (bar_index - lastEntryBar > minGap)
+if freshLong or freshShort
+    lastEntryBar := bar_index
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 5A: HTF-REFINED SCALPER ENTRIES (Ultra Scalper TF only)
+// ══════════════════════════════════════════════════════════════════════
+
+htfrActive = i_htfrEnabled and not isSwingMode
+
+new15mBar = ta.change(time("15")) != 0
+
+scalperSetupLong  = bias15m > 0 and str15m >= i_htfStrGate and bias1h > 0 and str1h >= i_htfStrGate
+scalperSetupShort = bias15m < 0 and str15m >= i_htfStrGate and bias1h < 0 and str1h >= i_htfStrGate
+
+scalperStopOK = stopDistance >= i_minStopSwing and stopDistance <= i_maxStopSwing
+
+var int   scoutEntryBar  = 0
+var int   scoutDir       = 0
+var bool  inScoutTrade   = false
+var bool  scoutConfirmed = false
+var int   lastScoutBar   = 0
+
+scoutGapOK = (bar_index - lastEntryBar > 5) and (bar_index - lastScoutBar > i_confirmWindow + 10)
+
+scoutLongCond  = htfrActive and scalperSetupLong  and sigDir == 1  and sigScore >= i_scoutScore and scalperStopOK and not pastCutoff and not inScoutTrade and scoutGapOK
+scoutShortCond = htfrActive and scalperSetupShort and sigDir == -1 and sigScore >= i_scoutScore and scalperStopOK and not pastCutoff and not inScoutTrade and scoutGapOK
+
+freshScoutLong  = validSymbol and scoutLongCond  and not rangingLongBlocked
+freshScoutShort = validSymbol and scoutShortCond
+
+if freshScoutLong
+    scoutEntryBar  := bar_index
+    scoutDir       := 1
+    inScoutTrade   := true
+    scoutConfirmed := false
+    lastScoutBar   := bar_index
+
+if freshScoutShort
+    scoutEntryBar  := bar_index
+    scoutDir       := -1
+    inScoutTrade   := true
+    scoutConfirmed := false
+    lastScoutBar   := bar_index
+
+barsInScout   = bar_index - scoutEntryBar
+windowOpen    = barsInScout <= i_confirmWindow
+
+freshConfirmLong  = validSymbol and inScoutTrade and scoutDir == 1  and new15mBar and bias15m > 0 and str15m >= i_htfStrGate and bias1h > 0 and windowOpen and not scoutConfirmed
+freshConfirmShort = validSymbol and inScoutTrade and scoutDir == -1 and new15mBar and bias15m < 0 and str15m >= i_htfStrGate and bias1h < 0 and windowOpen and not scoutConfirmed
+
+if freshConfirmLong or freshConfirmShort
+    scoutConfirmed := true
+
+if inScoutTrade and not scoutConfirmed and barsInScout > i_confirmWindow
+    scoutDir       := 0
+    inScoutTrade   := false
+
+tfRatio        = math.max(math.round(900 / tfSeconds), 1)
+scalperC1inLTF = i_c1BarsSwing * tfRatio
+scalperC2inLTF = i_c2BarsSwing * tfRatio
+
+scoutC1Exit = inScoutTrade and scoutConfirmed and (barsInScout == scalperC1inLTF)
+
+if inScoutTrade and scoutDir != 0
+    if (scoutConfirmed and barsInScout >= scalperC2inLTF) or inFlatten
+        scoutDir       := 0
+        inScoutTrade   := false
+        scoutConfirmed := false
+
+htfrStatus = not htfrActive ? "---" : inScoutTrade and scoutConfirmed ? (scoutDir == 1 ? "CONFIRMED LONG" : "CONFIRMED SHORT") : inScoutTrade and not scoutConfirmed ? (scoutDir == 1 ? "SCOUT LONG" : "SCOUT SHORT") : scalperSetupLong ? "SETUP LONG" : scalperSetupShort ? "SETUP SHORT" : "WATCHING"
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 6: TRADE TRACKING (mode-aware exit timing)
+// ══════════════════════════════════════════════════════════════════════
+
+var int   entryBarIdx = 0
+var int   tradeDir    = 0
+var bool  inTrade     = false
+
+if freshLong
+    entryBarIdx := bar_index
+    tradeDir    := 1
+    inTrade     := true
+
+if freshShort
+    entryBarIdx := bar_index
+    tradeDir    := -1
+    inTrade     := true
+
+if inTrade and tradeDir != 0
+    barsInTrade = bar_index - entryBarIdx
+    if barsInTrade >= activeC2Bars or inFlatten
+        tradeDir := 0
+        inTrade  := false
+
+c1ExitBar = inTrade and tradeDir != 0 and (bar_index - entryBarIdx == activeC1Bars)
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 6A: LIQUIDITY & STRUCTURE LEVELS
+// ══════════════════════════════════════════════════════════════════════
+
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1],  lookahead=barmerge.lookahead_off)
+pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_off)
+pwl = request.security(syminfo.tickerid, "W", low[1],  lookahead=barmerge.lookahead_off)
+mh  = request.security(syminfo.tickerid, "M", high, lookahead=barmerge.lookahead_off)
+ml  = request.security(syminfo.tickerid, "M", low,  lookahead=barmerge.lookahead_off)
+
+sessionHour24 = hour(time, "America/New_York")
+sessionMin24  = minute(time, "America/New_York")
+isOvernightHour = sessionHour24 >= 18 or sessionHour24 < 9 or (sessionHour24 == 9 and sessionMin24 < 30)
+isDaySessionStart = sessionHour24 == 9 and sessionMin24 == 0
+
+var float onh = na
+var float onl = na
+var bool sessionChanged = false
+
+if isOvernightHour
+    if na(onh)
+        onh := high
+        onl := low
+    else
+        onh := math.max(onh, high)
+        onl := math.min(onl, low)
+    sessionChanged := false
+else
+    if not sessionChanged
+        sessionChanged := true
+
+if i_showLevels
+    var line pdhLine = na
+    var label pdhLabel = na
+    if not na(pdhLine)
+        line.delete(pdhLine)
+    if not na(pdhLabel)
+        label.delete(pdhLabel)
+    if not na(pdh)
+        pdhLine := line.new(bar_index, pdh, bar_index + 1, pdh, extend=extend.both, color=color.new(#00BFFF, 0), style=line.style_dashed, width=2)
+        pdhLabel := label.new(bar_index + 20, pdh, "PDH (Previous Day High)", style=label.style_none, textcolor=#00BFFF, size=size.small)
+
+    var line pdlLine = na
+    var label pdlLabel = na
+    if not na(pdlLine)
+        line.delete(pdlLine)
+    if not na(pdlLabel)
+        label.delete(pdlLabel)
+    if not na(pdl)
+        pdlLine := line.new(bar_index, pdl, bar_index + 1, pdl, extend=extend.both, color=color.new(#00BFFF, 0), style=line.style_dashed, width=2)
+        pdlLabel := label.new(bar_index + 20, pdl, "PDL (Previous Day Low)", style=label.style_none, textcolor=#00BFFF, size=size.small)
+
+    var line onhLine = na
+    var label onhLabel = na
+    if not na(onhLine)
+        line.delete(onhLine)
+    if not na(onhLabel)
+        label.delete(onhLabel)
+    if not na(onh)
+        onhLine := line.new(bar_index, onh, bar_index + 1, onh, extend=extend.both, color=color.new(#FF8C00, 0), style=line.style_dotted, width=2)
+        onhLabel := label.new(bar_index + 20, onh, "ONH (Overnight High)", style=label.style_none, textcolor=#FF8C00, size=size.small)
+
+    var line onlLine = na
+    var label onlLabel = na
+    if not na(onlLine)
+        line.delete(onlLine)
+    if not na(onlLabel)
+        label.delete(onlLabel)
+    if not na(onl)
+        onlLine := line.new(bar_index, onl, bar_index + 1, onl, extend=extend.both, color=color.new(#FF8C00, 0), style=line.style_dotted, width=2)
+        onlLabel := label.new(bar_index + 20, onl, "ONL (Overnight Low)", style=label.style_none, textcolor=#FF8C00, size=size.small)
+
+    var line pwhLine = na
+    var label pwhLabel = na
+    if not na(pwhLine)
+        line.delete(pwhLine)
+    if not na(pwhLabel)
+        label.delete(pwhLabel)
+    if not na(pwh)
+        pwhLine := line.new(bar_index, pwh, bar_index + 1, pwh, extend=extend.both, color=color.new(#A855F7, 0), style=line.style_dashed, width=2)
+        pwhLabel := label.new(bar_index + 20, pwh, "PWH (Prev Week High)", style=label.style_none, textcolor=#A855F7, size=size.small)
+
+    var line pwlLine = na
+    var label pwlLabel = na
+    if not na(pwlLine)
+        line.delete(pwlLine)
+    if not na(pwlLabel)
+        label.delete(pwlLabel)
+    if not na(pwl)
+        pwlLine := line.new(bar_index, pwl, bar_index + 1, pwl, extend=extend.both, color=color.new(#A855F7, 0), style=line.style_dashed, width=2)
+        pwlLabel := label.new(bar_index + 20, pwl, "PWL (Prev Week Low)", style=label.style_none, textcolor=#A855F7, size=size.small)
+
+    var line mhLine = na
+    var label mhLabel = na
+    if not na(mhLine)
+        line.delete(mhLine)
+    if not na(mhLabel)
+        label.delete(mhLabel)
+    if not na(mh)
+        mhLine := line.new(bar_index, mh, bar_index + 1, mh, extend=extend.both, color=color.new(#FFFFFF, 0), style=line.style_solid, width=2)
+        mhLabel := label.new(bar_index + 20, mh, "MH (Monthly High)", style=label.style_none, textcolor=#FFFFFF, size=size.small)
+
+    var line mlLine = na
+    var label mlLabel = na
+    if not na(mlLine)
+        line.delete(mlLine)
+    if not na(mlLabel)
+        label.delete(mlLabel)
+    if not na(ml)
+        mlLine := line.new(bar_index, ml, bar_index + 1, ml, extend=extend.both, color=color.new(#FFFFFF, 0), style=line.style_solid, width=2)
+        mlLabel := label.new(bar_index + 20, ml, "ML (Monthly Low)", style=label.style_none, textcolor=#FFFFFF, size=size.small)
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 7: VISUALS — CLEAN ENTRY ARROWS WITH HOVER TOOLTIPS
+// ══════════════════════════════════════════════════════════════════════
+// Only two visual signals: green ▲ (long) and red ▼ (short).
+// Hover over any arrow to see: type, entry, stop, target, score, risk.
+
+// — Combine all long/short signals into single booleans —
+anyLong  = freshLong or freshScoutLong or freshConfirmLong
+anyShort = freshShort or freshScoutShort or freshConfirmShort
+
+// — Build tooltip text for longs —
+if anyLong
+    entryPrice = close
+    stopPts    = stopDistance
+    stopPrice  = entryPrice - stopPts
+    targetPts  = stopPts * 2.0
+    targetPrice = entryPrice + targetPts
+    entryType  = freshConfirmLong ? "FULL LOAD LONG (HTF Confirmed)" : freshScoutLong ? "SCOUT LONG (1 ct — HTF Forming)" : "ULTRA SCALPER LONG"
+    contracts  = freshConfirmLong ? "Heavy (Full Position)" : freshScoutLong ? "1 Contract (Scout)" : str.tostring(isSwingMode ? 5 : 5) + " Contracts"
+    tip = entryType + "\n─────────────────\n" +
+         "Entry:  " + str.tostring(entryPrice, "#.##") + "\n" +
+         "Stop:   " + str.tostring(stopPrice, "#.##") + " (−" + str.tostring(stopPts, "#.#") + " pts)\n" +
+         "Target: " + str.tostring(targetPrice, "#.##") + " (+" + str.tostring(targetPts, "#.#") + " pts)\n" +
+         "─────────────────\n" +
+         "Score:  " + str.tostring(sigScore, "#.###") + "\n" +
+         "Size:   " + contracts + "\n" +
+         "Mode:   " + modeLabel
+    label.new(bar_index, low - atr14 * 0.3, "▲",
+         style=label.style_none, textcolor=C_BULL, size=size.large,
+         tooltip=tip)
+
+// — Build tooltip text for shorts —
+if anyShort
+    entryPrice = close
+    stopPts    = stopDistance
+    stopPrice  = entryPrice + stopPts
+    targetPts  = stopPts * 2.0
+    targetPrice = entryPrice - targetPts
+    entryType  = freshConfirmShort ? "FULL LOAD SHORT (HTF Confirmed)" : freshScoutShort ? "SCOUT SHORT (1 ct — HTF Forming)" : "ULTRA SCALPER SHORT"
+    contracts  = freshConfirmShort ? "Heavy (Full Position)" : freshScoutShort ? "1 Contract (Scout)" : str.tostring(isSwingMode ? 5 : 5) + " Contracts"
+    tip = entryType + "\n─────────────────\n" +
+         "Entry:  " + str.tostring(entryPrice, "#.##") + "\n" +
+         "Stop:   " + str.tostring(stopPrice, "#.##") + " (+" + str.tostring(stopPts, "#.#") + " pts)\n" +
+         "Target: " + str.tostring(targetPrice, "#.##") + " (−" + str.tostring(targetPts, "#.#") + " pts)\n" +
+         "─────────────────\n" +
+         "Score:  " + str.tostring(sigScore, "#.###") + "\n" +
+         "Size:   " + contracts + "\n" +
+         "Mode:   " + modeLabel
+    label.new(bar_index, high + atr14 * 0.3, "▼",
+         style=label.style_none, textcolor=C_BEAR, size=size.large,
+         tooltip=tip)
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 8: DASHBOARD (shows active mode + HTF-Refined status)
+// ══════════════════════════════════════════════════════════════════════
+
+if i_showDash
+    dashRows  = validSymbol ? 9 : 2
+    var table dash = table.new(position.top_right, 3, dashRows, bgcolor=C_DASHBG, border_color=C_DASHBORD, border_width=1, frame_color=C_DASHBORD, frame_width=2)
+
+    modeColor = isSwingMode ? C_SWING : C_BULL
+    table.cell(dash, 0, 0, "MMM ES/MES Algo", text_color=color.white, text_size=size.normal, text_halign=text.align_center)
+    table.merge_cells(dash, 0, 0, 2, 0)
+
+    if not validSymbol
+        table.cell(dash, 0, 1, "⚠ WRONG SYMBOL — This indicator is for ES / MES only ⚠", text_color=#FF5252, text_size=size.normal, text_halign=text.align_center)
+        table.merge_cells(dash, 0, 1, 2, 1)
+
+    if validSymbol
+        htfLabel = isSwingMode ? "1H+4H" : "5m+15m"
+        table.cell(dash, 0, 1, "  Mode  ", text_color=C_DIMTEXT, text_size=size.normal, text_halign=text.align_left)
+        table.cell(dash, 1, 1, "", text_size=size.normal)
+        table.cell(dash, 2, 1, "  " + modeLabel + " (" + htfLabel + ")  ", text_color=modeColor, text_size=size.normal, text_halign=text.align_right)
+
+        table.cell(dash, 0, 2, "  HTF Bias  ", text_color=C_DIMTEXT, text_size=size.normal, text_halign=text.align_left)
+        table.cell(dash, 1, 2, "", text_size=size.normal)
+        htfColor = htfBullish ? C_BULL : htfBearish ? C_BEAR : C_NEUTRAL
+        table.cell(dash, 2, 2, "  " + htfDir + "  ", text_color=htfColor, text_size=size.normal, text_halign=text.align_right)
+
+        table.cell(dash, 0, 3, "  Regime  ", text_color=C_DIMTEXT, text_size=size.normal, text_halign=text.align_left)
+        table.cell(dash, 1, 3, "", text_size=size.normal)
+        regimeLabel = regime == "trending_up" ? "TREND UP" : regime == "trending_down" ? "TREND DN" : regime == "ranging" ? "RANGING" : regime == "high_volatility" ? "HIGH VOL" : regime == "low_liquidity" ? "LOW LIQ" : "---"
+        regimeColor2 = regime == "trending_up" ? C_BULL : regime == "trending_down" ? C_BEAR : regime == "ranging" ? C_RANGING : regime == "high_volatility" ? C_HIVOL : C_LOWLIQ
+        table.cell(dash, 2, 3, "  " + regimeLabel + "  ", text_color=regimeColor2, text_size=size.normal, text_halign=text.align_right)
+
+        table.cell(dash, 0, 4, "  Score  ", text_color=C_DIMTEXT, text_size=size.normal, text_halign=text.align_left)
+        table.cell(dash, 1, 4, "", text_size=size.normal)
+        scoreOK = sigScore >= activeMinScore
+        table.cell(dash, 2, 4, "  " + str.tostring(sigScore, "#.###") + "  ", text_color=scoreOK ? C_BULL : #616161, text_size=size.normal, text_halign=text.align_right)
+
+        table.cell(dash, 0, 5, "  Stop (pts)  ", text_color=C_DIMTEXT, text_size=size.normal, text_halign=text.align_left)
+        table.cell(dash, 1, 5, "", text_size=size.normal)
+        stopOK = stopDistance >= activeMinStop and stopDistance <= activeMaxStop
+        table.cell(dash, 2, 5, "  " + str.tostring(stopDistance, "#.#") + "  ", text_color=stopOK ? C_BULL : C_BEAR, text_size=size.normal, text_halign=text.align_right)
+
+        table.cell(dash, 0, 6, "  Position  ", text_color=C_DIMTEXT, text_size=size.normal, text_halign=text.align_left)
+        table.cell(dash, 1, 6, "", text_size=size.normal)
+        posLabel = inTrade ? (tradeDir == 1 ? "LONG" : "SHORT") : "FLAT"
+        posColor = inTrade ? (tradeDir == 1 ? C_BULL : C_BEAR) : C_NEUTRAL
+        table.cell(dash, 2, 6, "  " + posLabel + "  ", text_color=posColor, text_size=size.normal, text_halign=text.align_right)
+
+        table.cell(dash, 0, 7, "  HTF Signal  ", text_color=C_DIMTEXT, text_size=size.normal, text_halign=text.align_left)
+        table.cell(dash, 1, 7, "", text_size=size.normal)
+        htfrColor = htfrStatus == "CONFIRMED LONG" ? C_CONFIRM : htfrStatus == "CONFIRMED SHORT" ? C_CONFIRM : htfrStatus == "SCOUT LONG" ? C_SCOUT_L : htfrStatus == "SCOUT SHORT" ? C_SCOUT_S : htfrStatus == "SETUP LONG" ? C_SWING : htfrStatus == "SETUP SHORT" ? C_SWING : C_NEUTRAL
+        table.cell(dash, 2, 7, "  " + htfrStatus + "  ", text_color=htfrColor, text_size=size.normal, text_halign=text.align_right)
+
+        scoutCountdown = inScoutTrade and not scoutConfirmed ? str.tostring(math.max(i_confirmWindow - barsInScout, 0)) + " bars left" : inScoutTrade and scoutConfirmed ? "LOADED" : "---"
+        scoutCdColor   = inScoutTrade and not scoutConfirmed ? C_SWING : inScoutTrade and scoutConfirmed ? C_CONFIRM : C_NEUTRAL
+        table.cell(dash, 0, 8, "  Scout  ", text_color=C_DIMTEXT, text_size=size.normal, text_halign=text.align_left)
+        table.cell(dash, 1, 8, "", text_size=size.normal)
+        table.cell(dash, 2, 8, "  " + scoutCountdown + "  ", text_color=scoutCdColor, text_size=size.normal, text_halign=text.align_right)
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SECTION 9: ALERTS
+// ══════════════════════════════════════════════════════════════════════
+
+alertcondition(freshLong,         title="Ultra Scalper Long",  message="MMM ES: ULTRA SCALPER LONG entry")
+alertcondition(freshShort,        title="Ultra Scalper Short", message="MMM ES: ULTRA SCALPER SHORT entry")
+alertcondition(c1ExitBar,         title="C1 Time Exit",        message="MMM ES: C1 time exit reached")
+alertcondition(freshScoutLong,    title="Scout Long (1ct)",    message="MMM ES: SCOUT LONG — 1 contract, HTF setup forming")
+alertcondition(freshScoutShort,   title="Scout Short (1ct)",   message="MMM ES: SCOUT SHORT — 1 contract, HTF setup forming")
+alertcondition(freshConfirmLong,  title="Full Load Long",      message="MMM ES: FULL LOAD LONG — 15m confirmed, add heavy contracts")
+alertcondition(freshConfirmShort, title="Full Load Short",     message="MMM ES: FULL LOAD SHORT — 15m confirmed, add heavy contracts")
+alertcondition(inFlatten,         title="Flatten Zone",        message="MMM ES: FLATTEN — close all positions")
