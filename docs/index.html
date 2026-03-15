@@ -381,9 +381,9 @@
   <!-- ── NAV CARDS ───────────────────────────────────── -->
   <div class="cards">
     <a href="live.html" class="card">
-      <div class="tag">LIVE STATUS</div>
+      <div class="tag">PAPER TRADING &mdash; LIVE STATUS</div>
       <h2>Live Dashboard <span class="arrow">&rarr;</span></h2>
-      <p>Real-time bot status, connection health monitoring, heartbeat tracking, and activity sparklines.</p>
+      <p>Real-time bot status (paper money), connection health monitoring, heartbeat tracking, and activity sparklines.</p>
     </a>
     <a href="weekly-dashboard.html" class="card">
       <div class="tag">DASHBOARD</div>
@@ -397,16 +397,26 @@
     </a>
   </div>
 
-  <!-- ── DAILY PNL (LIVE) ─────────────────────────────── -->
+  <!-- ── DAILY PNL (PAPER MONEY) ──────────────────────── -->
   <div class="section" id="daily-pnl-section">
-    <h2>Daily PnL &mdash; Live Trading</h2>
+    <h2>Live PnL &mdash; Paper Money <span style="font-size:10px;color:var(--text-muted);font-weight:400;letter-spacing:1px;margin-left:8px;vertical-align:middle;background:var(--surface-alt);padding:3px 10px;border-radius:12px;border:1px solid var(--border-light)">SIMULATED</span></h2>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <label for="pnl-date-picker" style="font-size:12px;color:var(--text2);font-weight:600">Select Date:</label>
+      <select id="pnl-date-picker" style="padding:7px 14px;border-radius:8px;border:1px solid var(--border-light);background:var(--surface);color:var(--text);font-family:var(--mono);font-size:12px;cursor:pointer">
+        <option value="all">All Dates</option>
+      </select>
+      <span id="pnl-day-summary" style="font-family:var(--mono);font-size:12px;color:var(--text-muted);margin-left:auto"></span>
+    </div>
     <div id="daily-pnl-container" style="overflow-x:auto">
       <table id="daily-pnl-table">
-        <thead><tr><th>Date</th><th>Trades</th><th>Win Rate</th><th>PnL</th><th>Cumulative</th></tr></thead>
+        <thead><tr><th style="text-align:left">Date</th><th>Time</th><th>Trades</th><th>Win Rate</th><th>PnL</th><th>Cumulative</th></tr></thead>
         <tbody id="daily-pnl-body">
-          <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">Loading daily PnL data...</td></tr>
+          <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Loading paper trading data...</td></tr>
         </tbody>
       </table>
+    </div>
+    <div id="pnl-expand-row" class="hidden" style="text-align:center;padding:12px 0">
+      <button id="pnl-expand-btn" onclick="expandPnl()" style="padding:8px 24px;border-radius:20px;border:1px solid var(--border-light);background:var(--surface);color:var(--accent);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s">Show All Trades</button>
     </div>
   </div>
 
@@ -423,6 +433,7 @@
 </div>
 
 <script>
+/* ── Mode Toggle ─────────────────────────────────── */
 function toggleMode(mode) {
   var ultraEl = document.getElementById('data-ultra');
   var scalperEl = document.getElementById('data-scalper');
@@ -441,6 +452,60 @@ function toggleMode(mode) {
   }
 }
 
+/* ── Paper PnL — Date picker, time column, 15-row limit ── */
+var allTradeRows = [];
+var pnlExpanded = false;
+var VISIBLE_LIMIT = 15;
+
+function expandPnl() {
+  pnlExpanded = true;
+  renderPnlRows();
+  document.getElementById('pnl-expand-row').classList.add('hidden');
+}
+
+function renderPnlRows() {
+  var rows = allTradeRows;
+  var filterDate = document.getElementById('pnl-date-picker').value;
+  if (filterDate !== 'all') {
+    rows = rows.filter(function(r) { return r.date === filterDate; });
+  }
+  if (rows.length === 0) {
+    document.getElementById('daily-pnl-body').innerHTML =
+      '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">No trades for this date</td></tr>';
+    document.getElementById('pnl-expand-row').classList.add('hidden');
+    document.getElementById('pnl-day-summary').textContent = '';
+    return;
+  }
+  var totalPnl = 0; var wins = 0; var losses = 0;
+  rows.forEach(function(r) { totalPnl += r.pnl; if (r.pnl > 0) wins++; else losses++; });
+  var wr = rows.length > 0 ? ((wins / rows.length) * 100).toFixed(0) : '0';
+  var summSign = totalPnl >= 0 ? '+' : '';
+  document.getElementById('pnl-day-summary').textContent =
+    rows.length + ' trades | ' + wr + '% WR | ' + summSign + '$' + Math.abs(totalPnl).toFixed(2);
+
+  var visible = pnlExpanded ? rows : rows.slice(0, VISIBLE_LIMIT);
+  var cum = 0;
+  var html = '';
+  visible.forEach(function(r) {
+    cum += r.pnl;
+    var pnlCls = r.pnl >= 0 ? 'pos' : 'neg';
+    var cumCls = cum >= 0 ? 'pos' : 'neg';
+    var sign = r.pnl >= 0 ? '+' : '';
+    var cumSign = cum >= 0 ? '+' : '';
+    html += '<tr><td style="text-align:left">' + r.date + '</td><td>' + r.time + '</td><td>' + r.tradeCount + '</td><td>' + r.wr + '%</td>' +
+      '<td class="' + pnlCls + '">' + sign + '$' + Math.abs(r.pnl).toFixed(2) + '</td>' +
+      '<td class="' + cumCls + '">' + cumSign + '$' + Math.abs(cum).toFixed(2) + '</td></tr>';
+  });
+  document.getElementById('daily-pnl-body').innerHTML = html;
+
+  if (!pnlExpanded && rows.length > VISIBLE_LIMIT) {
+    document.getElementById('pnl-expand-row').classList.remove('hidden');
+    document.getElementById('pnl-expand-btn').textContent = 'Show All ' + rows.length + ' Trades';
+  } else {
+    document.getElementById('pnl-expand-row').classList.add('hidden');
+  }
+}
+
 (function() {
   fetch('data/live_stats.json?t=' + Date.now())
     .then(function(r) { return r.json(); })
@@ -448,42 +513,43 @@ function toggleMode(mode) {
       var trades = data.trade_log || [];
       if (trades.length === 0) {
         document.getElementById('daily-pnl-body').innerHTML =
-          '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No live trades recorded yet</td></tr>';
+          '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">No paper trades recorded yet</td></tr>';
         return;
       }
-      var byDay = {};
+      var dateSet = {};
       trades.forEach(function(t) {
         var d = t.date || (t.time ? t.time.split(' ')[0] : 'Unknown');
-        if (!byDay[d]) byDay[d] = { wins: 0, losses: 0, pnl: 0 };
-        byDay[d].pnl += (t.total_pnl || 0);
-        if ((t.total_pnl || 0) > 0) byDay[d].wins++;
-        else byDay[d].losses++;
+        var tm = t.time ? t.time.split(' ')[1] || '--:--' : '--:--';
+        if (tm.length > 5) tm = tm.substring(0, 5);
+        dateSet[d] = true;
+        allTradeRows.push({
+          date: d,
+          time: tm,
+          tradeCount: 1,
+          wr: (t.total_pnl || 0) > 0 ? 100 : 0,
+          pnl: t.total_pnl || 0
+        });
       });
-      var days = Object.keys(byDay).sort().reverse();
-      var cum = 0;
-      var cumMap = {};
-      Object.keys(byDay).sort().forEach(function(d) {
-        cum += byDay[d].pnl;
-        cumMap[d] = cum;
+      allTradeRows.sort(function(a, b) {
+        if (a.date !== b.date) return b.date.localeCompare(a.date);
+        return b.time.localeCompare(a.time);
       });
-      var html = '';
-      days.forEach(function(d) {
-        var day = byDay[d];
-        var total = day.wins + day.losses;
-        var wr = total > 0 ? ((day.wins / total) * 100).toFixed(0) : '0';
-        var pnlCls = day.pnl >= 0 ? 'pos' : 'neg';
-        var cumCls = cumMap[d] >= 0 ? 'pos' : 'neg';
-        var sign = day.pnl >= 0 ? '+' : '';
-        var cumSign = cumMap[d] >= 0 ? '+' : '';
-        html += '<tr><td>' + d + '</td><td>' + total + '</td><td>' + wr + '%</td>' +
-          '<td class="' + pnlCls + '">' + sign + '$' + Math.abs(day.pnl).toFixed(2) + '</td>' +
-          '<td class="' + cumCls + '">' + cumSign + '$' + Math.abs(cumMap[d]).toFixed(2) + '</td></tr>';
+      var picker = document.getElementById('pnl-date-picker');
+      var dates = Object.keys(dateSet).sort().reverse();
+      dates.forEach(function(d) {
+        var opt = document.createElement('option');
+        opt.value = d; opt.textContent = d;
+        picker.appendChild(opt);
       });
-      document.getElementById('daily-pnl-body').innerHTML = html;
+      picker.addEventListener('change', function() {
+        pnlExpanded = false;
+        renderPnlRows();
+      });
+      renderPnlRows();
     })
     .catch(function() {
       document.getElementById('daily-pnl-body').innerHTML =
-        '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">Daily PnL data unavailable</td></tr>';
+        '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">Paper trading data unavailable</td></tr>';
     });
 })();
 </script>
