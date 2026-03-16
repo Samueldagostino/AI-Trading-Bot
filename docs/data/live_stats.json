@@ -1,5 +1,5 @@
 {
-  "updated": "2026-03-16T00:51:59.082814+00:00",
+  "updated": "2026-03-16T00:53:00.694574+00:00",
   "status": "LIVE",
   "trading_mode": "PAPER",
   "bars_processed": 200,
@@ -29,56 +29,8 @@
       "display": "1.0x (No data)"
     }
   },
-  "last_price": 24517.5,
+  "last_price": 24514.25,
   "recent_decisions": [
-    {
-      "time": "20:50:30 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HC_STOP"
-    },
-    {
-      "time": "20:50:36 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HC_STOP"
-    },
-    {
-      "time": "20:50:45 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HC_STOP"
-    },
-    {
-      "time": "20:50:50 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HC_STOP"
-    },
-    {
-      "time": "20:50:55 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HC_STOP"
-    },
-    {
-      "time": "20:51:00 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HC_STOP"
-    },
-    {
-      "time": "20:51:21 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HC_STOP"
-    },
-    {
-      "time": "20:51:25 ET",
-      "direction": "SHORT",
-      "decision": "REJECTED",
-      "reason": "HC_STOP"
-    },
     {
       "time": "20:51:36 ET",
       "direction": "SHORT",
@@ -90,11 +42,59 @@
       "direction": "SHORT",
       "decision": "REJECTED",
       "reason": "HC_STOP"
+    },
+    {
+      "time": "20:52:00 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HC_STOP"
+    },
+    {
+      "time": "20:52:05 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HC_STOP"
+    },
+    {
+      "time": "20:52:10 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HC_STOP"
+    },
+    {
+      "time": "20:52:15 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HC_STOP"
+    },
+    {
+      "time": "20:52:20 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HC_STOP"
+    },
+    {
+      "time": "20:52:26 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HC_STOP"
+    },
+    {
+      "time": "20:52:40 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HC_STOP"
+    },
+    {
+      "time": "20:52:51 ET",
+      "direction": "SHORT",
+      "decision": "REJECTED",
+      "reason": "HC_STOP"
     }
   ],
   "heartbeat": {
     "last_seen": "2026-03-11T17:37:35.115789+00:00",
-    "seconds_since_last": 371664.0,
+    "seconds_since_last": 371725.6,
     "connection_quality": "good",
     "uptime_pct": 100.0
   },
@@ -105,102 +105,6 @@
   },
   "active_trade": null,
   "candle_buffer": [
-    {
-      "t": "",
-      "o": 24502.25,
-      "h": 24506.25,
-      "l": 24502.25,
-      "c": 24504.25,
-      "v": 177
-    },
-    {
-      "t": "",
-      "o": 24504.75,
-      "h": 24506.0,
-      "l": 24504.25,
-      "c": 24505.0,
-      "v": 63
-    },
-    {
-      "t": "",
-      "o": 24505.0,
-      "h": 24506.75,
-      "l": 24504.5,
-      "c": 24505.75,
-      "v": 86
-    },
-    {
-      "t": "",
-      "o": 24505.5,
-      "h": 24506.0,
-      "l": 24502.25,
-      "c": 24502.25,
-      "v": 73
-    },
-    {
-      "t": "",
-      "o": 24502.75,
-      "h": 24503.75,
-      "l": 24502.25,
-      "c": 24503.25,
-      "v": 20
-    },
-    {
-      "t": "",
-      "o": 24504.0,
-      "h": 24505.75,
-      "l": 24504.0,
-      "c": 24504.0,
-      "v": 18
-    },
-    {
-      "t": "",
-      "o": 24504.0,
-      "h": 24507.0,
-      "l": 24504.0,
-      "c": 24505.5,
-      "v": 45
-    },
-    {
-      "t": "",
-      "o": 24505.75,
-      "h": 24506.25,
-      "l": 24502.0,
-      "c": 24504.5,
-      "v": 55
-    },
-    {
-      "t": "",
-      "o": 24504.5,
-      "h": 24505.75,
-      "l": 24503.25,
-      "c": 24505.25,
-      "v": 34
-    },
-    {
-      "t": "",
-      "o": 24505.25,
-      "h": 24505.75,
-      "l": 24503.75,
-      "c": 24504.25,
-      "v": 82
-    },
-    {
-      "t": "",
-      "o": 24504.5,
-      "h": 24504.75,
-      "l": 24498.5,
-      "c": 24498.5,
-      "v": 101
-    },
-    {
-      "t": "",
-      "o": 24499.25,
-      "h": 24501.5,
-      "l": 24498.25,
-      "c": 24500.25,
-      "v": 37
-    },
     {
       "t": "",
       "o": 24500.25,
@@ -1704,6 +1608,102 @@
       "l": 24516.5,
       "c": 24517.5,
       "v": 12
+    },
+    {
+      "t": "",
+      "o": 24517.5,
+      "h": 24518.75,
+      "l": 24517.5,
+      "c": 24518.75,
+      "v": 6
+    },
+    {
+      "t": "",
+      "o": 24518.5,
+      "h": 24519.25,
+      "l": 24517.75,
+      "c": 24519.25,
+      "v": 18
+    },
+    {
+      "t": "",
+      "o": 24518.75,
+      "h": 24519.75,
+      "l": 24517.75,
+      "c": 24518.25,
+      "v": 23
+    },
+    {
+      "t": "",
+      "o": 24519.0,
+      "h": 24519.5,
+      "l": 24518.25,
+      "c": 24519.25,
+      "v": 17
+    },
+    {
+      "t": "",
+      "o": 24518.25,
+      "h": 24519.0,
+      "l": 24516.75,
+      "c": 24519.0,
+      "v": 15
+    },
+    {
+      "t": "",
+      "o": 24518.25,
+      "h": 24519.75,
+      "l": 24517.25,
+      "c": 24519.0,
+      "v": 17
+    },
+    {
+      "t": "",
+      "o": 24519.0,
+      "h": 24519.0,
+      "l": 24514.5,
+      "c": 24515.0,
+      "v": 55
+    },
+    {
+      "t": "",
+      "o": 24515.0,
+      "h": 24515.75,
+      "l": 24512.0,
+      "c": 24515.5,
+      "v": 71
+    },
+    {
+      "t": "",
+      "o": 24515.25,
+      "h": 24518.5,
+      "l": 24515.25,
+      "c": 24518.5,
+      "v": 56
+    },
+    {
+      "t": "",
+      "o": 24518.5,
+      "h": 24518.5,
+      "l": 24513.25,
+      "c": 24514.0,
+      "v": 26
+    },
+    {
+      "t": "",
+      "o": 24513.75,
+      "h": 24519.0,
+      "l": 24513.75,
+      "c": 24515.5,
+      "v": 79
+    },
+    {
+      "t": "",
+      "o": 24515.5,
+      "h": 24515.5,
+      "l": 24513.5,
+      "c": 24514.25,
+      "v": 19
     }
   ],
   "session_pnl_dollars": 0.0,
